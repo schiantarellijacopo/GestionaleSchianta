@@ -891,7 +891,7 @@ async def genera_documento(mid: str, body: GeneraDocBody,
             # mantiene il marcatore {firma} nel PDF per il posizionamento Yousign
             t_html = t.replace("\n", "<br/>")
         else:
-            t_html = t.replace("{firma}", "_______________________________").replace("\n", "<br/>")
+            t_html = t.replace("{firma}", "_______________________________").replace("{data_firma}", "Data: ______________").replace("\n", "<br/>")
         el.append(Paragraph(t_html, styles["Normal"]))
         el.append(Spacer(1, 6))
 
@@ -915,12 +915,19 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         from routes.firma_modelli import _invia_yousign
         doc_f = fitz.open(stream=pdf_bytes, filetype="pdf")
         firma_fields = []
+        data_fields = []
         for page in doc_f:
             for r in page.search_for("{firma}"):
                 page.add_redact_annot(r, text="", fill=(1, 1, 1))
                 firma_fields.append({
                     "page": page.number, "x": round(r.x0), "y": round(r.y0),
                     "width": max(120, round(r.width)), "height": max(40, round(r.height * 2.2)),
+                })
+            for r in page.search_for("{data_firma}"):
+                page.add_redact_annot(r, text="", fill=(1, 1, 1))
+                data_fields.append({
+                    "page": page.number, "x": round(r.x0), "y": round(r.y0),
+                    "width": max(90, round(r.width)), "height": max(24, round(r.height * 1.6)),
                 })
             page.apply_redactions()
         pdf_bytes = doc_f.tobytes()
@@ -931,7 +938,7 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         valori = {"nome_cliente": ctx.get("cliente_nome") or "Cliente", "email": cliente_email}
         body_y = {"email_firmatario": body.email_firmatario,
                   "auth_mode": body.auth_mode or "otp_email", "invia_firma": True}
-        signing = await _invia_yousign(db, {"nome": m.get("nome")}, pdf_bytes, firma_fields, valori, body_y)
+        signing = await _invia_yousign(db, {"nome": m.get("nome")}, pdf_bytes, firma_fields, valori, body_y, data_fields=data_fields)
         fr = (signing or {}).get("firma") or {}
         if not fr.get("ok"):
             raise HTTPException(400, f"Invio a firma non riuscito: {fr.get('error') or 'errore sconosciuto'}")

@@ -4972,6 +4972,7 @@ function ModelloMupDialog({ editing, onClose }) {
         garanzieText: (editing.garanzie || []).join("\n"), corpo: editing.corpo || "",
         sezioni_visibili: editing.id ? (editing.sezioni_visibili || []) : MODELLO_SEZIONI.map((s) => s.key),
         attivo: editing.attivo !== false,
+        firma_digitale: !!editing.firma_digitale,
     });
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const [importando, setImportando] = useState(false);
@@ -4998,7 +4999,7 @@ function ModelloMupDialog({ editing, onClose }) {
         const garanzie = f.garanzieText.split("\n").map((s) => s.trim()).filter(Boolean);
         if (!f.nome.trim()) { toast.error("Inserisci un nome"); return; }
         if (garanzie.length === 0) { toast.error("Inserisci almeno una garanzia"); return; }
-        const payload = { nome: f.nome.trim(), area: f.area, garanzie, corpo: f.corpo, sezioni_visibili: f.sezioni_visibili, attivo: f.attivo };
+        const payload = { nome: f.nome.trim(), area: f.area, garanzie, corpo: f.corpo, sezioni_visibili: f.sezioni_visibili, attivo: f.attivo, firma_digitale: f.firma_digitale };
         try {
             if (isNew) await api.post("/librerie/mup-modelli", payload);
             else await api.put(`/librerie/mup-modelli/${editing.id}`, payload);
@@ -5054,6 +5055,11 @@ function ModelloMupDialog({ editing, onClose }) {
                         <input type="checkbox" checked={f.attivo} onChange={(e) => set("attivo", e.target.checked)}
                             data-testid="mup-modello-attivo" />
                         Attivo
+                    </label>
+                    <label className="flex items-center gap-2 text-sm" title="Se attivo, il MUP può essere inviato a firma digitale al contraente (campo Firma + Data posizionati)">
+                        <input type="checkbox" checked={f.firma_digitale} onChange={(e) => set("firma_digitale", e.target.checked)}
+                            data-testid="mup-modello-firma-digitale" />
+                        🖋️ Firma digitale (invio a firma del contraente con campo Firma + Data)
                     </label>
                 </div>
                 <DialogFooter>
@@ -5656,11 +5662,16 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                                 <input type="checkbox" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} data-testid="modello-attivo" />
                                 Attivo
                             </label>
-                            <label className="flex items-center gap-1.5 text-sm" title="Se attivo, il documento generato può essere inviato a firma digitale (segnaposto {firma})">
+                            <label className="flex items-center gap-1.5 text-sm" title="Se attivo, il documento generato può essere inviato a firma digitale. Inserisci nel testo {firma} dove firma il cliente e {data_firma} per la data di firma.">
                                 <input type="checkbox" checked={!!f.richiede_firma} onChange={(e) => set("richiede_firma", e.target.checked)} data-testid="modello-richiede-firma" />
-                                Richiede firma digitale
+                                🖋️ Firma digitale
                             </label>
                         </div>
+                        {f.richiede_firma && (
+                            <p className="text-[11px] text-violet-700 bg-violet-50 border border-violet-200 rounded px-2 py-1.5 mt-1" data-testid="modello-firma-hint">
+                                Inserisci nel testo <code className="bg-white px-1 rounded border border-violet-200">{"{firma}"}</code> dove deve firmare il cliente e <code className="bg-white px-1 rounded border border-violet-200">{"{data_firma}"}</code> per la data di firma.
+                            </p>
+                        )}
                     </div>
 
                     {isPdf && (

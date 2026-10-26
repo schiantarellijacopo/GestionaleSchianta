@@ -72,6 +72,7 @@ class MupModelloBody(BaseModel):
     corpo: str = ""
     sezioni_visibili: list[str] = []
     attivo: bool = True
+    firma_digitale: bool = False
     note: str | None = None
 
 
@@ -267,7 +268,86 @@ async def mup_genera(pid: str, body: dict, user=Depends(current_user)):
     return {"ok": True, "allegato_id": alleg.id, "nome_file": fname}
 
 
-def _build(pol, ana, comp, az, area, righe, logo, corpo="", ctx=None) -> bytes:
+@router.post("/polizze/{pid}/mup/firma")
+async def mup_firma(pid: str, body: dict, user=Depends(current_user)):
+    """Genera il MUP con i campi FIRMA e DATA posizionati (segnaposto {firma}/{data_firma})
+    e lo invia a firma digitale Yousign al contraente. Recapita il link via WhatsApp/Email."""
+    import fitz  # pymupdf
+    import storage as obj_storage
+    from routes.firma_modelli import _invia_yousign, _recapita_link
+
+    pol, ana, comp, az = await _ctx(pid)
+    logo = await _logo_bytes()
+    fallback_area, fallback_righe, modello = await _righe_default(pol, body.get("modello_id"))
+    area = body.get("area") or fallback_area
+    righe = body.get("righe") or fallback_righe
+    corpo = body.get("corpo") if body.get("corpo") is not None else (modello or {}).get("corpo", "")
+    ctx = await _ph_context(pol, ana, comp, az)
+
+    pdf = _build(pol, ana, comp, az, area, righe, logo, corpo, ctx, firma_tokens=True)
+
+    # Posizione dei segnaposto firma/data
+    doc_f = fitz.open(stream=pdf, filetype="pdf")
+    firma_fields, data_fields = [], []
+    for page in doc_f:
+        for r in page.search_for("{firma}"):
+            page.add_redact_annot(r, text="", fill=(1, 1, 1))
+            firma_fields.append({"page": page.number, "x": round(r.x0), "y": round(r.y0),
+                                 "width": max(120, round(r.width)), "height": max(40, round(r.height * 2.2))})
+        for r in page.search_for("{data_firma}"):
+            page.add_redact_annot(r, text="", fill=(1, 1, 1))
+            data_fields.append({"page": page.number, "x": round(r.x0), "y": round(r.y0),
+                                "width": max(90, round(r.width)), "height": max(24, round(r.height * 1.6))})
+        page.apply_redactions()
+    pdf = doc_f.tobytes()
+    doc_f.close()
+    if not firma_fields:
+        raise HTTPException(422, "Area firma non trovata nel MUP")
+
+    email = (body.get("email_firmatario") or ana.get("email") or "").strip()
+    if not email:
+        raise HTTPException(400, "Email del contraente mancante (obbligatoria per la firma Yousign)")
+    valori = {
+        "nome_cliente": ctx.get("cliente") or "Cliente",
+        "email": email,
+        "telefono": ana.get("cellulare") or ana.get("telefono") or "",
+    }
+    # Archivia il MUP (da firmare) tra gli allegati della polizza
+    aid = str(uuid.uuid4())
+    stored = await StorageService.put(user=user, entita_tipo="polizza", entita_id=pid,
+                                      filename=f"mup_firma_{pid[:8]}.pdf", data=pdf, content_type="application/pdf")
+    fname = f"MUP {pol.get('numero_polizza', '')} (da firmare).pdf".strip()
+    alleg = Allegato(entita_tipo="polizza", entita_id=pid, nome_file=fname,
+                     storage_path=stored["storage_path"], storage_provider=stored["storage_provider"],
+                     content_type="application/pdf", size=stored.get("size", len(pdf)),
+                     categoria="mup", descrizione=f"MUP da firmare — {area}")
+    await db.allegati.insert_one(alleg.model_dump())
+
+    body_y = {"email_firmatario": email, "auth_mode": body.get("auth_mode") or "otp_email", "invia_firma": True}
+    signing = await _invia_yousign(db, {"nome": fname}, pdf, firma_fields, valori, body_y, data_fields=data_fields)
+    fr = (signing or {}).get("firma") or {}
+    if not fr.get("ok"):
+        raise HTTPException(400, f"Invio a firma non riuscito: {fr.get('error') or 'errore sconosciuto'}")
+
+    canali = body.get("canali") or {"wa": True, "email": True}
+    recapito = None
+    if canali.get("wa") or canali.get("email"):
+        recapito = await _recapita_link(canali, valori, fr.get("signing_url"), fname)
+
+    await db.firma_requests.insert_one({
+        "id": str(uuid.uuid4()), "provider": "yousign",
+        "request_id": fr.get("request_id"), "stato": fr.get("status") or "ongoing",
+        "entita_tipo": "polizza", "entita_id": pid, "categoria": "mup",
+        "nome_file": fname, "allegato_origine_id": aid,
+        "firmatario_nome": valori["nome_cliente"], "firmatario_email": email,
+        "signing_url": fr.get("signing_url"),
+        "created_at": _now_iso(), "created_by": user.get("id"),
+    })
+    return {"ok": True, "allegato_id": alleg.id, "signing_url": fr.get("signing_url"),
+            "recapito": recapito, "firma": fr}
+
+
+def _build(pol, ana, comp, az, area, righe, logo, corpo="", ctx=None, firma_tokens=False) -> bytes:
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib.enums import TA_CENTER
@@ -346,8 +426,10 @@ def _build(pol, ana, comp, az, area, righe, logo, corpo="", ctx=None) -> bytes:
                            "che le richieste ed esigenze assicurative sopra riportate corrispondono al vero e conferma "
                            "le garanzie indicate per l'inserimento in proposta/polizza.", body))
     story.append(Spacer(1, 26))
+    _cell_data = "{data_firma}" if firma_tokens else "______________________"
+    _cell_firma = "{firma}" if firma_tokens else "______________________"
     fr = Table([[Paragraph("Luogo e data", body), Paragraph("Il Cliente", body)],
-                [Paragraph("______________________", body), Paragraph("______________________", body)]],
+                [Paragraph(_cell_data, body), Paragraph(_cell_firma, body)]],
                colWidths=[8.25 * cm, 8.25 * cm])
     fr.setStyle(TableStyle([("TOPPADDING", (0, 0), (-1, -1), 6)]))
     story.append(fr)

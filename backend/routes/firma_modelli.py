@@ -426,12 +426,32 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
     return out
 
 
-async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body) -> dict:
-    """Crea richiesta firma Yousign (sandbox) con i campi firma alle posizioni dei {firma}."""
-    api_key = (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip()
+def _yousign_cfg() -> dict:
+    """Config Yousign: sandbox (default) o produzione, con chiave unica condivisa.
+
+    Env:
+      YOUSIGN_ENVIRONMENT        = "sandbox" | "production"  (default sandbox)
+      YOUSIGN_SANDBOX_API_KEY    = chiave ambiente di test
+      YOUSIGN_PRODUCTION_API_KEY = chiave ambiente di produzione
+    """
+    env = (os.environ.get("YOUSIGN_ENVIRONMENT") or "sandbox").strip().lower()
+    if env == "production":
+        return {"env": "production",
+                "api_key": (os.environ.get("YOUSIGN_PRODUCTION_API_KEY") or "").strip(),
+                "base": "https://api.yousign.app/v3"}
+    return {"env": "sandbox",
+            "api_key": (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip(),
+            "base": "https://api-sandbox.yousign.app/v3"}
+
+
+async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body, data_fields=None) -> dict:
+    """Crea richiesta firma Yousign con il campo firma alle posizioni dei {firma} e,
+    se presenti ``data_fields``, un campo 'mention' con la data di firma (Firmato il %date%)."""
+    cfg = _yousign_cfg()
+    api_key = cfg["api_key"]
     if not api_key:
-        return {"firma": {"ok": False, "error": "Firma Yousign non configurata"}}
-    base = "https://api-sandbox.yousign.app/v3"
+        return {"firma": {"ok": False, "error": f"Firma Yousign non configurata ({cfg['env']})"}}
+    base = cfg["base"]
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     email = (body.get("email_firmatario") or valori.get("email") or "").strip()
     nome = valori.get("nome_cliente") or "Cliente"
@@ -462,8 +482,16 @@ async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body) -> 
             did = up.json()["id"]
             fields = [{
                 "type": "signature", "document_id": did, "page": f["page"] + 1,
-                "x": f["x"], "y": f["y"], "width": f["width"], "height": f["height"],
+                "x": f["x"], "y": f["y"],
+                "width": max(85, f["width"]), "height": max(37, f["height"]),
             } for f in firma_fields]
+            for f in (data_fields or []):
+                fields.append({
+                    "type": "mention", "document_id": did, "page": f["page"] + 1,
+                    "x": f["x"], "y": f["y"],
+                    "width": max(90, f["width"]), "height": max(24, f["height"]),
+                    "mention": "Firmato il %date%", "name": "Data firma",
+                })
             signer_body = {
                 "info": {"first_name": first, "last_name": last, "email": email, "locale": "it"},
                 "signature_level": "electronic_signature",

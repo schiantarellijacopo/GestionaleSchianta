@@ -79,3 +79,12 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Statistiche per operatore e premi: rimossa la voce "Rinnovi"; "Quietanze" ora include anche i vecchi tipo="rinnovo" (nessuna migrazione dati storici, solo query/filtri).
 - Export (CSV/XLSX/PDF) ora rispettano SIA i filtri attivi SIA le colonne scelte nel menu "Colonne", in ordine: Titoli, Polizze, Sinistri, Anagrafiche. Schemi colonne lato backend: *_EXPORT_SCHEMA + _resolve_export_cols.
 - Primo titolo: confermata regola esistente "nuova" (nuova polizza) / "sostituzione" (sostituzione); nessuna modifica necessaria.
+
+## [2026-10-26] Firma digitale Yousign: Data firma + MUP + produzione
+- Yousign: config centralizzata sandbox/produzione con chiave unica condivisa (env YOUSIGN_ENVIRONMENT, YOUSIGN_SANDBOX_API_KEY, YOUSIGN_PRODUCTION_API_KEY) in routes/firma_modelli.py::_yousign_cfg.
+- Campo DATA firma: _invia_yousign ora aggiunge un campo Yousign "mention" ("Firmato il %date%") accanto alla firma. Segnaposto {data_firma} supportato in Gestione modelli e MUP.
+- Gestione modelli: checkbox "Firma digitale" (già esistente come richiede_firma) + hint {firma}/{data_firma}; invio Yousign con firma+data.
+- MUP: nuovo flag firma_digitale sul modello MUP (Librerie); _build genera i segnaposto {firma}/{data_firma} nell'area firma; nuovo endpoint POST /polizze/{pid}/mup/firma che genera il MUP, posiziona firma+data e invia a Yousign al contraente, recapitando il link via WhatsApp/Email. In PolizzaDetail il pulsante firma MUP usa questo flusso quando il modello ha firma_digitale, altrimenti resta il flusso OpenAPI OTP SMS esistente.
+- Loghi per agenzia: già isolati per tenant (azienda_config), inseriti automaticamente nei moduli e nel MUP.
+- Verificato end-to-end in sandbox: POST /mup/firma → ok=True, signing_url generato, campo firma+data accettati da Yousign (status ongoing), MUP archiviato come allegato.
+- TODO go-live: impostare YOUSIGN_ENVIRONMENT=production dopo aver salvato YOUSIGN_PRODUCTION_API_KEY.

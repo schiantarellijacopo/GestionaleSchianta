@@ -103,6 +103,19 @@ export default function PolizzaDetail() {
     const firmaMup = async (canali = { wa: true, email: true }) => {
         setMupBusy(true);
         try {
+            const modelloSel = (mupModelli || []).find((m) => m.id === mupModelloId);
+            if (modelloSel?.firma_digitale) {
+                // Firma Yousign con campo Firma + Data posizionati
+                const r = await api.post(`/polizze/${id}/mup/firma`, {
+                    area: mupArea, righe: mupRighe, modello_id: mupModelloId, canali,
+                });
+                if (r.data.signing_url) window.open(r.data.signing_url, "_blank");
+                const via = [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") || "solo link";
+                toast.success(`MUP inviato a firma digitale (${via}) con campo Firma + Data`);
+                setMupOpen(false);
+                load();
+                return;
+            }
             // 1) Genera e archivia il MUP come allegato PDF della polizza
             const r0 = await api.post(`/polizze/${id}/mup/genera`, { area: mupArea, righe: mupRighe, modello_id: mupModelloId, salva: true });
             const allegatoId = r0.data.allegato_id;
