@@ -8449,6 +8449,22 @@ async def quota_collaboratore_endpoint(
     PIÙ SPECIFICO per (collaboratore + compagnia + ramo). Usa la stessa logica di
     `_provv_breakdown` (schema sul netto → netto×%, schema a ripartizione → %collab
     della provvigione totale già presente sul titolo)."""
+    # Per gli schemi "diretti sul NETTO" (es. BS BROKER 4,5%) la quota si calcola DAL
+    # netto anche quando la provvigione totale è 0 (campo non ancora compilato nel form):
+    # non deve ripiegare sulla quota annuale ereditata dalla polizza.
+    schema = await _risolvi_schema_provvigionale(collaboratore_id, compagnia_id, ramo)
+    if schema and float(schema.get("percentuale_su_premio_netto") or 0) > 0 and premio_netto:
+        q = _quota_collab_da_schema(
+            schema, provvigione_totale, float(premio_netto or 0), float(premio_lordo or 0))
+        if q is not None:
+            pct_netto = float(schema.get("percentuale_su_premio_netto") or 0)
+            pct_collab = float(schema.get("percentuale_collaboratore") or 0)
+            return {
+                "provvigione_collaboratore": round(q, 2),
+                "pct_collab": pct_collab if pct_collab > 0 else pct_netto,
+                "schema_id": schema.get("id"),
+                "schema_nome": schema.get("nome"),
+            }
     bk = await _provv_breakdown(
         provvigione_totale, collaboratore_id, compagnia_id, ramo,
         premio_netto=premio_netto, premio_lordo=premio_lordo,

@@ -105,3 +105,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Messaggio errore form titolo (TitoloDialog.save) ora mostra il dettaglio reale (incl. errori di validazione 422) invece del generico "Errore".
 - Provvigioni broker errate (mostrava la quota ANNUALE ereditata 40,96 invece del 4,5% sul netto del titolo = 22,50): il backend calcola correttamente (quota-collaboratore con premio_netto=500 → 22,50; con netto=0 → 0, da cui il vecchio fallback alla quota polizza). Fix frontend: nuovo useEffect in TitoloDialog ricalcola le quote dallo schema quando cambia premio netto/lordo o quando gli operatori vengono ereditati, e allinea il totale provvigioni alla somma ripartita. Non tocca i titoli già incassati.
 - NB: fix nel codebase preview; per vederli in produzione (Railway) serve un nuovo deploy.
+
+## [2026-10-26] (RCA approfondita) Provvigioni broker 4,5% sul netto
+- Causa reale: _provv_breakdown azzera tutto se la provvigione totale ~0 (abs(tot)<0.005). Nel form "Provvigioni totale" è 0 → la quota-collaboratore tornava 0 → fallback alla quota ANNUALE della polizza (40,96).
+- Fix backend: quota_collaboratore_endpoint ora, per schemi con percentuale_su_premio_netto>0 e premio_netto presente, calcola la quota direttamente dal netto (via _quota_collab_da_schema) anche con totale=0, senza passare dal corto-circuito. _provv_breakdown (stats/E-C) invariato.
+- Verificato via API: totale=0+netto=500 → 22,50; schema ripartizione 70% con totale=0 → 0 (invariato), totale=100 → 70.
+- Verificato E2E nel form (screenshot): netto 500 → riga collaboratore 22,50 e Totale ripartito 22,50 € (prima 40,96).
