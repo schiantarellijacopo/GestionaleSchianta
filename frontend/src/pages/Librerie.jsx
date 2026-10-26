@@ -5469,21 +5469,21 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
 
             {tipo === "griglia" ? (
                 <div className="border rounded-lg p-3 bg-slate-50 space-y-2 overflow-x-auto">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 w-max">
                         {colonne.map((c, i) => (
-                            <div key={i} className="flex items-center gap-1">
-                                <Input value={c} onChange={(e) => setColName(i, e.target.value)} className="h-8 w-40 bg-white" placeholder={`Colonna ${i + 1}`} data-testid={`tabella-col-${i}`} />
-                                <button onClick={() => removeCol(i)} className="text-rose-500 hover:text-rose-700" title="Rimuovi colonna"><XCircle size={16} /></button>
+                            <div key={i} className="relative w-40 shrink-0">
+                                <Input value={c} onChange={(e) => setColName(i, e.target.value)} className="h-8 w-full bg-white pr-6 font-medium" placeholder={`Colonna ${i + 1}`} data-testid={`tabella-col-${i}`} />
+                                <button onClick={() => removeCol(i)} className="absolute -top-2 -right-2 bg-white rounded-full text-rose-500 hover:text-rose-700 shadow-sm" title="Rimuovi colonna"><XCircle size={15} /></button>
                             </div>
                         ))}
-                        <Button size="sm" variant="outline" className="h-8" onClick={addCol} data-testid="tabella-add-col"><Plus size={13} className="mr-1" />Colonna</Button>
+                        <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={addCol} data-testid="tabella-add-col"><Plus size={13} className="mr-1" />Colonna</Button>
                     </div>
                     {righe.map((r, ri) => (
-                        <div key={ri} className="flex items-center gap-2">
+                        <div key={ri} className="flex items-center gap-2 w-max">
                             {r.map((c, ci) => (
-                                <Input key={ci} value={c} onChange={(e) => setCell(ri, ci, e.target.value)} className="h-8 w-40 bg-white" data-testid={`tabella-cell-${ri}-${ci}`} />
+                                <Input key={ci} value={c} onChange={(e) => setCell(ri, ci, e.target.value)} className="h-8 w-40 shrink-0 bg-white" data-testid={`tabella-cell-${ri}-${ci}`} />
                             ))}
-                            <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700" title="Rimuovi riga"><Trash2 size={15} /></button>
+                            <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700 shrink-0" title="Rimuovi riga"><Trash2 size={15} /></button>
                         </div>
                     ))}
                     <Button size="sm" variant="outline" className="h-8" onClick={addRow} data-testid="tabella-add-row"><Plus size={13} className="mr-1" />Riga</Button>
@@ -5654,6 +5654,7 @@ function WordVisualEditor({ modello, onClose }) {
                 if (tag === "i" || tag === "em") nf.italic = true;
                 if (tag === "u" || tag === "ins") nf.underline = true;
                 if (st.fontWeight === "bold" || parseInt(st.fontWeight) >= 600) nf.bold = true;
+                else if (st.fontWeight === "normal" || st.fontWeight === "lighter" || (st.fontWeight && parseInt(st.fontWeight) <= 400)) nf.bold = false;
                 if (st.fontStyle === "italic") nf.italic = true;
                 if (/underline/.test(st.textDecoration || st.textDecorationLine || "")) nf.underline = true;
                 const col = st.color || (ch.getAttribute && ch.getAttribute("color"));

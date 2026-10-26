@@ -1,0 +1,29 @@
+{
+  "summary": "Frontend-only retest of (1) Word visual editor persistence fix, (2) 'Segnaposto visivo' button on non-Word models, (3) Import table from PDF. All 3 features PASS. The critical bug from iteration_119 is fixed: typed text, bold, color and line deletion all survive save, close and reopen, including after re-renders caused by toggling the delete/restore button on a row.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "WordVisualEditor - heading paragraphs", "issue": "Heading rows already render semibold through CSS (isHeading -> font-semibold). Selecting heading text and clicking Bold makes execCommand treat it as already bold, so it wraps it in <span style='font-weight: normal'> and removes the bold. serialize() ignores font-weight:normal, so saving writes the run as not bold. Net effect: Bold on a title removes it or does nothing, which confuses users. Reproduce: double-click 'Contratto' in wve-para-0 of 'PROVA Editor Fix', click wve-bold. Fix: mark heading runs as bold from segment data, not CSS, or handle font-weight normal/400 as bold=false explicitly.", "selector": "[data-testid='wve-para-0'] + [data-testid='wve-bold']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Tabelle editor (after Importa da PDF)", "issues": ["Column header inputs, each with its (x) remove icon, are wider than the data cells in the rows, so later columns drift out of line (e.g. the 'Nobis' header sits about 50px right of its column's cells). Use a CSS grid or table so headers and cells share the same column widths."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Low) Fix Bold toggle on heading paragraphs in WordVisualEditor (CSS semibold makes execCommand('bold') remove bold)",
+    "(Low) Align the Tabelle editor's column headers with the row cells"
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is about 7480 lines. Split WordVisualEditor, EditablePara, TabelleManager/TabellaEditor and ModelliSezione into separate files.",
+    "The 'Segnaposto visivo' button for non-Word models just opens the normal edit form (setEditing+setOpen), the same as editing. It works as requested, but it is not a real 'visual' editor for PDF/email.",
+    "document.execCommand is deprecated. It still works today, but long term it is a risk."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested", "frontend": "100% (3/3 features)"},
+  "seed_data_creation": "Changed the 'PROVA Editor Fix' model (id 8cf6004e-7d37-48d2-8558-74ae38a81f75). It now has ' TESTPERSIST' at the end of para 1, 'Gentile' in bold, 'Importo' in blue #1D4ED8, ' EXTRA2' at the end of the last para, and the empty line deleted. No table was saved during the PDF import test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Navigation: login -> /librerie -> lib-tab-modelli -> modelli-tab-{email|sms|whatsapp|pdf|word}. The Word editor is opened with modello-visivo-<id>. Save sends POST /librerie/modelli/{id}/salva-contenuto and the editor reloads via GET struttura-word. The PDF import sends POST /api/librerie/tabelle/estrai-da-pdf; /tmp/tab.pdf returns 4 columns and 3 rows (Autovetture/Autocarri/Motocicli) via pdfplumber in about 1-2s."
+}
