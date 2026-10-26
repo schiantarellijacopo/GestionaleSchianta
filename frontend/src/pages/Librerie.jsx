@@ -5484,6 +5484,7 @@ h1 { font-size: 18px; margin: 0 0 14px; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
 th { background:#1e293b !important; color:#fff !important; border:1px solid #64748b; padding:5px 8px; text-align:left; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 td { border:1px solid #cbd5e1; padding:5px 8px; }
+tbody tr:nth-of-type(even):not(.sez) td { background:#f8fafc !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 tr.sez td { background:#e2e8f0 !important; font-weight:700; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 </style></head><body><h1>${titolo}</h1>${html}<script>window.onload=function(){setTimeout(function(){window.print();},150);};</script></body></html>`);
         w.document.close();
@@ -5691,36 +5692,49 @@ function PdfVisualEditor({ modello, onClose }) {
     useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
     const clamp = (v) => Math.max(0, Math.min(1, v));
+    const clampItem = (o, x, y) => {
+        const maxX = o.kind === "image" ? 1 - (o.w || 0.22) : 1;
+        const maxY = o.kind === "image" ? 1 - (o.h || 0.1) : 1;
+        return { x: Math.max(0, Math.min(maxX, x)), y: Math.max(0, Math.min(maxY, y)) };
+    };
     const onPageClick = (pi, e) => {
         if (!sel) { toast.info("Scegli prima un segnaposto o un'immagine, poi clicca sul punto del PDF"); return; }
         const rect = e.currentTarget.getBoundingClientRect();
         const x = clamp((e.clientX - rect.left) / rect.width);
         const y = clamp((e.clientY - rect.top) / rect.height);
         setOverlay((ov) => {
-            const item = sel.kind === "image"
-                ? { page: pi, x: clamp(x), y: clamp(y), key: sel.key, kind: "image", w: 0.22, h: 0.1, font_size: 11 }
-                : { page: pi, x, y, key: sel.key, kind: "text", font_size: 11 };
-            const n = [...ov, item]; setActiveIdx(n.length - 1); return n;
+            const base = sel.kind === "image"
+                ? { page: pi, key: sel.key, kind: "image", w: 0.22, h: 0.1, font_size: 11 }
+                : { page: pi, key: sel.key, kind: "text", font_size: 11 };
+            const pos = clampItem(base, x, y);
+            const n = [...ov, { ...base, ...pos }]; setActiveIdx(n.length - 1); return n;
         });
     };
     const updateItem = (idx, patch) => setOverlay((ov) => ov.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
     const removeItem = (idx) => { setOverlay((ov) => ov.filter((_, i) => i !== idx)); setActiveIdx(null); };
 
-    // Trascinamento segnaposto col mouse
-    const startDrag = (idx, el, e) => { e.stopPropagation(); e.preventDefault(); setActiveIdx(idx); dragRef.current = { idx, el }; };
+    // Trascinamento segnaposto col mouse (con offset di presa)
+    const startDrag = (idx, el, e) => {
+        e.stopPropagation(); e.preventDefault(); setActiveIdx(idx);
+        const rect = el.getBoundingClientRect();
+        const o = overlay[idx] || {};
+        const px = (e.clientX - rect.left) / rect.width;
+        const py = (e.clientY - rect.top) / rect.height;
+        dragRef.current = { idx, el, offx: px - (o.x || 0), offy: py - (o.y || 0) };
+    };
     useEffect(() => {
         const move = (e) => {
             const d = dragRef.current; if (!d || !d.el) return;
             const rect = d.el.getBoundingClientRect();
-            const x = clamp((e.clientX - rect.left) / rect.width);
-            const y = clamp((e.clientY - rect.top) / rect.height);
-            setOverlay((ov) => ov.map((o, i) => (i === d.idx ? { ...o, x, y } : o)));
+            const px = (e.clientX - rect.left) / rect.width - d.offx;
+            const py = (e.clientY - rect.top) / rect.height - d.offy;
+            setOverlay((ov) => ov.map((o, i) => (i === d.idx ? { ...o, ...clampItem(o, px, py) } : o)));
         };
         const up = () => { dragRef.current = null; };
         window.addEventListener("pointermove", move);
         window.addEventListener("pointerup", up);
         return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    }, []);
+    }, [overlay]);
 
     const salvaOverlay = async () => {
         setSaving(true);
@@ -5820,7 +5834,7 @@ function PdfVisualEditor({ modello, onClose }) {
                                                 onPointerDown={(e) => startDrag(idx, e.currentTarget.parentElement, e)}
                                                 onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
                                                 className={`absolute rounded flex items-center justify-center text-[10px] font-semibold cursor-move select-none ${activeIdx === idx ? "ring-2 ring-amber-500 bg-amber-200/60 text-amber-900" : "bg-sky-500/20 text-sky-800 border border-dashed border-sky-500"}`}
-                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${(o.w || 0.22) * 100}%`, height: `${(o.h || 0.1) * 100}%` }}
+                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${(o.w || 0.22) * 100}%`, height: `${(o.h || 0.1) * 100}%`, touchAction: "none" }}
                                                 data-testid={`pdf-overlay-item-${idx}`}
                                                 title="Trascina per spostare">
                                                 <ImageIcon size={14} className="mr-1" />{o.key === "logo" ? "Logo" : "Firma"}
@@ -5830,7 +5844,7 @@ function PdfVisualEditor({ modello, onClose }) {
                                                 onPointerDown={(e) => startDrag(idx, e.currentTarget.parentElement, e)}
                                                 onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
                                                 className={`absolute font-mono px-1 rounded cursor-move whitespace-nowrap select-none ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
-                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, fontSize: `${o.font_size || 11}px` }}
+                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, fontSize: `${o.font_size || 11}px`, touchAction: "none" }}
                                                 data-testid={`pdf-overlay-item-${idx}`}
                                                 title="Trascina per spostare">
                                                 {`{${o.key}}`}

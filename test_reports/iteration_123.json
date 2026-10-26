@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only test of 3 enhancements in Librerie > Gestioni Modelli. All four requested flows pass: (1) the table A4 preview sheet is 794x1123px (ratio 1.414, true A4), and Stampa opens a popup with @page A4 CSS, the table content and window.print(), with no JS errors. (2) The Logo agenzia and Firma operatore image placeholders can be placed on the PDF; the image shows Largh.%/Alt.% fields instead of the font size field; Largh. was changed to 30%, saved, persisted (API check) and reloaded correctly after reopening. (3) Dragging a text item and an image item updates X%/Y% (text 20/40 -> 50/60, logo 10/5 -> 40/20) and no extra placeholder is created (count stays 3, even with a palette key still selected). (4) Regression: text placeholder font size 16 is saved, and Anteprima PDF opens a new tab; genera-pdf-overlay returns 200 application/pdf with the text stamped. 0 images were embedded because the tenant has no logo/firma set, which is expected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PdfVisualEditor drag (Librerie.jsx ~5712-5718)", "issue": "Drag clamps only the top-left x/y to [0,1] and ignores the item's w/h. Dragging an image past the right edge set X=100%, so the logo box was rendered entirely outside the page (invisible or clipped), and the backend would stamp it off-page. Same for onPageClick near edges and for text items. Clamp x to 1-w and y to 1-h for images.", "selector": "[data-testid^='pdf-overlay-item-']", "priority": "MEDIUM"},
+      {"component": "PdfVisualEditor drag", "issue": "No grab offset is kept: when dragging starts, the item jumps so its top-left corner sits under the cursor. Store the pointer offset on pointerdown for smooth dragging.", "selector": "[data-testid^='pdf-overlay-item-']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": ["/app/tests/mk_pdf_overlay_model.py"],
+  "action_items": [
+    "Clamp overlay item position so the whole image or text box stays inside the page (x <= 1-w, y <= 1-h), both when dragging and when clicking to place.",
+    "Optional: keep the pointer offset during drag to avoid the jump."
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is about 7860 lines; split PdfVisualEditor and TabelleManager/TabellaEditor into separate modules.",
+    "stampaTabella copies the table outerHTML, so the Tailwind classes do nothing in the popup. The inline CSS covers it, but zebra rows (bg-slate-50) are lost in print. Minor.",
+    "Drag uses window pointer listeners without setPointerCapture. It works, but touch devices may scroll the page during drag; add touch-action: none on the items."
+  ],
+  "updated_files": ["/app/tests/mk_pdf_overlay_model.py"],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100% of requested flows (2 minor UX bugs)"},
+  "seed_data_creation": "Created the TEST_PDF_overlay_drag pdf_altro model with an uploaded PDF and deleted it afterwards. The TEST_A4_print table was never saved.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Navigation: /librerie -> lib-tab-modelli -> modelli-tab-pdf -> modelli-search -> modello-pdfvisivo-{id}. Use /app/tests/mk_pdf_overlay_model.py (no args) to create a TEST pdf model with an original PDF attached, 'overlay <id>' to read the saved overlay, and pdf_model.py cleanup <id> to delete it. Text palette buttons are segnaposto-item-{key} inside pdf-overlay-palette. The X/Y inputs in the props panel have no data-testid (read them via the number inputs in pdf-overlay-props). The tenant has no logo/firma, so no images get embedded."
+}
