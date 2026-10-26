@@ -95,3 +95,7 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Tipi di SISTEMA: chiave non modificabile e non eliminabili (solo disattivabili) perché usati da statistiche/logiche. Tipi personalizzati: chiave auto-slug dal nome, modificabili ed eliminabili.
 - Il menù "Tipo (riferimento)" in TitoloDialog ora legge da /librerie/tipi-titolo?solo_attivi, con fallback ai 9 tipi di sistema se la libreria è vuota/offline.
 - Verificato: seed 9, create custom (slug), delete sistema→400, delete custom→200, solo_attivi; tab frontend mostra 9 righe con colonne Nome/Chiave/Ordine/Tipo/Attivo.
+
+## [2026-10-26] Tipi titolo: blocco eliminazione se usato + filtri statistiche dinamici
+- DELETE /librerie/tipi-titolo: oltre ai tipi di sistema, un tipo personalizzato GIÀ USATO in almeno un titolo (conteggio globale via raw_db.titoli) non è eliminabile (400) → si può solo disattivare. Verificato 400 se usato, 200 se non più usato.
+- Filtri "Tipo titolo" in Statistiche (Per Operatore + Premi/Provvigioni) ora leggono l'elenco da /librerie/tipi-titolo?solo_attivi, così i tipi personalizzati appaiono nei report. Quietanza continua a includere i legacy 'rinnovo' lato backend. Verificato con screenshot (dropdown mostra tutti i tipi della libreria).

@@ -14,7 +14,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, ConfigDict
 
-from database import db
+from database import db, raw_db
 from db_models import (
     _now_iso, _uid,
     AziendaConfig, Banca, ContattoCompagnia, ContoCassa, MezzoPagamento,
@@ -1171,7 +1171,12 @@ async def delete_tipo_titolo(tid: str, user: dict = Depends(require_user("admin"
     if not cur:
         return {"ok": True}
     if cur.get("sistema"):
-        raise HTTPException(400, "I tipi di sistema non si possono eliminare: puoi disattivarli")
+        raise HTTPException(400, "I tipi di sistema non si possono eliminare: puoi solo disattivarli")
+    # Se è già stato usato in almeno un titolo (su qualsiasi agenzia) non si elimina:
+    # si può solo disattivare, per non perdere lo storico/etichetta.
+    usato = await raw_db.titoli.count_documents({"tipo": cur["chiave"]})
+    if usato > 0:
+        raise HTTPException(400, f"Tipo già utilizzato in {usato} titoli: puoi solo disattivarlo, non eliminarlo")
     await db.tipi_titolo.delete_one({"id": tid})
     return {"ok": True}
 

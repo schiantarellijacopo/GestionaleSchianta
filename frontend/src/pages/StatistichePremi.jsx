@@ -21,10 +21,13 @@ export default function StatistichePremi() {
     const [operatori, setOperatori] = useState([]);
     const [rami, setRami] = useState([]);
     const [ramoSel, setRamoSel] = useState([]);
+    const [tipiTitolo, setTipiTitolo] = useState([]);
     const [data, setData] = useState(null);
 
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data || []));
+        api.get("/librerie/tipi-titolo", { params: { solo_attivi: true } })
+            .then((r) => setTipiTitolo(r.data || [])).catch(() => setTipiTitolo([]));
         api.get("/librerie/rami", { params: { dedup: 1, con_polizze: 1 } })
             .then((r) => setRami((r.data || []).map((x) => x.nome).filter(Boolean)))
             .catch(() => setRami([]));
@@ -79,7 +82,7 @@ export default function StatistichePremi() {
                     </div>
                 </div>
                 <FSel label="Filtra per data" value={dataField} onChange={setDataField} opts={[["incasso", "Data incasso"], ["rata", "Rata / decorrenza"], ["copertura", "Data copertura"]]} tid="stat-datafield" />
-                <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ["nuova", "Nuove"], ["sostituzione", "Sostituite"], ["regolazione", "Regolazioni"], ["quietanza", "Quietanze"]]} tid="stat-tipo" />
+                <FSel label="Tipo titolo" value={tipo} onChange={setTipo} opts={[["all", "Tutti"], ...tipiTitolo.map((t) => [t.chiave, t.nome])]} tid="stat-tipo" />
                 <FSel label="Compagnia" value={compagniaId} onChange={setCompagniaId} opts={[["all", "Tutte"], ...compagnie.map((c) => [c.id, c.ragione_sociale])]} tid="stat-compagnia" />
                 <RamoMulti rami={rami} sel={ramoSel} setSel={setRamoSel} tid="stat-ramo" />
                 {isAdmin && (
