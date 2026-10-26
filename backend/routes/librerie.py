@@ -1099,6 +1099,94 @@ async def seed_default_tipologie_sinistri() -> None:
     await db.tipologie_sinistri.insert_many(docs)
 
 
+# --- TIPI TITOLO (riferimento titoli: quietanza, nuova, sostituzione, ...) ---
+TIPI_TITOLO_DEFAULT = [
+    ("quietanza", "Quietanza"),
+    ("nuova", "Polizza nuova"),
+    ("appendice", "Appendice"),
+    ("inclusione", "Inclusione"),
+    ("esclusione", "Esclusione"),
+    ("annullo", "Annullo"),
+    ("sostituzione", "Sostituzione"),
+    ("regolazione", "Regolazione premio"),
+    ("storno", "Storno"),
+]
+
+
+def _slug_tipo(s: str) -> str:
+    import re
+    s = re.sub(r"[^a-z0-9]+", "_", (s or "").strip().lower()).strip("_")
+    return s or "tipo"
+
+
+@router.get("/librerie/tipi-titolo")
+async def list_tipi_titolo(solo_attivi: bool = False, user: dict = Depends(current_user)) -> list[dict]:
+    flt = {"attivo": {"$ne": False}} if solo_attivi else {}
+    return await db.tipi_titolo.find(flt, {"_id": 0}).sort([("ordine", 1), ("nome", 1)]).to_list(300)
+
+
+@router.post("/librerie/tipi-titolo", status_code=201)
+async def create_tipo_titolo(body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    nome = (body.get("nome") or "").strip()
+    if not nome:
+        raise HTTPException(400, "Nome obbligatorio")
+    chiave = _slug_tipo(body.get("chiave") or nome)
+    if await db.tipi_titolo.find_one({"chiave": chiave}):
+        raise HTTPException(400, f"Esiste già un tipo con chiave '{chiave}'")
+    doc = {"id": str(uuid.uuid4()), "chiave": chiave, "nome": nome,
+           "ordine": int(body.get("ordine") or 100), "attivo": body.get("attivo", True),
+           "sistema": False, "created_at": _now_iso()}
+    await db.tipi_titolo.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "create", "tipo_titolo", doc["id"], nome)
+    return doc
+
+
+@router.put("/librerie/tipi-titolo/{tid}")
+async def update_tipo_titolo(tid: str, body: dict, user: dict = Depends(require_user("admin", "collaboratore"))) -> dict:
+    cur = await db.tipi_titolo.find_one({"id": tid}, {"_id": 0})
+    if not cur:
+        raise HTTPException(404, "Tipo non trovato")
+    patch = {}
+    if "nome" in body and (body.get("nome") or "").strip():
+        patch["nome"] = body["nome"].strip()
+    if "ordine" in body:
+        patch["ordine"] = int(body.get("ordine") or 0)
+    if "attivo" in body:
+        patch["attivo"] = bool(body["attivo"])
+    # La chiave dei tipi di SISTEMA non è modificabile (serve a statistiche/logiche).
+    if "chiave" in body and not cur.get("sistema"):
+        nuova = _slug_tipo(body["chiave"])
+        if nuova != cur["chiave"] and await db.tipi_titolo.find_one({"chiave": nuova}):
+            raise HTTPException(400, f"Chiave '{nuova}' già in uso")
+        patch["chiave"] = nuova
+    patch["updated_at"] = _now_iso()
+    await db.tipi_titolo.update_one({"id": tid}, {"$set": patch})
+    return strip_mongo_id(await db.tipi_titolo.find_one({"id": tid}, {"_id": 0}))
+
+
+@router.delete("/librerie/tipi-titolo/{tid}")
+async def delete_tipo_titolo(tid: str, user: dict = Depends(require_user("admin"))) -> dict:
+    cur = await db.tipi_titolo.find_one({"id": tid}, {"_id": 0})
+    if not cur:
+        return {"ok": True}
+    if cur.get("sistema"):
+        raise HTTPException(400, "I tipi di sistema non si possono eliminare: puoi disattivarli")
+    await db.tipi_titolo.delete_one({"id": tid})
+    return {"ok": True}
+
+
+async def seed_default_tipi_titolo() -> None:
+    """Crea i tipi titolo di sistema se non esistono (idempotente). Collezione condivisa."""
+    if await db.tipi_titolo.count_documents({}) > 0:
+        return
+    docs = [{"id": str(uuid.uuid4()), "chiave": c, "nome": n, "ordine": i * 10,
+             "attivo": True, "sistema": True, "created_at": _now_iso()}
+            for i, (c, n) in enumerate(TIPI_TITOLO_DEFAULT)]
+    await db.tipi_titolo.insert_many(docs)
+
+
+
 
 
 

@@ -88,3 +88,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Loghi per agenzia: già isolati per tenant (azienda_config), inseriti automaticamente nei moduli e nel MUP.
 - Verificato end-to-end in sandbox: POST /mup/firma → ok=True, signing_url generato, campo firma+data accettati da Yousign (status ongoing), MUP archiviato come allegato.
 - TODO go-live: impostare YOUSIGN_ENVIRONMENT=production dopo aver salvato YOUSIGN_PRODUCTION_API_KEY.
+
+## [2026-10-26] Libreria "Tipi titolo (riferimento)"
+- Nuova libreria condivisa (collezione tipi_titolo, non tenant-scoped come tipologie_sinistri) in Librerie → "Tipi titolo (riferimento)".
+- CRUD backend /librerie/tipi-titolo (GET con solo_attivi, POST, PUT, DELETE) + seed idempotente dei 9 tipi di sistema (quietanza, nuova, appendice, inclusione, esclusione, annullo, sostituzione, regolazione, storno) con sistema=True.
+- Tipi di SISTEMA: chiave non modificabile e non eliminabili (solo disattivabili) perché usati da statistiche/logiche. Tipi personalizzati: chiave auto-slug dal nome, modificabili ed eliminabili.
+- Il menù "Tipo (riferimento)" in TitoloDialog ora legge da /librerie/tipi-titolo?solo_attivi, con fallback ai 9 tipi di sistema se la libreria è vuota/offline.
+- Verificato: seed 9, create custom (slug), delete sistema→400, delete custom→200, solo_attivi; tab frontend mostra 9 righe con colonne Nome/Chiave/Ordine/Tipo/Attivo.

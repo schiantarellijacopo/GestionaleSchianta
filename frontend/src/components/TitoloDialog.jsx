@@ -38,6 +38,18 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     }));
     const [giornataChiusa, setGiornataChiusa] = useState(false);
     const [collaboratori, setCollaboratori] = useState([]);
+    // Tipi titolo dalla libreria (Librerie → Tipi titolo), con fallback ai tipi di sistema
+    const FALLBACK_TIPI = [
+        ["quietanza", "Quietanza"], ["nuova", "Polizza nuova"], ["appendice", "Appendice"],
+        ["inclusione", "Inclusione"], ["esclusione", "Esclusione"], ["annullo", "Annullo"],
+        ["sostituzione", "Sostituzione"], ["regolazione", "Regolazione premio"], ["storno", "Storno"],
+    ];
+    const [tipiTitolo, setTipiTitolo] = useState(FALLBACK_TIPI);
+    useEffect(() => {
+        api.get("/librerie/tipi-titolo", { params: { solo_attivi: true } })
+            .then((r) => { if (Array.isArray(r.data) && r.data.length) setTipiTitolo(r.data.map((t) => [t.chiave, t.nome])); })
+            .catch(() => {});
+    }, []);
     // Ripartizione provvigione multi-collaboratore
     const [operatori, setOperatori] = useState(() => {
         if (Array.isArray(titolo.provvigioni_operatori) && titolo.provvigioni_operatori.length > 0) {
@@ -338,17 +350,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                         <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
                             <SelectTrigger data-testid="titolo-tipo-select"><SelectValue placeholder="Seleziona tipo" /></SelectTrigger>
                             <SelectContent>
-                                {[
-                                    ["quietanza", "Quietanza"],
-                                    ["nuova", "Polizza nuova"],
-                                    ["appendice", "Appendice"],
-                                    ["inclusione", "Inclusione"],
-                                    ["esclusione", "Esclusione"],
-                                    ["annullo", "Annullo"],
-                                    ["sostituzione", "Sostituzione"],
-                                    ["regolazione", "Regolazione premio"],
-                                    ["storno", "Storno"],
-                                ].map(([v, l]) => (
+                                {tipiTitolo.map(([v, l]) => (
                                     <SelectItem key={v} value={v}>{l}</SelectItem>
                                 ))}
                             </SelectContent>

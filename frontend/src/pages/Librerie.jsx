@@ -60,6 +60,7 @@ const SECTIONS = [
     { key: "conti-cassa", label: "Conti / Banche", icon: <Landmark size={14} />, endpoint: "/librerie/conti-cassa" },
     { key: "mezzi-pagamento", label: "Modalità pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/mezzi-pagamento" },
     { key: "tipi-pagamento", label: "Tipi pagamento", icon: <Wallet size={14} />, endpoint: "/librerie/tipi-pagamento" },
+    { key: "tipi-titolo", label: "Tipi titolo (riferimento)", icon: <Tags size={14} />, endpoint: "/librerie/tipi-titolo" },
     { key: "voci-bilancio", label: "Voci di bilancio", icon: <Wallet size={14} />, endpoint: "/librerie/voci-bilancio" },
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
@@ -1206,6 +1207,27 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
             </table>
         );
     }
+    if (section.key === "tipi-titolo") {
+        return (
+            <table className="tbl w-full">
+                <thead><tr><th>Nome (etichetta)</th><th>Chiave interna</th><th className="text-right">Ordine</th><th>Tipo</th><th>Attivo</th><th></th></tr></thead>
+                <tbody>
+                    {list.map((t) => (
+                        <tr key={t.id} className={t.attivo === false ? "opacity-60" : ""} data-testid={`tipo-titolo-row-${t.chiave}`}>
+                            <td className="font-medium">{t.nome}</td>
+                            <td className="num font-mono text-xs text-slate-500">{t.chiave}</td>
+                            <td className="num text-right">{t.ordine}</td>
+                            <td>{t.sistema ? <span className="badge badge-info">sistema</span> : <span className="badge badge-neutral">personalizzato</span>}</td>
+                            <td>{t.attivo !== false ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">no</span>}</td>
+                            <td className="text-right">
+                                <RowActions onEdit={() => onEdit(t)} onDelete={() => onDelete(t.id)} canDelete={!t.sistema} label="tipo titolo" testid={`tipo-titolo-actions-${t.chiave}`} />
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    }
     if (section.key === "voci-bilancio") {
         return (
             <table className="tbl w-full">
@@ -1490,6 +1512,7 @@ const SECTION_FORMS = {
     "conti-cassa": ContoForm,
     "mezzi-pagamento": MezzoPagamentoForm,
     "tipi-pagamento": TipoPagamentoForm,
+    "tipi-titolo": TipoTitoloForm,
     "voci-bilancio": VoceBilancioForm,
     "prodotti": ProdottoForm,
     "rami": RamoForm,
@@ -1500,6 +1523,31 @@ const SECTION_FORMS = {
     "mapping-garanzie": MappingGaranziaForm,
     "mapping-operatori": MappingOperatoreForm,
 };
+
+function TipoTitoloForm({ section, editing, onClose }) {
+    const isSistema = !!(editing && editing.sistema);
+    return <GenericForm section={section} editing={editing} onClose={onClose}
+        defaults={{ nome: "", chiave: "", ordine: 100, attivo: true }}
+        fields={(f, set) => (
+            <>
+                <div><Label>Nome (etichetta mostrata) *</Label>
+                    <Input value={f.nome || ""} onChange={(e) => set("nome", e.target.value)} placeholder="Es. Quietanza" data-testid="tipo-titolo-nome" /></div>
+                <div><Label>Chiave interna {isSistema && <span className="text-xs text-slate-400">(non modificabile)</span>}</Label>
+                    <Input value={f.chiave || ""} disabled={isSistema}
+                        onChange={(e) => set("chiave", e.target.value)}
+                        placeholder="Auto dal nome se vuota (es. quietanza)" data-testid="tipo-titolo-chiave" />
+                    <p className="text-[11px] text-slate-500 mt-1">La chiave è il codice usato da statistiche e logiche. Per i tipi di sistema non si può cambiare.</p>
+                </div>
+                <div><Label>Ordine</Label>
+                    <Input type="number" value={f.ordine ?? 100} onChange={(e) => set("ordine", e.target.value)} data-testid="tipo-titolo-ordine" /></div>
+                <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={f.attivo !== false} onChange={(e) => set("attivo", e.target.checked)} data-testid="tipo-titolo-attivo" />
+                    Attivo (mostrato nel menù del titolo)
+                </label>
+            </>
+        )}
+    />;
+}
 
 function MappingGaranziaForm({ section, editing, onClose }) {
     return <GenericForm section={section} editing={editing} onClose={onClose}

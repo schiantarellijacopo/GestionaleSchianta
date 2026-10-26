@@ -19243,6 +19243,11 @@ async def startup():
         await seed_default_tipologie_sinistri()
     except Exception as e:
         logger.warning("Seed tipologie sinistri fallito: %s", e)
+    try:
+        from routes.librerie import seed_default_tipi_titolo
+        await seed_default_tipi_titolo()
+    except Exception as e:
+        logger.warning("Seed tipi titolo fallito: %s", e)
 
     # IMAP Poller — avviato automaticamente solo se abilitato in config
     try:
