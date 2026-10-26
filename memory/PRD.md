@@ -122,3 +122,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Nuovo endpoint GET /librerie/placeholders: catalogo raggruppato (_PLACEHOLDER_CATALOGO) con key/label/token. 52 segnaposto in 6 gruppi.
 - Nuova scheda Librerie "Segnaposto {…}" (SegnapostoSezione in Librerie.jsx): istruzioni d'uso, ricerca, griglia raggruppata con copia-al-clic. Spiega che i segnaposto vanno scritti nel modello o nel Word/PDF e vengono sostituiti coi dati reali in generazione; {firma}/{data_firma} per la firma digitale.
 - Verificato: endpoint 52 voci; scheda mostra 52 item, copia funzionante. NB: la sostituzione testuale piena avviene sul corpo del modello/Word; per i PDF caricati la posizione firma/data viene localizzata ({firma}/{data_firma}).
+
+## [2026-10-26] Word fedele (mail-merge con layout preservato)
+- Nuovo upload "Carica Word fedele" (Librerie → Modelli, scheda Word): il .docx resta identico (font/tabelle/logo). Endpoint POST /librerie/modelli/importa-word-fedele (tipo=word, word_fedele=True, word_storage_path, placeholders auto-rilevati). NIENTE trasformazione AI.
+- Generazione: POST /librerie/modelli/{id}/genera-fedele. _fill_docx sostituisce i {segnaposto} run-aware mantenendo l'impaginazione; _docx_to_pdf converte via LibreOffice headless (soffice). formato=docx → Word compilato; formato=pdf → PDF identico; invia_firma → mantiene {firma}/{data_firma}, converte in PDF, localizza i marcatori e invia a Yousign (riuso _invia_yousign con data_fields).
+- Segnaposto conosciuti senza valore → stringa vuota (niente {token} grezzi in stampa). In modalità firma {firma}/{data_firma} restano come marcatori per il posizionamento.
+- Frontend: pulsante verde "Carica Word fedele", badge "Word fedele" sulle card, UsaModelloDialog instrada a genera-fedele (PDF/Word/Invia a firma) quando word_fedele.
+- Verificato E2E: upload docx con {cliente}/{numero_polizza}/{firma}/{data_firma} → DOCX compilato senza token grezzi (layout ok), PDF 200, firma Yousign ok=True signing_url status ongoing.

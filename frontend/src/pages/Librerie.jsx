@@ -5276,6 +5276,28 @@ function ModelliSezione() {
     const caricaPdf = (e) => caricaDoc(e, "/librerie/modelli/da-pdf", "PDF");
     const caricaWord = (e) => caricaDoc(e, "/librerie/modelli/da-word", "Word");
 
+    const [uploadingFedele, setUploadingFedele] = useState(false);
+    const caricaWordFedele = async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (!f) return;
+        const nome = window.prompt("Nome del modello Word fedele:", f.name.replace(/\.docx$/i, ""));
+        if (nome === null) return;
+        setUploadingFedele(true);
+        toast.info("Caricamento del Word fedele… (mantiene il tuo layout)");
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("nome", (nome || f.name).trim());
+            await api.post("/librerie/modelli/importa-word-fedele", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Word fedele caricato ✓ — ora puoi generarlo coi dati reali");
+            setActiveTab("word");
+            await load();
+        } catch (err) {
+            toast.error(errMsg(err, "Errore durante il caricamento del Word fedele"));
+        } finally { setUploadingFedele(false); }
+    };
+
     return (
         <Card className="p-0 border-slate-200 overflow-hidden" data-testid="lib-modelli">
             {/* Header */}
@@ -5346,6 +5368,13 @@ function ModelliSezione() {
                                     <input type="file" hidden accept=".docx,.doc,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={caricaWord}
                                         data-testid="modelli-carica-word-input" />
                                 </label>
+                                <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-emerald-300 text-emerald-700 text-sm font-medium cursor-pointer hover:bg-emerald-50 ${uploadingFedele ? "opacity-60 pointer-events-none" : ""}`}
+                                    title="Carica il tuo Word: resta identico, compilo solo i {segnaposto} in stampa"
+                                    data-testid="modelli-carica-word-fedele">
+                                    <Upload size={14} /> {uploadingFedele ? "Carico…" : "Carica Word fedele"}
+                                    <input type="file" hidden accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={caricaWordFedele}
+                                        data-testid="modelli-carica-word-fedele-input" />
+                                </label>
                             </>
                         )}
                     </div>
@@ -5374,6 +5403,7 @@ function ModelliSezione() {
                                         <div className="flex items-center gap-1.5 flex-wrap mb-1">
                                             <h3 className="text-sm font-semibold text-slate-900 truncate">{m.nome}</h3>
                                             {m.default && <span className="text-[9px] bg-violet-600 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wide">default</span>}
+                                            {m.word_fedele && <span className="text-[9px] bg-emerald-600 text-white px-1.5 py-0.5 rounded uppercase font-bold tracking-wide">Word fedele</span>}
                                             {!m.attivo && <span className="text-[9px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded uppercase tracking-wide">off</span>}
                                         </div>
                                         {m.tipo.startsWith("pdf_") && (
@@ -5448,6 +5478,9 @@ function UsaModelloDialog({ modello, mode, onClose }) {
     const [emailFirmatario, setEmailFirmatario] = useState("");
     const [firmaLink, setFirmaLink] = useState(null);
     const richiedeFirma = !!modello.richiede_firma;
+    const genEndpoint = modello.word_fedele
+        ? `/librerie/modelli/${modello.id}/genera-fedele`
+        : `/librerie/modelli/${modello.id}/genera`;
 
     useEffect(() => {
         api.get("/auth/users")
@@ -5474,7 +5507,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
     const genera = async (formato) => {
         setBusy(true);
         try {
-            const r = await api.post(`/librerie/modelli/${modello.id}/genera`,
+            const r = await api.post(genEndpoint,
                 { cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null, formato },
                 { responseType: "blob" });
             const url = URL.createObjectURL(r.data);
@@ -5496,7 +5529,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
         if (!window.confirm(`Inviare il documento a firma digitale a ${email}?`)) return;
         setBusy(true);
         try {
-            const r = await api.post(`/librerie/modelli/${modello.id}/genera`, {
+            const r = await api.post(genEndpoint, {
                 cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null,
                 formato: "pdf", invia_firma: true, email_firmatario: email,
             });

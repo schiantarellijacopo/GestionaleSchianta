@@ -1047,6 +1047,208 @@ async def genera_documento(mid: str, body: GeneraDocBody,
                     headers={"Content-Disposition": f"inline; filename={fname}.pdf"})
 
 
+# =====================================================================
+# WORD FEDELE — carica un .docx, mantieni l'impaginazione e compila i {segnaposto}
+# =====================================================================
+def _docx_replace_paragraph(p, mapping: dict) -> None:
+    full = "".join(r.text for r in p.runs)
+    if "{" not in full:
+        return
+    new = _PLACEHOLDER_RE.sub(lambda m: str(mapping.get(m.group(1), m.group(0))), full)
+    if new == full:
+        return
+    if p.runs:
+        p.runs[0].text = new
+        for r in p.runs[1:]:
+            r.text = ""
+
+
+def _docx_iter_tables(tables, mapping: dict) -> None:
+    for tbl in tables:
+        for row in tbl.rows:
+            for cell in row.cells:
+                for p in cell.paragraphs:
+                    _docx_replace_paragraph(p, mapping)
+                if cell.tables:
+                    _docx_iter_tables(cell.tables, mapping)
+
+
+def _fill_docx(raw: bytes, mapping: dict) -> bytes:
+    """Sostituisce i {segnaposto} in un .docx mantenendo l'impaginazione originale."""
+    import io
+    from docx import Document
+    doc = Document(io.BytesIO(raw))
+    for p in doc.paragraphs:
+        _docx_replace_paragraph(p, mapping)
+    _docx_iter_tables(doc.tables, mapping)
+    for sec in doc.sections:
+        for hf in (sec.header, sec.footer, sec.first_page_header,
+                   sec.first_page_footer, sec.even_page_header, sec.even_page_footer):
+            try:
+                for p in hf.paragraphs:
+                    _docx_replace_paragraph(p, mapping)
+                _docx_iter_tables(hf.tables, mapping)
+            except Exception:
+                pass
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()
+
+
+def _docx_to_pdf(docx_bytes: bytes) -> bytes:
+    """Converte un .docx in PDF mantenendo il layout (LibreOffice headless)."""
+    import tempfile
+    import subprocess
+    import os as _os
+    import pathlib
+    with tempfile.TemporaryDirectory() as d:
+        src = _os.path.join(d, "doc.docx")
+        pathlib.Path(src).write_bytes(docx_bytes)
+        env = {**_os.environ, "HOME": d}
+        try:
+            subprocess.run(
+                ["soffice", "--headless", "--nologo", "--nofirststartwizard",
+                 "--convert-to", "pdf", "--outdir", d, src],
+                check=True, timeout=90, env=env,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception as e:  # noqa
+            raise HTTPException(500, f"Conversione Word→PDF non riuscita: {str(e)[:120]}")
+        out = _os.path.join(d, "doc.pdf")
+        if not _os.path.exists(out):
+            raise HTTPException(500, "Conversione Word→PDF non riuscita")
+        return pathlib.Path(out).read_bytes()
+
+
+@router.post("/librerie/modelli/importa-word-fedele")
+async def importa_word_fedele(
+    file: UploadFile = File(...),
+    nome: str = Form(...),
+    categoria: Optional[str] = Form(None),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Carica un .docx che resta IDENTICO (layout, font, tabelle, logo). I
+    {segnaposto} inseriti nel testo vengono compilati in fase di stampa."""
+    import uuid as _uuid
+    import os as _os
+    import storage as obj_storage
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".docx"):
+        raise HTTPException(400, "Carica un file Word .docx")
+    raw = await file.read()
+    testo = _estrai_testo_docx(raw)
+    placeholders = sorted(set(_PLACEHOLDER_RE.findall(testo)))
+    mid = str(_uuid.uuid4())
+    path = f"{_os.environ.get('APP_NAME', 'assicura')}/modelli_word/{mid}.docx"
+    obj_storage.put_object(
+        path, raw,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    doc = TemplateModello(
+        tipo="word", nome=nome.strip(), categoria=categoria, corpo="",
+        placeholders=placeholders, richiede_firma=("firma" in placeholders),
+    ).model_dump()
+    doc["id"] = mid
+    doc["word_fedele"] = True
+    doc["word_storage_path"] = path
+    doc["word_filename"] = file.filename
+    await db.template_modelli.insert_one(doc)
+    doc.pop("_id", None)
+    await log_attivita(user, "importa_word_fedele", "modello", mid, nome)
+    return doc
+
+
+@router.post("/librerie/modelli/{mid}/genera-fedele")
+async def genera_word_fedele(
+    mid: str, body: GeneraDocBody,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Compila un modello 'Word fedele' coi dati reali mantenendo il layout.
+    formato=docx → scarica Word; formato=pdf → PDF; invia_firma → firma Yousign."""
+    from fastapi.responses import Response
+    import storage as obj_storage
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    if not m.get("word_fedele") or not m.get("word_storage_path"):
+        raise HTTPException(400, "Questo modello non è un Word fedele")
+    raw, _ct = obj_storage.get_object(m["word_storage_path"])
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id)
+    richiede_firma = bool(m.get("richiede_firma")) or ("firma" in (m.get("placeholders") or []))
+    fai_firma = bool(body.invia_firma and richiede_firma)
+    mapping = {k: v for k, v in ctx.items() if not k.startswith("_")}
+    # Ogni segnaposto conosciuto senza valore → stringa vuota (niente {token} grezzi in stampa)
+    for _k in _PLACEHOLDER_DISPONIBILI:
+        mapping.setdefault(_k, "")
+    mapping["logo"] = ""
+    mapping["firma_operatore"] = "______________________________"
+    if fai_firma:
+        # mantiene i marcatori {firma}/{data_firma} per il posizionamento nel PDF
+        mapping.pop("firma", None)
+        mapping.pop("data_firma", None)
+    else:
+        mapping["firma"] = "______________________________"
+        mapping["data_firma"] = "Data: ______________"
+    filled_docx = _fill_docx(raw, mapping)
+    fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
+
+    if body.formato == "docx" and not fai_firma:
+        return Response(
+            filled_docx,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f"attachment; filename={fname}.docx"})
+
+    pdf_bytes = _docx_to_pdf(filled_docx)
+
+    if fai_firma:
+        import uuid as _uuid
+        import os as _os
+        import fitz  # pymupdf
+        from routes.firma_modelli import _invia_yousign
+        doc_f = fitz.open(stream=pdf_bytes, filetype="pdf")
+        firma_fields, data_fields = [], []
+        for page in doc_f:
+            for r in page.search_for("{firma}"):
+                page.add_redact_annot(r, text="", fill=(1, 1, 1))
+                firma_fields.append({"page": page.number, "x": round(r.x0), "y": round(r.y0),
+                                     "width": max(120, round(r.width)), "height": max(40, round(r.height * 2.2))})
+            for r in page.search_for("{data_firma}"):
+                page.add_redact_annot(r, text="", fill=(1, 1, 1))
+                data_fields.append({"page": page.number, "x": round(r.x0), "y": round(r.y0),
+                                    "width": max(90, round(r.width)), "height": max(24, round(r.height * 1.6))})
+            page.apply_redactions()
+        pdf_bytes = doc_f.tobytes()
+        doc_f.close()
+        if not firma_fields:
+            raise HTTPException(422, "Nessun segnaposto {firma} trovato nel Word")
+        cliente_email = ctx.get("cliente_email") if ctx.get("cliente_email") not in (None, "-", "") else ""
+        valori = {"nome_cliente": ctx.get("cliente_nome") or "Cliente", "email": cliente_email}
+        body_y = {"email_firmatario": body.email_firmatario,
+                  "auth_mode": body.auth_mode or "otp_email", "invia_firma": True}
+        signing = await _invia_yousign(db, {"nome": m.get("nome")}, pdf_bytes, firma_fields, valori, body_y, data_fields=data_fields)
+        fr = (signing or {}).get("firma") or {}
+        if not fr.get("ok"):
+            raise HTTPException(400, f"Invio a firma non riuscito: {fr.get('error') or 'errore sconosciuto'}")
+        aid = str(_uuid.uuid4())
+        path = f"{_os.environ.get('APP_NAME', 'assicura')}/documenti_firma/{aid}.pdf"
+        obj_storage.put_object(path, pdf_bytes, "application/pdf")
+        nome_file = f"{m.get('nome') or 'documento'} - {valori['nome_cliente']}.pdf"
+        await db.allegati.insert_one({
+            "id": aid, "entita_tipo": "polizza" if body.polizza_id else "anagrafica",
+            "entita_id": body.polizza_id or body.cliente_id, "nome_file": nome_file,
+            "storage_path": path, "content_type": "application/pdf", "size": len(pdf_bytes),
+            "categoria": "documento_firma", "visibile_cliente": True,
+            "descrizione": f"Generato da Word fedele {m.get('nome')}",
+            "autore_id": user.get("id"), "created_at": _now_iso(), "updated_at": _now_iso(),
+        })
+        await log_attivita(user, "genera_firma_word", "modello", mid, nome_file)
+        return {"ok": True, "allegato_id": aid, "nome_file": nome_file, "firma_presente": True,
+                "signing_url": fr.get("signing_url"), "request_id": fr.get("request_id"),
+                "status": fr.get("status"), "firma": fr}
+
+    return Response(pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={fname}.pdf"})
+
+
+
 class InviaWaModelloBody(BaseModel):
     cliente_id: Optional[str] = None
     numero: Optional[str] = None
