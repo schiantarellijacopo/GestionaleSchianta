@@ -155,81 +155,144 @@ async def create_modello(
     return doc
 
 
-_PLACEHOLDER_DISPONIBILI = [
-    "azienda_nome", "azienda_indirizzo", "azienda_telefono", "azienda_email", "data_oggi",
-    "numero_polizza", "ramo", "prodotto", "stato_polizza", "scadenza", "data_scadenza",
-    "effetto", "data_effetto", "premio", "premio_lordo", "importo", "compagnia", "compagnia_nome",
-    "cliente", "cliente_nome", "cliente_cognome", "cliente_indirizzo", "cliente_comune",
-    "cliente_cap", "cliente_provincia", "cliente_cf", "cliente_codice_fiscale",
-    "cliente_partita_iva", "cliente_email", "cliente_telefono", "cliente_cellulare",
-    "cliente_data_nascita", "cliente_luogo_nascita", "cliente_professione", "cliente_iban",
-    "numero_sinistro", "data_sinistro", "descrizione_sinistro", "stato_sinistro", "data_denuncia",
-    # Collaboratore/operatore selezionato in fase di generazione
-    "operatore_nome", "operatore_email", "operatore_telefono", "operatore_rui", "operatore_sezione",
-    "agenzia_rui", "azienda_iban", "azienda_pec",
-    # Immagini e firma (gestite come elementi grafici, non testo)
-    "logo", "firma_operatore", "firma", "data_firma",
-]
-
-
 # Catalogo segnaposto raggruppato per la sezione "Segnaposto" (Librerie).
 # Ogni voce: (chiave, etichetta leggibile). I gruppi sono mostrati in ordine.
+# Fonte unica di verità: popolata da build_context() con i dati reali di
+# agenzia + anagrafica + polizza + titolo + sinistro + compagnia + collaboratore.
 _PLACEHOLDER_CATALOGO = [
     ("Agenzia", [
         ("azienda_nome", "Ragione sociale agenzia"),
+        ("azienda_forma_giuridica", "Forma giuridica"),
+        ("azienda_partita_iva", "Partita IVA agenzia"),
+        ("azienda_codice_fiscale", "Codice fiscale agenzia"),
+        ("agenzia_rui", "N. iscrizione RUI agenzia"),
+        ("agenzia_rui_sezione", "Sezione RUI agenzia"),
+        ("agenzia_data_iscrizione_rui", "Data iscrizione RUI"),
         ("azienda_indirizzo", "Indirizzo agenzia"),
+        ("azienda_comune", "Comune agenzia"),
+        ("azienda_provincia", "Provincia agenzia"),
+        ("azienda_cap", "CAP agenzia"),
+        ("azienda_nazione", "Nazione agenzia"),
         ("azienda_telefono", "Telefono agenzia"),
+        ("azienda_fax", "Fax agenzia"),
         ("azienda_email", "Email agenzia"),
         ("azienda_pec", "PEC agenzia"),
+        ("azienda_sito_web", "Sito web agenzia"),
         ("azienda_iban", "IBAN agenzia"),
-        ("agenzia_rui", "N. iscrizione RUI agenzia"),
+        ("azienda_banca", "Banca agenzia"),
+        ("azienda_capitale_sociale", "Capitale sociale"),
+        ("azienda_rea", "N. REA"),
         ("data_oggi", "Data di oggi"),
+    ]),
+    ("Anagrafica / Cliente / Contraente", [
+        ("cliente", "Cliente (nome completo o ragione sociale)"),
+        ("cliente_nome", "Nome"),
+        ("cliente_cognome", "Cognome"),
+        ("cliente_ragione_sociale", "Ragione sociale"),
+        ("cliente_tipo", "Tipo (persona fisica/giuridica)"),
+        ("cliente_indirizzo", "Indirizzo completo"),
+        ("cliente_via", "Via/indirizzo"),
+        ("cliente_comune", "Comune"),
+        ("cliente_cap", "CAP"),
+        ("cliente_provincia", "Provincia"),
+        ("cliente_nazione", "Nazione"),
+        ("cliente_cf", "Codice fiscale"),
+        ("cliente_codice_fiscale", "Codice fiscale (alt.)"),
+        ("cliente_partita_iva", "Partita IVA"),
+        ("cliente_email", "Email"),
+        ("cliente_pec", "PEC"),
+        ("cliente_telefono", "Telefono"),
+        ("cliente_cellulare", "Cellulare"),
+        ("cliente_data_nascita", "Data di nascita"),
+        ("cliente_luogo_nascita", "Luogo di nascita"),
+        ("cliente_provincia_nascita", "Provincia di nascita"),
+        ("cliente_sesso", "Sesso"),
+        ("cliente_stato_civile", "Stato civile"),
+        ("cliente_titolo_studio", "Titolo di studio"),
+        ("cliente_professione", "Professione"),
+        ("cliente_iban", "IBAN cliente"),
+        ("cliente_amministratore", "Legale rappresentante / amministratore"),
     ]),
     ("Polizza", [
         ("numero_polizza", "Numero polizza"),
         ("ramo", "Ramo"),
         ("prodotto", "Prodotto"),
         ("stato_polizza", "Stato polizza"),
-        ("compagnia", "Compagnia"),
-        ("compagnia_nome", "Compagnia (nome esteso)"),
+        ("frazionamento", "Frazionamento"),
         ("effetto", "Data effetto"),
         ("data_effetto", "Data effetto (alt.)"),
         ("scadenza", "Data scadenza"),
         ("data_scadenza", "Data scadenza (alt.)"),
-        ("premio", "Premio"),
+        ("premio", "Premio (lordo)"),
         ("premio_lordo", "Premio lordo"),
-        ("importo", "Importo"),
+        ("premio_netto", "Premio netto"),
+        ("premio_imposte", "Imposte"),
+        ("premio_tasse", "Tasse"),
+        ("premio_ssn", "Contributo SSN"),
+        ("premio_accessori", "Accessori"),
+        ("provvigioni_polizza", "Provvigioni polizza"),
+        ("importo", "Importo (premio lordo)"),
+        ("mandato", "Mandato"),
+        ("targa", "Targa veicolo"),
+        ("veicolo_marca", "Veicolo - marca"),
+        ("veicolo_modello", "Veicolo - modello"),
+        ("veicolo_tipo", "Veicolo - tipo"),
+        ("veicolo_immatricolazione", "Veicolo - immatricolazione"),
+        ("massimali", "Massimali"),
+        ("franchigia", "Franchigia"),
+        ("capitale_assicurato", "Capitale assicurato"),
+        ("oggetto_assicurato", "Oggetto assicurato"),
     ]),
-    ("Cliente / Contraente", [
-        ("cliente", "Cliente (nome completo o ragione sociale)"),
-        ("cliente_nome", "Nome"),
-        ("cliente_cognome", "Cognome"),
-        ("cliente_indirizzo", "Indirizzo"),
-        ("cliente_comune", "Comune"),
-        ("cliente_cap", "CAP"),
-        ("cliente_provincia", "Provincia"),
-        ("cliente_cf", "Codice fiscale"),
-        ("cliente_codice_fiscale", "Codice fiscale (alt.)"),
-        ("cliente_partita_iva", "Partita IVA"),
-        ("cliente_email", "Email"),
-        ("cliente_telefono", "Telefono"),
-        ("cliente_cellulare", "Cellulare"),
-        ("cliente_data_nascita", "Data di nascita"),
-        ("cliente_luogo_nascita", "Luogo di nascita"),
-        ("cliente_professione", "Professione"),
-        ("cliente_iban", "IBAN cliente"),
+    ("Titolo / Quietanza", [
+        ("numero_titolo", "Numero titolo"),
+        ("titolo_tipo", "Tipo titolo"),
+        ("titolo_effetto", "Data effetto titolo"),
+        ("titolo_scadenza", "Data scadenza titolo"),
+        ("titolo_stato", "Stato titolo"),
+        ("titolo_importo_lordo", "Importo lordo titolo"),
+        ("titolo_importo_netto", "Importo netto titolo"),
+        ("titolo_imposte", "Imposte titolo"),
+        ("titolo_ssn", "SSN titolo"),
+        ("titolo_accessori", "Accessori titolo"),
+        ("titolo_provvigioni", "Provvigioni titolo"),
+        ("titolo_descrizione", "Descrizione titolo"),
+        ("titolo_data_incasso", "Data incasso"),
+        ("titolo_importo_pagato", "Importo pagato"),
+        ("titolo_sconto", "Sconto applicato"),
+        ("titolo_mezzo_pagamento", "Mezzo di pagamento"),
     ]),
     ("Sinistro", [
         ("numero_sinistro", "Numero sinistro"),
-        ("data_sinistro", "Data sinistro"),
-        ("descrizione_sinistro", "Descrizione sinistro"),
-        ("stato_sinistro", "Stato sinistro"),
+        ("numero_sinistro_interno", "Numero sinistro interno"),
+        ("data_sinistro", "Data sinistro (avvenimento)"),
         ("data_denuncia", "Data denuncia"),
+        ("data_apertura_sinistro", "Data apertura"),
+        ("anno_sinistro", "Anno sinistro"),
+        ("tipologia_sinistro", "Tipologia sinistro"),
+        ("luogo_sinistro", "Luogo sinistro"),
+        ("ramo_sinistro", "Ramo sinistro"),
+        ("stato_sinistro", "Stato sinistro"),
+        ("descrizione_sinistro", "Descrizione sinistro"),
+        ("riserva_sinistro", "Riserva"),
+        ("liquidazione_sinistro", "Liquidazione"),
+        ("data_liquidazione_sinistro", "Data liquidazione"),
+    ]),
+    ("Compagnia", [
+        ("compagnia", "Compagnia (nome)"),
+        ("compagnia_nome", "Compagnia (nome esteso)"),
+        ("compagnia_codice", "Codice compagnia"),
+        ("compagnia_email", "Email compagnia"),
+        ("compagnia_telefono", "Telefono compagnia"),
+        ("compagnia_sito_web", "Sito web compagnia"),
+        ("compagnia_referente", "Referente compagnia"),
     ]),
     ("Collaboratore / Operatore", [
         ("operatore_nome", "Nome collaboratore"),
         ("operatore_email", "Email collaboratore"),
         ("operatore_telefono", "Telefono collaboratore"),
+        ("operatore_codice_fiscale", "Codice fiscale collaboratore"),
+        ("operatore_partita_iva", "Partita IVA collaboratore"),
+        ("operatore_iban", "IBAN collaboratore"),
         ("operatore_rui", "N. RUI collaboratore"),
         ("operatore_sezione", "Sezione RUI collaboratore"),
     ]),
@@ -240,6 +303,10 @@ _PLACEHOLDER_CATALOGO = [
         ("data_firma", "Data della firma del cliente"),
     ]),
 ]
+
+# Elenco piatto di tutte le chiavi (derivato dal catalogo) — usato dall'AI e
+# per azzerare i segnaposto non valorizzati in fase di stampa.
+_PLACEHOLDER_DISPONIBILI = [k for _grp, _voci in _PLACEHOLDER_CATALOGO for k, _lbl in _voci]
 
 
 
@@ -617,63 +684,162 @@ async def _load_logo_bytes(az: dict) -> Optional[bytes]:
 async def build_context(cliente_id: Optional[str] = None,
                          polizza_id: Optional[str] = None,
                          extra: Optional[dict] = None,
-                         operatore_id: Optional[str] = None) -> dict:
-    """Contesto placeholder standard: azienda + cliente + polizza + operatore."""
+                         operatore_id: Optional[str] = None,
+                         titolo_id: Optional[str] = None,
+                         sinistro_id: Optional[str] = None) -> dict:
+    """Contesto placeholder standard: agenzia + cliente + polizza + titolo +
+    sinistro + compagnia + collaboratore. Risolve a cascata le entità mancanti
+    (es. da titolo/sinistro ricava polizza e cliente)."""
     from datetime import date
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     ctx: dict = {
         "azienda_nome": az.get("ragione_sociale") or az.get("nome") or "",
+        "azienda_forma_giuridica": az.get("forma_giuridica") or "",
+        "azienda_partita_iva": az.get("partita_iva") or "",
+        "azienda_codice_fiscale": az.get("codice_fiscale") or "",
+        "agenzia_rui": az.get("rui") or "",
+        "agenzia_rui_sezione": az.get("rui_sezione") or "",
+        "agenzia_data_iscrizione_rui": _fmt_date_doc(az.get("data_iscrizione_rui")) if az.get("data_iscrizione_rui") else "",
         "azienda_indirizzo": az.get("indirizzo") or "",
+        "azienda_comune": az.get("comune") or "",
+        "azienda_provincia": az.get("provincia") or "",
+        "azienda_cap": az.get("cap") or "",
+        "azienda_nazione": az.get("nazione") or "",
         "azienda_telefono": az.get("telefono") or "",
+        "azienda_fax": az.get("fax") or "",
         "azienda_email": az.get("email") or "",
         "azienda_pec": az.get("pec") or "",
+        "azienda_sito_web": az.get("sito_web") or "",
         "azienda_iban": az.get("iban") or "",
-        "agenzia_rui": az.get("rui") or "",
+        "azienda_banca": az.get("banca") or "",
+        "azienda_capitale_sociale": az.get("capitale_sociale") or "",
+        "azienda_rea": az.get("rea") or "",
         "data_oggi": date.today().strftime("%d/%m/%Y"),
     }
+    # Risoluzione a cascata: sinistro → polizza/cliente; titolo → polizza → cliente
+    sin = None
+    if sinistro_id:
+        sin = await db.sinistri.find_one({"id": sinistro_id}, {"_id": 0})
+        if sin:
+            polizza_id = polizza_id or sin.get("polizza_id")
+            cliente_id = cliente_id or sin.get("contraente_id")
+    tit = None
+    if titolo_id:
+        tit = await db.titoli.find_one({"id": titolo_id}, {"_id": 0})
+        if tit:
+            polizza_id = polizza_id or tit.get("polizza_id")
     p = None
     if polizza_id:
         p = await db.polizze.find_one({"id": polizza_id}, {"_id": 0})
     if p:
-        comp = await db.compagnie.find_one({"id": p.get("compagnia_id")}, {"_id": 0, "nome": 1}) or {}
+        comp = await db.compagnie.find_one({"id": p.get("compagnia_id")}, {"_id": 0}) or {}
+        comp_nome = comp.get("ragione_sociale") or comp.get("nome") or "-"
         ctx.update({
             "numero_polizza": p.get("numero_polizza") or "-",
             "ramo": p.get("ramo") or "-",
             "prodotto": p.get("prodotto") or "-",
             "stato_polizza": p.get("stato") or "-",
+            "frazionamento": p.get("frazionamento") or "-",
             "scadenza": _fmt_date_doc(p.get("scadenza")),
             "data_scadenza": _fmt_date_doc(p.get("scadenza")),
             "effetto": _fmt_date_doc(p.get("effetto")),
             "data_effetto": _fmt_date_doc(p.get("effetto")),
             "premio": _fmt_eur_doc(p.get("premio_lordo")),
             "premio_lordo": _fmt_eur_doc(p.get("premio_lordo")),
+            "premio_netto": _fmt_eur_doc(p.get("premio_netto")),
+            "premio_imposte": _fmt_eur_doc(p.get("premio_imposte")),
+            "premio_tasse": _fmt_eur_doc(p.get("premio_tasse")),
+            "premio_ssn": _fmt_eur_doc(p.get("premio_ssn")),
+            "premio_accessori": _fmt_eur_doc(p.get("premio_accessori")),
+            "provvigioni_polizza": _fmt_eur_doc(p.get("provvigioni")),
             "importo": _fmt_eur_doc(p.get("premio_lordo")),
-            "compagnia": comp.get("nome") or "-",
-            "compagnia_nome": comp.get("nome") or "-",
+            "mandato": p.get("mandato") or "-",
+            "targa": p.get("targa") or "-",
+            "veicolo_marca": p.get("veicolo_marca") or "-",
+            "veicolo_modello": p.get("veicolo_modello") or "-",
+            "veicolo_tipo": p.get("veicolo_tipo") or "-",
+            "veicolo_immatricolazione": _fmt_date_doc(p.get("veicolo_data_immatricolazione")) if p.get("veicolo_data_immatricolazione") else "-",
+            "massimali": p.get("massimali") or "-",
+            "franchigia": _fmt_eur_doc(p.get("franchigia")),
+            "capitale_assicurato": _fmt_eur_doc(p.get("capitale_assicurato")),
+            "oggetto_assicurato": p.get("oggetto_assicurato") or p.get("assicurato_oggetto_nome") or "-",
+            "compagnia": comp_nome,
+            "compagnia_nome": comp_nome,
+            "compagnia_codice": comp.get("codice") or "-",
+            "compagnia_email": comp.get("email") or "-",
+            "compagnia_telefono": comp.get("telefono") or "-",
+            "compagnia_sito_web": comp.get("sito_web") or "-",
+            "compagnia_referente": comp.get("referente") or "-",
         })
         cliente_id = cliente_id or p.get("contraente_id")
+    if tit:
+        ctx.update({
+            "numero_titolo": tit.get("numero_titolo") or "-",
+            "titolo_tipo": tit.get("tipo") or "-",
+            "titolo_effetto": _fmt_date_doc(tit.get("effetto")),
+            "titolo_scadenza": _fmt_date_doc(tit.get("scadenza")),
+            "titolo_stato": tit.get("stato") or "-",
+            "titolo_importo_lordo": _fmt_eur_doc(tit.get("importo_lordo")),
+            "titolo_importo_netto": _fmt_eur_doc(tit.get("importo_netto")),
+            "titolo_imposte": _fmt_eur_doc(tit.get("imposte")),
+            "titolo_ssn": _fmt_eur_doc(tit.get("ssn")),
+            "titolo_accessori": _fmt_eur_doc(tit.get("accessori")),
+            "titolo_provvigioni": _fmt_eur_doc(tit.get("provvigioni")),
+            "titolo_descrizione": tit.get("descrizione") or "-",
+            "titolo_data_incasso": _fmt_date_doc(tit.get("data_incasso")) if tit.get("data_incasso") else "-",
+            "titolo_importo_pagato": _fmt_eur_doc(tit.get("importo_pagato")) if tit.get("importo_pagato") is not None else "-",
+            "titolo_sconto": _fmt_eur_doc(tit.get("sconto_applicato")),
+            "titolo_mezzo_pagamento": tit.get("mezzo_pagamento") or "-",
+        })
+    if sin:
+        ctx.update({
+            "numero_sinistro": sin.get("numero_sinistro") or "-",
+            "numero_sinistro_interno": sin.get("numero_interno") or "-",
+            "data_sinistro": _fmt_date_doc(sin.get("data_avvenimento")) if sin.get("data_avvenimento") else "-",
+            "data_denuncia": _fmt_date_doc(sin.get("data_denuncia")) if sin.get("data_denuncia") else "-",
+            "data_apertura_sinistro": _fmt_date_doc(sin.get("data_apertura")) if sin.get("data_apertura") else "-",
+            "anno_sinistro": str(sin.get("anno") or "-"),
+            "tipologia_sinistro": sin.get("tipologia_sinistro") or "-",
+            "luogo_sinistro": sin.get("luogo") or "-",
+            "ramo_sinistro": sin.get("ramo") or "-",
+            "stato_sinistro": sin.get("stato") or "-",
+            "descrizione_sinistro": sin.get("descrizione") or "-",
+            "riserva_sinistro": _fmt_eur_doc(sin.get("riserva")),
+            "liquidazione_sinistro": _fmt_eur_doc(sin.get("liquidazione")),
+            "data_liquidazione_sinistro": _fmt_date_doc(sin.get("data_liquidazione")) if sin.get("data_liquidazione") else "-",
+        })
     if cliente_id:
         a = await db.anagrafiche.find_one({"id": cliente_id}, {"_id": 0})
         if a:
             nome = a.get("ragione_sociale") or f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip()
-            indirizzo = ", ".join(x for x in [a.get("indirizzo"), a.get("cap"), a.get("citta")] if x)
+            indirizzo = ", ".join(x for x in [a.get("indirizzo"), a.get("cap"), a.get("citta") or a.get("comune")] if x)
             ctx.update({
                 "cliente": nome, "cliente_nome": nome,
                 "cliente_cognome": a.get("cognome") or "",
+                "cliente_ragione_sociale": a.get("ragione_sociale") or nome,
+                "cliente_tipo": "Persona giuridica" if a.get("tipo") == "persona_giuridica" else "Persona fisica",
                 "cliente_indirizzo": indirizzo,
-                "cliente_comune": a.get("citta") or "-",
+                "cliente_via": a.get("indirizzo") or "-",
+                "cliente_comune": a.get("comune") or a.get("citta") or "-",
                 "cliente_cap": a.get("cap") or "-",
                 "cliente_provincia": a.get("provincia") or "-",
+                "cliente_nazione": a.get("nazione") or "-",
                 "cliente_cf": a.get("codice_fiscale") or a.get("partita_iva") or "-",
                 "cliente_codice_fiscale": a.get("codice_fiscale") or "-",
                 "cliente_partita_iva": a.get("partita_iva") or "-",
                 "cliente_email": a.get("email") or "-",
+                "cliente_pec": a.get("pec") or "-",
                 "cliente_telefono": a.get("telefono") or "-",
                 "cliente_cellulare": a.get("cellulare") or a.get("telefono") or "-",
                 "cliente_data_nascita": _fmt_date_doc(a.get("data_nascita")),
-                "cliente_luogo_nascita": a.get("luogo_nascita") or "-",
+                "cliente_luogo_nascita": a.get("comune_nascita") or a.get("luogo_nascita") or "-",
+                "cliente_provincia_nascita": a.get("provincia_nascita") or "-",
+                "cliente_sesso": a.get("sesso") or "-",
+                "cliente_stato_civile": a.get("stato_civile") or "-",
+                "cliente_titolo_studio": a.get("titolo_studio") or "-",
                 "cliente_professione": a.get("professione") or a.get("attivita") or "-",
                 "cliente_iban": a.get("iban") or "-",
+                "cliente_amministratore": a.get("amministratore") or "-",
             })
     if operatore_id:
         u = await db.users.find_one({"id": operatore_id}, {"_id": 0}) or {}
@@ -682,7 +848,10 @@ async def build_context(cliente_id: Optional[str] = None,
                 "operatore_nome": u.get("name") or u.get("nome") or "",
                 "operatore_email": u.get("email") or "",
                 "operatore_telefono": u.get("telefono") or "",
-                "operatore_rui": u.get("rui") or az.get("rui") or "",
+                "operatore_codice_fiscale": u.get("codice_fiscale") or "",
+                "operatore_partita_iva": u.get("partita_iva") or "",
+                "operatore_iban": u.get("iban") or "",
+                "operatore_rui": u.get("rui") or u.get("rui_numero_iscrizione") or az.get("rui") or "",
                 "operatore_sezione": u.get("rui_sezione") or az.get("rui_sezione") or "",
             })
             # URL firma collaboratore (interno: usato per inserire l'immagine, non come testo)
@@ -725,6 +894,8 @@ class GeneraDocBody(BaseModel):
     cliente_id: Optional[str] = None
     polizza_id: Optional[str] = None
     operatore_id: Optional[str] = None
+    titolo_id: Optional[str] = None
+    sinistro_id: Optional[str] = None
     extra: dict = {}
     formato: str = "pdf"  # pdf | docx
     invia_firma: bool = False               # invia a firma digitale Yousign
@@ -826,7 +997,8 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Modello non trovato")
-    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id)
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
+                              body.titolo_id, body.sinistro_id)
     titolo = render_text(m.get("oggetto") or m.get("nome") or "Documento", ctx)
     corpo = render_text(m.get("corpo") or "", ctx)
     sezioni = [
@@ -1171,7 +1343,8 @@ async def genera_word_fedele(
     if not m.get("word_fedele") or not m.get("word_storage_path"):
         raise HTTPException(400, "Questo modello non è un Word fedele")
     raw, _ct = obj_storage.get_object(m["word_storage_path"])
-    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id)
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
+                              body.titolo_id, body.sinistro_id)
     richiede_firma = bool(m.get("richiede_firma")) or ("firma" in (m.get("placeholders") or []))
     fai_firma = bool(body.invia_firma and richiede_firma)
     mapping = {k: v for k, v in ctx.items() if not k.startswith("_")}
@@ -1292,9 +1465,11 @@ async def invia_modello_whatsapp(mid: str, body: InviaWaModelloBody,
 # =====================================================================
 
 async def _resolve_contatti(entita_tipo: str, entita_id: str) -> dict:
-    """Risolve cliente_id + polizza_id + contatti per anagrafica/polizza/titolo/sinistro."""
+    """Risolve cliente_id + polizza_id + titolo_id + sinistro_id + contatti per anagrafica/polizza/titolo/sinistro."""
     cliente_id = None
     polizza_id = None
+    titolo_id = None
+    sinistro_id = None
     et = (entita_tipo or "").lower()
     if et in ("anagrafica", "cliente"):
         cliente_id = entita_id
@@ -1303,12 +1478,14 @@ async def _resolve_contatti(entita_tipo: str, entita_id: str) -> dict:
         p = await db.polizze.find_one({"id": entita_id}, {"_id": 0, "contraente_id": 1})
         cliente_id = (p or {}).get("contraente_id")
     elif et == "titolo":
+        titolo_id = entita_id
         t = await db.titoli.find_one({"id": entita_id}, {"_id": 0, "polizza_id": 1})
         polizza_id = (t or {}).get("polizza_id")
         if polizza_id:
             p = await db.polizze.find_one({"id": polizza_id}, {"_id": 0, "contraente_id": 1})
             cliente_id = (p or {}).get("contraente_id")
     elif et == "sinistro":
+        sinistro_id = entita_id
         s = await db.sinistri.find_one(
             {"id": entita_id}, {"_id": 0, "polizza_id": 1, "contraente_id": 1})
         polizza_id = (s or {}).get("polizza_id")
@@ -1323,6 +1500,7 @@ async def _resolve_contatti(entita_tipo: str, entita_id: str) -> dict:
         cellulare = a.get("cellulare") or a.get("telefono") or ""
         nome = a.get("ragione_sociale") or f"{a.get('nome') or ''} {a.get('cognome') or ''}".strip()
     return {"cliente_id": cliente_id, "polizza_id": polizza_id,
+            "titolo_id": titolo_id, "sinistro_id": sinistro_id,
             "email": email, "cellulare": cellulare, "cliente_nome": nome}
 
 
@@ -1348,7 +1526,8 @@ async def comunica_render(body: ComunicaRenderBody, user: dict = Depends(current
         if not m:
             raise HTTPException(404, "Modello non trovato")
         ctx = await build_context(c.get("cliente_id"), c.get("polizza_id"),
-                                  operatore_id=user.get("id"))
+                                  operatore_id=user.get("id"),
+                                  titolo_id=c.get("titolo_id"), sinistro_id=c.get("sinistro_id"))
         out["oggetto"] = render_text(m.get("oggetto") or m.get("nome") or "", ctx)
         out["corpo"] = render_text(m.get("corpo") or "", ctx)
     return out

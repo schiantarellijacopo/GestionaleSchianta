@@ -280,3 +280,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Polizze: export CSV/XLSX e `/stampa/polizze` ora accettano anche `tag` ed `escludi_annullate` (prima ignorati).
 - Verificato via curl: Titoli 45→11 (incassato), 31 (arretrati), range data effetto ok; Polizze 31→26 (escludi_annullate), 22 (stato=attiva).
 - Nota: PDF Titoli mostra `rinnovo` come `quietanza` (coerente con unificazione terminologia).
+
+## 2026-06 — Catalogo segnaposto completo (tutto il programma)
+- `routes/modelli.py`: `_PLACEHOLDER_CATALOGO` esteso da 52 a **126 segnaposto** in 8 gruppi ordinati: Agenzia (22), Anagrafica/Cliente/Contraente (27), Polizza (28), Titolo/Quietanza (16), Sinistro (14), Compagnia (7), Collaboratore/Operatore (8), Grafica e firma (4). `_PLACEHOLDER_DISPONIBILI` ora derivato dal catalogo (nessun duplicato).
+- `build_context()`: nuovi parametri `titolo_id` e `sinistro_id` con risoluzione a cascata (sinistro→polizza/cliente, titolo→polizza→cliente). Popola tutti i nuovi segnaposto: agenzia estesa (forma giuridica, p.iva, cf, rui+sezione+data, comune/prov/cap/nazione, fax, sito, banca, capitale, rea), cliente esteso (pec, sesso, stato civile, titolo studio, tipo, amministratore, prov. nascita), polizza estesa (frazionamento, netto/imposte/ssn/accessori/provvigioni, veicolo, massimali, franchigia, capitale, mandato), titolo completo, sinistro completo, compagnia estesa (codice/email/telefono/sito/referente), operatore esteso (cf/piva/iban).
+- `GeneraDocBody` + endpoint `/genera` e `/genera-fedele`: passano `titolo_id`/`sinistro_id`. `_resolve_contatti` e `/comunica/render` propagano titolo/sinistro.
+- Verificato: endpoint `/api/librerie/placeholders` → totale 126, gruppi corretti, sinistro con numero/data/descrizione ecc.; UI "Segnaposto {…}" renderizza tutti i gruppi ordinati.
