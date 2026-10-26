@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2 } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -5301,6 +5301,199 @@ function SegnapostoSezione({ onInsert = null, compact = false }) {
     );
 }
 
+function TabelleManager() {
+    const [items, setItems] = useState(null);
+    const [editing, setEditing] = useState(null);
+    const load = () => api.get("/librerie/tabelle").then((r) => setItems(r.data || []));
+    useEffect(() => { load(); }, []);
+
+    const elimina = async (t) => {
+        if (!window.confirm(`Eliminare la tabella "${t.nome}"?`)) return;
+        try { await api.delete(`/librerie/tabelle/${t.id}`); toast.success("Tabella eliminata"); load(); }
+        catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const copyToken = (tok) => { navigator.clipboard.writeText(tok); toast.success(`Copiato ${tok}`); };
+
+    if (editing) return <TabellaEditor tabella={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
+
+    return (
+        <div className="space-y-3" data-testid="tabelle-manager">
+            <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-slate-500">Crea tabelle (griglia o checklist) e richiamale nei modelli col loro segnaposto. Le celle possono contenere segnaposto come {"{cliente}"}.</p>
+                <Button onClick={() => setEditing({ tipo: "griglia", mostra_intestazione: true, colonne: ["Colonna 1", "Colonna 2"], righe: [["", ""]], voci: [], prima_colonna: "Voce" })}
+                    className="bg-amber-600 hover:bg-amber-700 h-8 shrink-0" data-testid="tabella-new-btn">
+                    <Plus size={14} className="mr-1" />Nuova tabella
+                </Button>
+            </div>
+            {items === null ? <p className="text-sm text-slate-400">Caricamento…</p> :
+             items.length === 0 ? <p className="text-sm text-slate-400">Nessuna tabella ancora.</p> :
+             <div className="grid gap-2">
+                {items.map((t) => (
+                    <div key={t.id} className="flex items-center gap-3 border rounded-lg p-3 bg-white" data-testid={`tabella-row-${t.slug}`}>
+                        <Table2 size={18} className="text-amber-600 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-800 truncate">{t.nome}</div>
+                            {t.descrizione && <div className="text-xs text-slate-500 truncate">{t.descrizione}</div>}
+                            <button onClick={() => copyToken(t.token)} className="mt-1 inline-flex items-center gap-1 text-xs font-mono bg-slate-100 hover:bg-slate-200 px-2 py-0.5 rounded" data-testid={`tabella-token-${t.slug}`}>
+                                <Copy size={11} /> {t.token}
+                            </button>
+                        </div>
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0">{t.tipo === "checklist" ? "Checklist" : "Griglia"}</span>
+                        <Button size="sm" variant="outline" className="h-8" onClick={() => setEditing(t)} data-testid={`tabella-edit-${t.slug}`}><Pencil size={13} /></Button>
+                        <Button size="sm" variant="outline" className="h-8 text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => elimina(t)} data-testid={`tabella-del-${t.slug}`}><Trash2 size={13} /></Button>
+                    </div>
+                ))}
+             </div>}
+        </div>
+    );
+}
+
+function TabellaEditor({ tabella, onClose, onSaved }) {
+    const isNew = !tabella.id;
+    const [nome, setNome] = useState(tabella.nome || "");
+    const [descrizione, setDescrizione] = useState(tabella.descrizione || "");
+    const [tipo, setTipo] = useState(tabella.tipo || "griglia");
+    const [mostraInt, setMostraInt] = useState(tabella.mostra_intestazione !== false);
+    const [colonne, setColonne] = useState(tabella.colonne?.length ? [...tabella.colonne] : (tabella.tipo === "checklist" ? ["Richiesta", "Proposta", "Confermata"] : ["Colonna 1", "Colonna 2"]));
+    const [righe, setRighe] = useState(tabella.righe?.length ? tabella.righe.map((r) => [...r]) : [["", ""]]);
+    const [primaColonna, setPrimaColonna] = useState(tabella.prima_colonna || "Voce");
+    const [voci, setVoci] = useState(tabella.voci?.length ? tabella.voci.map((v) => ({ testo: v.testo || "", spunte: [...(v.spunte || [])] })) : [{ testo: "", spunte: [] }]);
+    const [busy, setBusy] = useState(false);
+
+    // Griglia helpers
+    const addCol = () => { setColonne([...colonne, `Colonna ${colonne.length + 1}`]); setRighe(righe.map((r) => [...r, ""])); };
+    const removeCol = (i) => { if (colonne.length <= 1) return; setColonne(colonne.filter((_, x) => x !== i)); setRighe(righe.map((r) => r.filter((_, x) => x !== i))); };
+    const setColName = (i, val) => setColonne(colonne.map((c, x) => (x === i ? val : c)));
+    const addRow = () => setRighe([...righe, colonne.map(() => "")]);
+    const removeRow = (i) => setRighe(righe.filter((_, x) => x !== i));
+    const setCell = (ri, ci, val) => setRighe(righe.map((r, x) => (x === ri ? r.map((c, y) => (y === ci ? val : c)) : r)));
+
+    // Checklist helpers
+    const addColCk = () => { setColonne([...colonne, "Colonna"]); setVoci(voci.map((v) => ({ ...v, spunte: [...v.spunte, false] }))); };
+    const removeColCk = (i) => { setColonne(colonne.filter((_, x) => x !== i)); setVoci(voci.map((v) => ({ ...v, spunte: v.spunte.filter((_, x) => x !== i) }))); };
+    const setColNameCk = (i, val) => setColonne(colonne.map((c, x) => (x === i ? val : c)));
+    const addVoce = () => setVoci([...voci, { testo: "", spunte: colonne.map(() => false) }]);
+    const removeVoce = (i) => setVoci(voci.filter((_, x) => x !== i));
+    const setVoceTesto = (i, val) => setVoci(voci.map((v, x) => (x === i ? { ...v, testo: val } : v)));
+    const toggleSpunta = (vi, ci) => setVoci(voci.map((v, x) => {
+        if (x !== vi) return v;
+        const s = [...v.spunte];
+        while (s.length < colonne.length) s.push(false);
+        s[ci] = !s[ci];
+        return { ...v, spunte: s };
+    }));
+
+    const salva = async () => {
+        if (!nome.trim()) { toast.error("Inserisci un nome"); return; }
+        setBusy(true);
+        const payload = {
+            nome: nome.trim(), descrizione: descrizione.trim() || null, tipo, mostra_intestazione: mostraInt,
+            colonne, righe: tipo === "griglia" ? righe : [],
+            prima_colonna: tipo === "checklist" ? primaColonna : null,
+            voci: tipo === "checklist" ? voci : [],
+        };
+        try {
+            if (isNew) await api.post("/librerie/tabelle", payload);
+            else await api.put(`/librerie/tabelle/${tabella.id}`, payload);
+            toast.success("Tabella salvata"); onSaved();
+        } catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
+        finally { setBusy(false); }
+    };
+
+    return (
+        <div className="space-y-4" data-testid="tabella-editor">
+            <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                    <Label className="text-xs">Nome tabella</Label>
+                    <Input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Es. Valutazione del prodotto" data-testid="tabella-nome-input" />
+                </div>
+                <div>
+                    <Label className="text-xs">Descrizione (facoltativa)</Label>
+                    <Input value={descrizione} onChange={(e) => setDescrizione(e.target.value)} data-testid="tabella-descrizione-input" />
+                </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-4">
+                <div className="w-48">
+                    <Label className="text-xs">Tipo</Label>
+                    <Select value={tipo} onValueChange={setTipo}>
+                        <SelectTrigger className="h-9" data-testid="tabella-tipo-select"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="griglia">Griglia libera</SelectItem>
+                            <SelectItem value="checklist">Checklist (colonne da spuntare)</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <label className="flex items-center gap-2 text-sm mt-5 cursor-pointer" data-testid="tabella-intestazione-toggle">
+                    <input type="checkbox" checked={mostraInt} onChange={(e) => setMostraInt(e.target.checked)} className="h-4 w-4" />
+                    Mostra intestazione
+                </label>
+            </div>
+
+            {tipo === "griglia" ? (
+                <div className="border rounded-lg p-3 bg-slate-50 space-y-2 overflow-x-auto">
+                    <div className="flex items-center gap-2">
+                        {colonne.map((c, i) => (
+                            <div key={i} className="flex items-center gap-1">
+                                <Input value={c} onChange={(e) => setColName(i, e.target.value)} className="h-8 w-40 bg-white" placeholder={`Colonna ${i + 1}`} data-testid={`tabella-col-${i}`} />
+                                <button onClick={() => removeCol(i)} className="text-rose-500 hover:text-rose-700" title="Rimuovi colonna"><XCircle size={16} /></button>
+                            </div>
+                        ))}
+                        <Button size="sm" variant="outline" className="h-8" onClick={addCol} data-testid="tabella-add-col"><Plus size={13} className="mr-1" />Colonna</Button>
+                    </div>
+                    {righe.map((r, ri) => (
+                        <div key={ri} className="flex items-center gap-2">
+                            {r.map((c, ci) => (
+                                <Input key={ci} value={c} onChange={(e) => setCell(ri, ci, e.target.value)} className="h-8 w-40 bg-white" data-testid={`tabella-cell-${ri}-${ci}`} />
+                            ))}
+                            <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700" title="Rimuovi riga"><Trash2 size={15} /></button>
+                        </div>
+                    ))}
+                    <Button size="sm" variant="outline" className="h-8" onClick={addRow} data-testid="tabella-add-row"><Plus size={13} className="mr-1" />Riga</Button>
+                </div>
+            ) : (
+                <div className="border rounded-lg p-3 bg-slate-50 space-y-2 overflow-x-auto">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <div>
+                            <Label className="text-[11px] text-slate-500">Etichetta 1ª colonna</Label>
+                            <Input value={primaColonna} onChange={(e) => setPrimaColonna(e.target.value)} className="h-8 w-48 bg-white" data-testid="tabella-prima-colonna" />
+                        </div>
+                        <span className="text-slate-400 mt-5">|</span>
+                        {colonne.map((c, i) => (
+                            <div key={i} className="flex items-end gap-1">
+                                <div>
+                                    <Label className="text-[11px] text-slate-500">Colonna {i + 1}</Label>
+                                    <Input value={c} onChange={(e) => setColNameCk(i, e.target.value)} className="h-8 w-28 bg-white" data-testid={`tabella-ckcol-${i}`} />
+                                </div>
+                                <button onClick={() => removeColCk(i)} className="text-rose-500 hover:text-rose-700 mb-1.5" title="Rimuovi colonna"><XCircle size={15} /></button>
+                            </div>
+                        ))}
+                        <Button size="sm" variant="outline" className="h-8 mt-4" onClick={addColCk} data-testid="tabella-add-ckcol"><Plus size={13} className="mr-1" />Colonna ✓</Button>
+                    </div>
+                    <div className="space-y-1">
+                        {voci.map((v, vi) => (
+                            <div key={vi} className="flex items-center gap-2">
+                                <Input value={v.testo} onChange={(e) => setVoceTesto(vi, e.target.value)} className="h-8 flex-1 min-w-[220px] bg-white" placeholder="Testo della voce" data-testid={`tabella-voce-${vi}`} />
+                                {colonne.map((_, ci) => (
+                                    <label key={ci} className="flex items-center justify-center w-16 shrink-0 cursor-pointer">
+                                        <input type="checkbox" checked={!!v.spunte[ci]} onChange={() => toggleSpunta(vi, ci)} className="h-4 w-4" data-testid={`tabella-spunta-${vi}-${ci}`} />
+                                    </label>
+                                ))}
+                                <button onClick={() => removeVoce(vi)} className="text-rose-500 hover:text-rose-700" title="Rimuovi voce"><Trash2 size={15} /></button>
+                            </div>
+                        ))}
+                    </div>
+                    <Button size="sm" variant="outline" className="h-8" onClick={addVoce} data-testid="tabella-add-voce"><Plus size={13} className="mr-1" />Voce</Button>
+                </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={onClose} data-testid="tabella-cancel-btn">Annulla</Button>
+                <Button onClick={salva} disabled={busy} className="bg-amber-600 hover:bg-amber-700" data-testid="tabella-save-btn">{busy ? "Salvataggio…" : "Salva tabella"}</Button>
+            </div>
+        </div>
+    );
+}
+
 function ModelliSezione() {
     const [items, setItems] = useState(null);
     const [activeTab, setActiveTab] = useState("email");
@@ -5338,6 +5531,7 @@ function ModelliSezione() {
     };
 
     const [showSegnaposto, setShowSegnaposto] = useState(false);
+    const [showTabelle, setShowTabelle] = useState(false);
     const [uploadingPdf, setUploadingPdf] = useState(false);
     const caricaDoc = async (e, endpoint, label) => {
         const f = e.target.files?.[0];
@@ -5443,6 +5637,10 @@ function ModelliSezione() {
                         <Button variant="outline" onClick={() => setShowSegnaposto(true)}
                             className="h-8 border-sky-300 text-sky-700 hover:bg-sky-50" data-testid="modelli-segnaposto-btn">
                             <Braces size={14} className="mr-1" />Segnaposto
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowTabelle(true)}
+                            className="h-8 border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="modelli-tabelle-btn">
+                            <Table2 size={14} className="mr-1" />Tabelle
                         </Button>
                         {(activeTab === "pdf" || activeTab === "word") && (
                             <>
@@ -5561,6 +5759,16 @@ function ModelliSezione() {
                         </DialogTitle>
                     </DialogHeader>
                     <SegnapostoSezione />
+                </DialogContent>
+            </Dialog>
+            <Dialog open={showTabelle} onOpenChange={setShowTabelle}>
+                <DialogContent className="max-w-5xl max-h-[88vh] overflow-y-auto" data-testid="modelli-tabelle-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Table2 size={16} className="text-amber-600" /> Tabelle riutilizzabili
+                        </DialogTitle>
+                    </DialogHeader>
+                    <TabelleManager />
                 </DialogContent>
             </Dialog>
         </Card>

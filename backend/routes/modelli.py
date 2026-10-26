@@ -8,10 +8,12 @@ scadenze, sollecitazioni, lettera abbuono, ecc.) tramite il helper
 from __future__ import annotations
 
 import re
-from typing import Optional
+import uuid
+from datetime import datetime, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from auth import current_user, require_user
 from database import db
@@ -23,6 +25,8 @@ router = APIRouter()
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+# Segnaposto tabella: {tabella:slug}
+_TABELLA_RE = re.compile(r"\{tabella:([a-zA-Z0-9_-]+)\}")
 
 
 class ModelloBody(BaseModel):
@@ -460,7 +464,209 @@ async def lista_placeholders(user: dict = Depends(current_user)) -> dict:
         ]}
         for nome, voci in _PLACEHOLDER_CATALOGO
     ]
+    # Gruppo dinamico: tabelle create dall'utente
+    tab_items = []
+    async for t in db.modelli_tabelle.find({}).sort("nome", 1):
+        slug = t.get("slug")
+        if not slug:
+            continue
+        tab_items.append({
+            "key": f"tabella:{slug}",
+            "label": t.get("nome") or slug,
+            "token": "{tabella:" + slug + "}",
+            "esempio": t.get("descrizione") or "Tabella riutilizzabile",
+        })
+    if tab_items:
+        gruppi.append({"gruppo": "Tabelle", "items": tab_items})
     return {"gruppi": gruppi, "totale": sum(len(g["items"]) for g in gruppi)}
+
+
+# ---------------------------------------------------------------------------
+# Tabelle riutilizzabili (griglia / checklist) — segnaposto {tabella:slug}
+# ---------------------------------------------------------------------------
+class VoceChecklist(BaseModel):
+    testo: str = ""
+    spunte: List[bool] = Field(default_factory=list)
+
+
+class TabellaBody(BaseModel):
+    nome: str
+    descrizione: Optional[str] = None
+    tipo: str = "griglia"  # "griglia" | "checklist"
+    mostra_intestazione: bool = True
+    colonne: List[str] = Field(default_factory=list)
+    # griglia
+    righe: List[List[str]] = Field(default_factory=list)
+    # checklist
+    prima_colonna: Optional[str] = None
+    voci: List[VoceChecklist] = Field(default_factory=list)
+
+
+def _tabella_out(t: dict) -> dict:
+    return {
+        "id": t.get("id"),
+        "slug": t.get("slug"),
+        "nome": t.get("nome"),
+        "descrizione": t.get("descrizione"),
+        "tipo": t.get("tipo") or "griglia",
+        "mostra_intestazione": t.get("mostra_intestazione", True),
+        "colonne": t.get("colonne") or [],
+        "righe": t.get("righe") or [],
+        "prima_colonna": t.get("prima_colonna"),
+        "voci": t.get("voci") or [],
+        "token": "{tabella:" + (t.get("slug") or "") + "}",
+    }
+
+
+async def _slug_unico(base: str, escludi_id: Optional[str] = None) -> str:
+    slug = base
+    i = 2
+    while True:
+        q = {"slug": slug}
+        existing = await db.modelli_tabelle.find_one(q)
+        if not existing or existing.get("id") == escludi_id:
+            return slug
+        slug = f"{base}_{i}"
+        i += 1
+
+
+_TABELLE_DEFAULT = [
+    {
+        "nome": "Dichiarazioni di ricevuta",
+        "descrizione": "Dichiarazioni ex art. 56 Reg. IVASS 40/2018",
+        "tipo": "checklist",
+        "mostra_intestazione": False,
+        "prima_colonna": "Il contraente dichiara",
+        "colonne": ["✔"],
+        "voci": [
+            {"testo": "di aver preso visione e ricevuto l'Allegato 3 – Modulo unico precontrattuale (MUP) per i prodotti assicurativi non d'investimento", "spunte": [True]},
+            {"testo": "di aver ricevuto il questionario delle richieste ed esigenze e la valutazione della coerenza del contratto offerto", "spunte": [True]},
+            {"testo": "di aver ricevuto la proposta assicurativa nonché tutta la documentazione precontrattuale", "spunte": [True]},
+            {"testo": "di aver ricevuto l'informativa sul trattamento dei dati personali (privacy)", "spunte": [True]},
+            {"testo": "di accettare la trasmissione della documentazione precontrattuale e contrattuale in formato elettronico, consapevole di poter modificare la preferenza e richiedere la documentazione su supporto cartaceo o altro supporto durevole", "spunte": [True]},
+            {"testo": "di aver ricevuto il testo contrattuale della polizza/appendice", "spunte": [True]},
+            {"testo": "di autorizzare l'intermediario a conservare presso le proprie strutture copia della documentazione contrattuale firmata", "spunte": [True]},
+        ],
+    },
+    {
+        "nome": "Valutazione del prodotto",
+        "descrizione": "Garanzie richieste / proposte / confermate",
+        "tipo": "checklist",
+        "mostra_intestazione": True,
+        "prima_colonna": "Garanzia",
+        "colonne": ["Richiesta", "Proposta", "Confermata"],
+        "voci": [
+            {"testo": "Responsabilità Civile Auto (RCA)", "spunte": [False, False, False]},
+            {"testo": "Rinuncia alla Rivalsa", "spunte": [False, False, False]},
+            {"testo": "Ricorso Terzi da Incendio", "spunte": [False, False, False]},
+            {"testo": "Cristalli", "spunte": [False, False, False]},
+            {"testo": "Assistenza Stradale", "spunte": [False, False, False]},
+            {"testo": "Incendio", "spunte": [False, False, False]},
+            {"testo": "Furto", "spunte": [False, False, False]},
+            {"testo": "Atti Vandalici / Eventi Sociopolitici", "spunte": [False, False, False]},
+            {"testo": "Eventi Atmosferici", "spunte": [False, False, False]},
+            {"testo": "Kasko / Collisione", "spunte": [False, False, False]},
+            {"testo": "Tutela Legale", "spunte": [False, False, False]},
+            {"testo": "Infortuni del Conducente", "spunte": [False, False, False]},
+        ],
+    },
+    {
+        "nome": "Rapporti con le compagnie",
+        "descrizione": "Imprese di assicurazione e tipologia di rapporto",
+        "tipo": "griglia",
+        "mostra_intestazione": True,
+        "colonne": ["Impresa di assicurazione", "Tipologia di rapporto"],
+        "righe": [
+            ["GENERALI ITALIA S.P.A.", "Mandato diretto con Compagnia di assicurazione"],
+            ["UCA ASSICURAZIONE SPESE LEGALI E PERITALI S.P.A.", "Mandato diretto con Compagnia di assicurazione"],
+        ],
+    },
+]
+
+
+async def _seed_tabelle_default(user: dict) -> None:
+    """Crea le tabelle di partenza se il tenant non ne ha ancora."""
+    from tenant import assign_tenant
+    for d in _TABELLE_DEFAULT:
+        base = _slugify_tabella(d["nome"])
+        slug = await _slug_unico(base)
+        doc = {
+            "id": str(uuid.uuid4()),
+            "slug": slug,
+            "nome": d["nome"],
+            "descrizione": d.get("descrizione"),
+            "tipo": d.get("tipo", "griglia"),
+            "mostra_intestazione": d.get("mostra_intestazione", True),
+            "colonne": d.get("colonne", []),
+            "righe": d.get("righe", []),
+            "prima_colonna": d.get("prima_colonna"),
+            "voci": d.get("voci", []),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        doc = assign_tenant(user, doc)
+        await db.modelli_tabelle.insert_one(doc)
+
+
+@router.get("/librerie/tabelle")
+async def lista_tabelle(user: dict = Depends(current_user)) -> List[dict]:
+    n = await db.modelli_tabelle.count_documents({})
+    if n == 0:
+        await _seed_tabelle_default(user)
+    out = []
+    async for t in db.modelli_tabelle.find({}).sort("nome", 1):
+        out.append(_tabella_out(t))
+    return out
+
+
+@router.post("/librerie/tabelle")
+async def crea_tabella(body: TabellaBody, user: dict = Depends(current_user)) -> dict:
+    from tenant import assign_tenant
+    slug = await _slug_unico(_slugify_tabella(body.nome))
+    doc = {
+        "id": str(uuid.uuid4()),
+        "slug": slug,
+        "nome": body.nome,
+        "descrizione": body.descrizione,
+        "tipo": body.tipo,
+        "mostra_intestazione": body.mostra_intestazione,
+        "colonne": body.colonne,
+        "righe": body.righe,
+        "prima_colonna": body.prima_colonna,
+        "voci": [v.model_dump() for v in body.voci],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    doc = assign_tenant(user, doc)
+    await db.modelli_tabelle.insert_one(doc)
+    return _tabella_out(doc)
+
+
+@router.put("/librerie/tabelle/{tid}")
+async def aggiorna_tabella(tid: str, body: TabellaBody, user: dict = Depends(current_user)) -> dict:
+    t = await db.modelli_tabelle.find_one({"id": tid})
+    if not t:
+        raise HTTPException(404, "Tabella non trovata")
+    upd = {
+        "nome": body.nome,
+        "descrizione": body.descrizione,
+        "tipo": body.tipo,
+        "mostra_intestazione": body.mostra_intestazione,
+        "colonne": body.colonne,
+        "righe": body.righe,
+        "prima_colonna": body.prima_colonna,
+        "voci": [v.model_dump() for v in body.voci],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    await db.modelli_tabelle.update_one({"id": tid}, {"$set": upd})
+    t = await db.modelli_tabelle.find_one({"id": tid})
+    return _tabella_out(t)
+
+
+@router.delete("/librerie/tabelle/{tid}")
+async def elimina_tabella(tid: str, user: dict = Depends(current_user)) -> dict:
+    r = await db.modelli_tabelle.delete_one({"id": tid})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Tabella non trovata")
+    return {"ok": True}
 
 
 def _estrai_testo_pdf(raw: bytes) -> str:
@@ -768,6 +974,132 @@ async def seed_default_models() -> None:
 def render_text(text: str, ctx: dict) -> str:
     """Sostituisce i placeholder {nome} in modo sicuro (mancanti → lasciati)."""
     return _PLACEHOLDER_RE.sub(lambda m: str(ctx.get(m.group(1), m.group(0))), text or "")
+
+
+def _slugify_tabella(nome: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode()
+    s = re.sub(r"[^a-zA-Z0-9]+", "_", s).strip("_").lower()
+    return s[:40] or "tabella"
+
+
+def _tabella_righe_render(tab: dict, ctx: dict):
+    """Risolve una tabella in (headers, rows) con i segnaposto sostituiti.
+
+    headers è ``None`` quando l'intestazione non va mostrata.
+    """
+    tipo = tab.get("tipo") or "griglia"
+    mostra = tab.get("mostra_intestazione", True)
+    if tipo == "checklist":
+        cols = tab.get("colonne") or []
+        prima = tab.get("prima_colonna") or ""
+        headers = ([render_text(prima, ctx)] + [render_text(c, ctx) for c in cols]) if mostra else None
+        rows = []
+        for v in tab.get("voci") or []:
+            testo = render_text(v.get("testo") or "", ctx)
+            spunte = v.get("spunte") or []
+            cells = [testo]
+            for i in range(len(cols)):
+                checked = spunte[i] if i < len(spunte) else False
+                cells.append("X" if checked else "")
+            rows.append(cells)
+        return headers, rows
+    # griglia
+    cols = tab.get("colonne") or []
+    headers = [render_text(c, ctx) for c in cols] if (cols and mostra) else None
+    rows = [[render_text(str(c if c is not None else ""), ctx) for c in row]
+            for row in (tab.get("righe") or [])]
+    return headers, rows
+
+
+async def _load_tabelle_map(slugs) -> dict:
+    """Carica le tabelle (tenant-scoped) indicizzate per slug."""
+    slugs = [s for s in set(slugs) if s]
+    if not slugs:
+        return {}
+    out: dict[str, dict] = {}
+    async for t in db.modelli_tabelle.find({"slug": {"$in": slugs}}):
+        out[t.get("slug")] = t
+    return out
+
+
+def _isolate_tabelle(text: str) -> str:
+    """Mette ogni segnaposto tabella su un paragrafo isolato."""
+    return _TABELLA_RE.sub(lambda m: "\n\n" + m.group(0) + "\n\n", text or "")
+
+
+def _esc_html(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _docx_build_tabella(doc, headers, rows) -> None:
+    """Costruisce e appende una tabella Word (python-docx) al documento."""
+    ncols = len(headers) if headers else (len(rows[0]) if rows else 1)
+    if ncols < 1:
+        ncols = 1
+    table = doc.add_table(rows=0, cols=ncols)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    if headers:
+        cells = table.add_row().cells
+        for i, h in enumerate(headers):
+            if i >= ncols:
+                break
+            cells[i].text = str(h)
+            for p in cells[i].paragraphs:
+                for run in p.runs:
+                    run.bold = True
+    for r in rows:
+        cells = table.add_row().cells
+        for i, c in enumerate(r):
+            if i >= ncols:
+                break
+            cells[i].text = str(c if c is not None else "")
+    doc.add_paragraph("")
+
+
+def _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors):
+    """Costruisce un flowable Table (reportlab) per una tabella riutilizzabile."""
+    from reportlab.lib.styles import ParagraphStyle
+    hstyle = ParagraphStyle("tab_hdr", parent=styles["Normal"],
+                            textColor=rl_colors.white, fontName="Helvetica-Bold", fontSize=9)
+    cstyle = ParagraphStyle("tab_cell", parent=styles["Normal"], fontSize=9, leading=11)
+    checklist = (tab.get("tipo") == "checklist")
+    data = []
+    if headers:
+        data.append([Paragraph(_esc_html(h).replace("\n", "<br/>"), hstyle) for h in headers])
+    for r in rows:
+        data.append([Paragraph(_esc_html(c).replace("\n", "<br/>"), cstyle) for c in r])
+    if not data:
+        return None
+    ncols = len(data[0])
+    usable = 170 * mm
+    if checklist and ncols > 1:
+        first = usable * 0.55
+        rest = (usable - first) / (ncols - 1)
+        colw = [first] + [rest] * (ncols - 1)
+    else:
+        colw = [usable / ncols] * ncols
+    t = Table(data, colWidths=colw, repeatRows=1 if headers else 0)
+    style = [
+        ("GRID", (0, 0), (-1, -1), 0.4, rl_colors.HexColor("#94a3b8")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+    ]
+    if headers:
+        style += [
+            ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1e293b")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f1f5f9")]),
+        ]
+    if checklist and ncols > 1:
+        style += [("ALIGN", (1, 0), (-1, -1), "CENTER")]
+    t.setStyle(TableStyle(style))
+    return t
 
 
 def _fmt_eur_doc(v) -> str:
@@ -1147,6 +1479,14 @@ async def genera_documento(mid: str, body: GeneraDocBody,
          "contenuto": render_text(str(s.get("contenuto") or ""), ctx)}
         for s in (m.get("sezioni") or []) if s.get("attiva", True)
     ]
+    # Tabelle riutilizzabili {tabella:slug}: carica e isola i segnaposto
+    _tab_slugs = _TABELLA_RE.findall(corpo) + [
+        sl for s in sezioni for sl in _TABELLA_RE.findall(s["contenuto"])
+    ]
+    tabelle_map = await _load_tabelle_map(_tab_slugs)
+    corpo = _isolate_tabelle(corpo)
+    for s in sezioni:
+        s["contenuto"] = _isolate_tabelle(s["contenuto"])
     az_nome = ctx.get("azienda_nome") or ""
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
 
@@ -1187,6 +1527,13 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         def _docx_para(testo: str):
             """Aggiunge un paragrafo gestendo i segnaposto immagine/firma."""
             t = testo.strip()
+            mtab = _TABELLA_RE.fullmatch(t)
+            if mtab:
+                tab = tabelle_map.get(mtab.group(1))
+                if tab:
+                    headers, rows = _tabella_righe_render(tab, ctx)
+                    _docx_build_tabella(doc, headers, rows)
+                return
             if t == "{logo}":
                 if logo_bytes:
                     try:
@@ -1263,6 +1610,17 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     def _pdf_para(testo: str):
         """Aggiunge flowable(s) gestendo i segnaposto immagine/firma."""
         t = testo.strip()
+        mtab = _TABELLA_RE.fullmatch(t)
+        if mtab:
+            tab = tabelle_map.get(mtab.group(1))
+            if tab:
+                headers, rows = _tabella_righe_render(tab, ctx)
+                flow = _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors)
+                if flow is not None:
+                    el.append(Spacer(1, 4))
+                    el.append(flow)
+                    el.append(Spacer(1, 8))
+            return
         if t == "{logo}":
             if logo_bytes:
                 try:
@@ -1386,8 +1744,40 @@ def _docx_iter_tables(tables, mapping: dict) -> None:
                     _docx_iter_tables(cell.tables, mapping)
 
 
-def _fill_docx(raw: bytes, mapping: dict) -> bytes:
-    """Sostituisce i {segnaposto} in un .docx mantenendo l'impaginazione originale."""
+def _docx_insert_tabella_before(doc, para, headers, rows) -> None:
+    """Inserisce una vera tabella Word prima del paragrafo ``para``."""
+    ncols = len(headers) if headers else (len(rows[0]) if rows else 1)
+    if ncols < 1:
+        ncols = 1
+    table = doc.add_table(rows=0, cols=ncols)
+    try:
+        table.style = "Table Grid"
+    except Exception:
+        pass
+    if headers:
+        cells = table.add_row().cells
+        for i, h in enumerate(headers):
+            if i >= ncols:
+                break
+            cells[i].text = str(h)
+            for p in cells[i].paragraphs:
+                for run in p.runs:
+                    run.bold = True
+    for r in rows:
+        cells = table.add_row().cells
+        for i, c in enumerate(r):
+            if i >= ncols:
+                break
+            cells[i].text = str(c if c is not None else "")
+    para._p.addprevious(table._tbl)
+
+
+def _fill_docx(raw: bytes, mapping: dict, tabelle_rendered: dict | None = None) -> bytes:
+    """Sostituisce i {segnaposto} in un .docx mantenendo l'impaginazione originale.
+
+    ``tabelle_rendered`` (slug → (headers, rows)) inserisce vere tabelle Word al
+    posto dei segnaposto ``{tabella:slug}``.
+    """
     import io
     from docx import Document
     doc = Document(io.BytesIO(raw))
@@ -1403,6 +1793,22 @@ def _fill_docx(raw: bytes, mapping: dict) -> bytes:
                 _docx_iter_tables(hf.tables, mapping)
             except Exception:
                 pass
+    if tabelle_rendered:
+        for p in list(doc.paragraphs):
+            full = "".join(r.text for r in p.runs)
+            m = _TABELLA_RE.search(full)
+            if not m or m.group(1) not in tabelle_rendered:
+                continue
+            headers, rows = tabelle_rendered[m.group(1)]
+            _docx_insert_tabella_before(doc, p, headers, rows)
+            remaining = _TABELLA_RE.sub("", full)
+            if remaining.strip():
+                if p.runs:
+                    p.runs[0].text = remaining
+                    for r in p.runs[1:]:
+                        r.text = ""
+            else:
+                p._p.getparent().remove(p._p)
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
@@ -1501,7 +1907,13 @@ async def genera_word_fedele(
     else:
         mapping["firma"] = "______________________________"
         mapping["data_firma"] = "Data: ______________"
-    filled_docx = _fill_docx(raw, mapping)
+    # Tabelle riutilizzabili: rende tutte le tabelle del tenant (solo quelle
+    # effettivamente richiamate nel documento verranno inserite da _fill_docx)
+    tabelle_rendered: dict = {}
+    async for t in db.modelli_tabelle.find({}):
+        if t.get("slug"):
+            tabelle_rendered[t["slug"]] = _tabella_righe_render(t, ctx)
+    filled_docx = _fill_docx(raw, mapping, tabelle_rendered)
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
 
     if body.formato == "docx" and not fai_firma:
