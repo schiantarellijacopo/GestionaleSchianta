@@ -1191,6 +1191,7 @@ async def build_context(cliente_id: Optional[str] = None,
     }
     # Risoluzione a cascata: sinistro → polizza/cliente; titolo → polizza → cliente
     sin = None
+    a = None
     if sinistro_id:
         sin = await db.sinistri.find_one({"id": sinistro_id}, {"_id": 0})
         if sin:
@@ -1314,6 +1315,11 @@ async def build_context(cliente_id: Optional[str] = None,
                 "cliente_iban": a.get("iban") or "-",
                 "cliente_amministratore": a.get("amministratore") or "-",
             })
+    # Operatore/intermediario: se non scelto esplicitamente, si usa il
+    # collaboratore collegato alla polizza, altrimenti quello dell'anagrafica.
+    if not operatore_id:
+        operatore_id = ((p or {}).get("collaboratore_id")
+                        or (a or {}).get("collaboratore_id"))
     if operatore_id:
         u = await db.users.find_one({"id": operatore_id}, {"_id": 0}) or {}
         if u:
@@ -1812,6 +1818,191 @@ def _fill_docx(raw: bytes, mapping: dict, tabelle_rendered: dict | None = None) 
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Editor visivo: inserimento segnaposto in un Word "fedele" mantenendo il layout
+# ---------------------------------------------------------------------------
+def _iter_block_items(parent):
+    """Itera paragrafi e tabelle di un Document o di una cella, in ordine."""
+    from docx.document import Document as _DocxDocument
+    from docx.oxml.ns import qn
+    from docx.text.paragraph import Paragraph as _Paragraph
+    from docx.table import Table as _Table
+    if isinstance(parent, _DocxDocument):
+        parent_elm = parent.element.body
+    else:  # _Cell
+        parent_elm = parent._tc
+    for child in parent_elm.iterchildren():
+        if child.tag == qn("w:p"):
+            yield _Paragraph(child, parent)
+        elif child.tag == qn("w:tbl"):
+            yield _Table(child, parent)
+
+
+def _enumerate_paragraphs(doc):
+    """Lista ordinata di tutti i paragrafi (corpo + celle tabella), ricorsiva.
+    L'ordine DEVE combaciare con quello usato per costruire la struttura JSON."""
+    from docx.text.paragraph import Paragraph as _Paragraph
+    out = []
+
+    def walk(parent):
+        for block in _iter_block_items(parent):
+            if isinstance(block, _Paragraph):
+                out.append(block)
+            else:  # Table
+                for row in block.rows:
+                    for cell in row.cells:
+                        walk(cell)
+    walk(doc)
+    return out
+
+
+def _para_to_json(p, idx):
+    segments = [{"text": r.text, "b": bool(r.bold), "i": bool(r.italic),
+                 "u": bool(r.underline)} for r in p.runs]
+    text = "".join(r.text for r in p.runs)
+    try:
+        style = (p.style.name if p.style else "") or ""
+    except Exception:
+        style = ""
+    return {"type": "paragraph", "p_index": idx, "segments": segments,
+            "text": text, "style": style}
+
+
+def _build_struttura(parent, counter):
+    """Struttura annidata (paragrafi + tabelle) per il rendering nell'editor."""
+    from docx.text.paragraph import Paragraph as _Paragraph
+    items = []
+    for block in _iter_block_items(parent):
+        if isinstance(block, _Paragraph):
+            items.append(_para_to_json(block, counter[0]))
+            counter[0] += 1
+        else:  # Table
+            rows = []
+            for row in block.rows:
+                cells = []
+                for cell in row.cells:
+                    cells.append({"type": "cell",
+                                  "items": _build_struttura(cell, counter)})
+                rows.append(cells)
+            items.append({"type": "table", "rows": rows})
+    return items
+
+
+def _set_run_text(r_elm, text: str) -> None:
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    for t in r_elm.findall(qn("w:t")):
+        r_elm.remove(t)
+    t = OxmlElement("w:t")
+    t.set(qn("xml:space"), "preserve")
+    t.text = text
+    r_elm.append(t)
+
+
+def _insert_token_into_paragraph(p, offset: int, token: str) -> None:
+    """Inserisce ``token`` all'offset (sul testo originale) dentro i run del
+    paragrafo, duplicando la formattazione del run ospitante."""
+    from copy import deepcopy
+    acc = 0
+    runs = list(p.runs)
+    for r in runs:
+        rl = len(r.text)
+        if offset <= acc + rl:
+            local = offset - acc
+            left, right = r.text[:local], r.text[local:]
+            r.text = left
+            tok_elm = deepcopy(r._r)
+            _set_run_text(tok_elm, token)
+            r._r.addnext(tok_elm)
+            if right:
+                right_elm = deepcopy(r._r)
+                _set_run_text(right_elm, right)
+                tok_elm.addnext(right_elm)
+            return
+        acc += rl
+    # offset oltre la fine → aggiunge un run in coda
+    p.add_run(token)
+
+
+@router.get("/librerie/modelli/{mid}/struttura-word")
+async def struttura_word(
+    mid: str,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Restituisce la struttura (paragrafi + tabelle) di un Word fedele per
+    l'editor visivo di inserimento segnaposto."""
+    import io
+    import storage as obj_storage
+    from docx import Document
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    if not m.get("word_fedele") or not m.get("word_storage_path"):
+        raise HTTPException(400, "Questo modello non è un Word fedele")
+    raw, _ct = obj_storage.get_object(m["word_storage_path"])
+    doc = Document(io.BytesIO(raw))
+    counter = [0]
+    blocks = _build_struttura(doc, counter)
+    return {"nome": m.get("nome"), "filename": m.get("word_filename"),
+            "blocks": blocks, "n_paragrafi": counter[0],
+            "placeholders": m.get("placeholders") or []}
+
+
+class InserisciSegnapostoBody(BaseModel):
+    insertions: List[dict] = []
+
+
+@router.post("/librerie/modelli/{mid}/inserisci-segnaposto")
+async def inserisci_segnaposto(
+    mid: str, body: InserisciSegnapostoBody,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Applica gli inserimenti di segnaposto al Word fedele originale,
+    mantenendo l'impaginazione, e salva il file aggiornato."""
+    import io
+    import storage as obj_storage
+    from docx import Document
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    if not m.get("word_fedele") or not m.get("word_storage_path"):
+        raise HTTPException(400, "Questo modello non è un Word fedele")
+    raw, _ct = obj_storage.get_object(m["word_storage_path"])
+    doc = Document(io.BytesIO(raw))
+    paras = _enumerate_paragraphs(doc)
+    # raggruppa per paragrafo e applica dall'offset più grande al più piccolo
+    per_para: dict = {}
+    for ins in body.insertions:
+        try:
+            pi = int(ins.get("p_index"))
+            off = int(ins.get("offset"))
+        except Exception:
+            continue
+        tok = str(ins.get("token") or "").strip()
+        if not tok or pi < 0 or pi >= len(paras):
+            continue
+        per_para.setdefault(pi, []).append((off, tok))
+    for pi, lst in per_para.items():
+        for off, tok in sorted(lst, key=lambda x: x[0], reverse=True):
+            _insert_token_into_paragraph(paras[pi], off, tok)
+    out = io.BytesIO()
+    doc.save(out)
+    new_bytes = out.getvalue()
+    obj_storage.put_object(
+        m["word_storage_path"], new_bytes,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    testo = _estrai_testo_docx(new_bytes)
+    placeholders = sorted(set(_PLACEHOLDER_RE.findall(testo)))
+    await db.template_modelli.update_one(
+        {"id": mid},
+        {"$set": {"placeholders": placeholders,
+                  "richiede_firma": ("firma" in placeholders)}})
+    await log_attivita(user, "inserisci_segnaposto", "modello", mid, m.get("nome"))
+    return {"ok": True, "placeholders": placeholders,
+            "inserted": sum(len(v) for v in per_para.values())}
+
 
 
 def _docx_to_pdf(docx_bytes: bytes) -> bytes:

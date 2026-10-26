@@ -1,0 +1,30 @@
+{
+  "summary": "Frontend-only test of the reusable Tabelle feature (Librerie > Gestioni Modelli > Tabelle). Everything requested passed: the 3 seeded tables are listed with the right type and token, grid and checklist tables can be created, the editor pre-fills saved data and a rename persists, delete works through the confirm() dialog, the Segnaposto dialog shows a 'Tabelle' group, and in the PDF model editor clicking a {tabella:...} token inserts it into the body. The two test tables were deleted afterwards, leaving the tenant with only the 3 seeded tables.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "TabellaEditor (new table)", "issue": "Creating a new table and switching Tipo from Griglia to Checklist keeps the grid's default column names 'Colonna 1/Colonna 2'. The checklist defaults (Richiesta/Proposta/Confermata) are only applied when tipo is already checklist at mount time.", "selector": "[data-testid='tabella-tipo-select']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "TabellaEditor checklist mode", "issues": ["The checkbox column header inputs (tabella-ckcol-*) sit next to the 'Etichetta 1a colonna' input on the left, but the checkbox columns appear far right after the long voce input. Headers do not line up visually with the checkboxes they label."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: when tipo changes to 'checklist' on a new table, reset colonne to the checklist defaults (Richiesta/Proposta/Confermata).",
+    "Optional: line up the checklist header labels with their checkbox columns (e.g. render the headers in the same flex row layout as the voce rows).",
+    "Optional: add a .catch() to navigator.clipboard.writeText in copyToken so a success toast is not shown when clipboard access is denied."
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is over 7100 lines; TabelleManager/TabellaEditor should be extracted into their own component file.",
+    "TabelleManager load() has no error handling; if GET fails, items stays null and 'Caricamento…' is shown forever.",
+    "Renaming a table keeps its slug (good: existing tokens in models do not break). The slug cannot be edited."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100% (6/6 requested flows)"},
+  "seed_data_creation": "Created TEST Griglia UI and TEST Checklist UI during the test; both deleted at the end.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Navigation: /librerie > [data-testid=lib-tab-modelli] > modelli-tabelle-btn. Grid editor and checklist editor testids all work. Slugs are derived from nome (e.g. 'TEST Griglia UI' -> test_griglia_ui) and stay the same on rename. The PDF editor is opened via modelli-tab-pdf > modelli-new; its placeholder picker includes the Tabelle group."
+}

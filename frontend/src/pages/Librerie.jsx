@@ -5494,6 +5494,168 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
     );
 }
 
+function WordVisualEditor({ modello, onClose }) {
+    const [struttura, setStruttura] = useState(null);
+    const [insertions, setInsertions] = useState([]); // {p_index, offset, token, _k}
+    const [caret, setCaret] = useState(null);          // {p_index, offset}
+    const [saving, setSaving] = useState(false);
+
+    const load = () => api.get(`/librerie/modelli/${modello.id}/struttura-word`)
+        .then((r) => { setStruttura(r.data); setInsertions([]); setCaret(null); })
+        .catch(() => { toast.error("Impossibile aprire il documento"); onClose(false); });
+    useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+    const addInsertion = (key) => {
+        if (!caret) { toast.info("Clicca prima nel documento, nel punto dove inserire il segnaposto"); return; }
+        const token = `{${key}}`;
+        setInsertions((arr) => [...arr, { p_index: caret.p_index, offset: caret.offset, token, _k: Date.now() + Math.random() }]);
+    };
+    const removeInsertion = (k) => setInsertions((arr) => arr.filter((x) => x._k !== k));
+
+    const handleParaClick = (pIndex) => {
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        let node = sel.anchorNode;
+        const within = node && node.nodeType === 3 ? (sel.anchorOffset || 0) : 0;
+        if (node && node.nodeType === 3) node = node.parentElement;
+        let base = null;
+        while (node && node.getAttribute) {
+            const v = node.getAttribute("data-ostart");
+            if (v != null) { base = parseInt(v, 10); break; }
+            node = node.parentElement;
+        }
+        if (base == null) return;
+        setCaret({ p_index: pIndex, offset: base + within });
+    };
+
+    const salva = async () => {
+        if (insertions.length === 0) { toast.info("Nessun segnaposto da inserire"); return; }
+        setSaving(true);
+        try {
+            const r = await api.post(`/librerie/modelli/${modello.id}/inserisci-segnaposto`,
+                { insertions: insertions.map(({ p_index, offset, token }) => ({ p_index, offset, token })) });
+            toast.success(`Inseriti ${r.data.inserted} segnaposto ✓`);
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
+        setSaving(false);
+    };
+
+    const TOKEN_RE = /\{[a-z_][a-z0-9_]*(?::[a-z0-9_]+)?\}/gi;
+    const renderOriginalText = (text, start) => {
+        const out = []; let last = 0; let m; let i = 0; TOKEN_RE.lastIndex = 0;
+        while ((m = TOKEN_RE.exec(text))) {
+            if (m.index > last) out.push(<span key={i++} data-ostart={start + last}>{text.slice(last, m.index)}</span>);
+            out.push(<span key={i++} data-ostart={start + m.index} className="bg-sky-100 text-sky-700 rounded px-0.5">{m[0]}</span>);
+            last = m.index + m[0].length;
+        }
+        if (last < text.length) out.push(<span key={i++} data-ostart={start + last}>{text.slice(last)}</span>);
+        return out;
+    };
+
+    const renderParagraph = (block) => {
+        const insMap = {};
+        insertions.filter((x) => x.p_index === block.p_index).forEach((x) => { (insMap[x.offset] = insMap[x.offset] || []).push(x); });
+        const chars = []; (block.segments || []).forEach((seg) => { for (const ch of seg.text) chars.push({ ch, b: seg.b, i: seg.i, u: seg.u }); });
+        const nodes = []; let buf = ""; let bufFmt = null; let bufStart = 0; let key = 0;
+        const fmtKey = (f) => `${f.b ? 1 : 0}${f.i ? 1 : 0}${f.u ? 1 : 0}`;
+        const flush = () => {
+            if (buf !== "") {
+                const style = { fontWeight: bufFmt.b ? 700 : undefined, fontStyle: bufFmt.i ? "italic" : undefined, textDecoration: bufFmt.u ? "underline" : undefined };
+                nodes.push(<span key={`t${key++}`} style={style}>{renderOriginalText(buf, bufStart)}</span>);
+                buf = "";
+            }
+        };
+        for (let off = 0; off <= chars.length; off++) {
+            if (caret && caret.p_index === block.p_index && caret.offset === off) {
+                flush();
+                nodes.push(<span key={`c${key++}`} className="inline-block w-0.5 h-4 bg-violet-600 align-text-bottom animate-pulse" />);
+            }
+            if (insMap[off]) {
+                flush();
+                insMap[off].forEach((it) => nodes.push(
+                    <span key={`i${it._k}`} contentEditable={false} className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0.5 rounded bg-violet-600 text-white text-xs font-mono select-none align-middle">
+                        {it.token}
+                        <button type="button" onClick={(e) => { e.stopPropagation(); removeInsertion(it._k); }} className="hover:text-rose-200" title="Rimuovi">
+                            <XCircle size={12} />
+                        </button>
+                    </span>));
+            }
+            if (off < chars.length) {
+                const c = chars[off];
+                if (buf === "") { bufStart = off; bufFmt = c; }
+                else if (fmtKey(c) !== fmtKey(bufFmt)) { flush(); bufStart = off; bufFmt = c; }
+                buf += c.ch;
+            }
+        }
+        flush();
+        if (nodes.length === 0) nodes.push(<span key="empty" data-ostart={0} className="text-slate-300 italic">(riga vuota — clicca per inserire)</span>);
+        return nodes;
+    };
+
+    const renderBlocks = (blocks) => blocks.map((b, i) => {
+        if (b.type === "paragraph") {
+            const isHeading = /heading|title/i.test(b.style || "");
+            return (
+                <p key={`p${b.p_index}`} onClick={() => handleParaClick(b.p_index)}
+                    className={`cursor-text rounded px-1 -mx-1 min-h-[1.4em] hover:bg-violet-50/50 ${isHeading ? "text-base font-semibold text-slate-900 mt-2 mb-1" : "text-sm text-slate-800 leading-relaxed"}`}
+                    data-testid={`wve-para-${b.p_index}`}>
+                    {renderParagraph(b)}
+                </p>
+            );
+        }
+        return (
+            <table key={`tb${i}`} className="border-collapse my-2 w-full">
+                <tbody>
+                    {b.rows.map((row, ri) => (
+                        <tr key={ri}>
+                            {row.map((cell, ci) => (
+                                <td key={ci} className="border border-slate-300 align-top p-1.5">{renderBlocks(cell.items)}</td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        );
+    });
+
+    return (
+        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+            <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col" data-testid="word-visual-editor">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <Braces size={16} className="text-violet-700" /> Inserisci segnaposto — {modello.nome}
+                    </DialogTitle>
+                </DialogHeader>
+                <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-slate-700 shrink-0">
+                    <strong>1)</strong> Clicca nel documento nel punto dove vuoi il dato. <strong>2)</strong> Scegli un segnaposto dall'elenco a destra. <strong>3)</strong> Premi <strong>Salva segnaposto</strong>. Il layout del tuo Word resta identico.
+                    {caret && <span className="ml-2 text-violet-700 font-semibold">• punto selezionato ✓</span>}
+                </div>
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3 overflow-hidden min-h-0 mt-2">
+                    <div className="border border-slate-200 rounded-lg bg-white overflow-y-auto p-5 shadow-inner" data-testid="wve-document">
+                        {!struttura ? <div className="text-slate-400 text-sm p-6">Caricamento documento…</div>
+                            : <div className="max-w-[640px] mx-auto space-y-1">{renderBlocks(struttura.blocks)}</div>}
+                    </div>
+                    <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-y-auto p-3">
+                        <SegnapostoSezione onInsert={addInsertion} compact />
+                    </div>
+                </div>
+                <div className="flex items-center justify-between gap-2 pt-2 shrink-0">
+                    <div className="text-xs text-slate-500" data-testid="wve-count">
+                        {insertions.length > 0 ? `${insertions.length} segnaposto da salvare` : "Nessuna modifica in sospeso"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button variant="outline" onClick={() => onClose(true)} data-testid="wve-close">Chiudi</Button>
+                        <Button onClick={salva} disabled={saving || insertions.length === 0} className="bg-violet-700 hover:bg-violet-800" data-testid="wve-save">
+                            {saving ? "Salvataggio…" : "Salva segnaposto"}
+                        </Button>
+                    </div>
+                </div>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+
 function ModelliSezione() {
     const [items, setItems] = useState(null);
     const [activeTab, setActiveTab] = useState("email");
@@ -5501,6 +5663,7 @@ function ModelliSezione() {
     const [open, setOpen] = useState(false);
     const [q, setQ] = useState("");
     const [azione, setAzione] = useState(null); // {modello, mode: 'doc'|'wa'}
+    const [visivo, setVisivo] = useState(null); // modello word fedele per editor visivo
 
     const load = () => api.get("/librerie/modelli").then((r) => setItems(r.data || []));
     useEffect(() => { load(); }, []);
@@ -5721,6 +5884,16 @@ function ModelliSezione() {
                                     >
                                         {m.tipo === "whatsapp" ? "📲 Invia WhatsApp" : m.tipo === "word" ? "📄 Genera Word" : m.tipo === "email" ? "📄 Genera PDF" : "📄 Genera documento"}
                                     </button>
+                                    {m.word_fedele && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setVisivo(m); }}
+                                            className="text-[10px] font-medium px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+                                            data-testid={`modello-visivo-${m.id}`}
+                                            title="Inserisci i segnaposto vedendo il tuo documento impaginato"
+                                        >
+                                            ✏️ Segnaposto visivo
+                                        </button>
+                                    )}
                                     {(m.placeholders || []).slice(0, 4).map((p) => (
                                         <span key={p} className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
                                             {`{${p}}`}
@@ -5750,6 +5923,7 @@ function ModelliSezione() {
                 />
             )}
             {azione && <UsaModelloDialog modello={azione.modello} mode={azione.mode} onClose={() => setAzione(null)} />}
+            {visivo && <WordVisualEditor modello={visivo} onClose={(reload) => { setVisivo(null); if (reload) load(); }} />}
 
             <Dialog open={showSegnaposto} onOpenChange={setShowSegnaposto}>
                 <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto" data-testid="modelli-segnaposto-dialog">
