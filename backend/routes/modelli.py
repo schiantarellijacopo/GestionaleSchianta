@@ -2707,6 +2707,9 @@ class PdfOverlayItem(BaseModel):
     y: float = 0.0            # 0..1 relativo all'altezza pagina
     key: str                  # chiave segnaposto senza graffe, es. "cliente"
     font_size: float = 11.0
+    kind: str = "text"        # "text" | "image"
+    w: float = 0.22           # 0..1 larghezza (solo immagine)
+    h: float = 0.10           # 0..1 altezza (solo immagine)
 
 
 class PdfOverlayBody(BaseModel):
@@ -2737,9 +2740,14 @@ def _pdf_render_pages(raw: bytes, dpi: int = 120) -> list[dict]:
     return out
 
 
-def _pdf_stamp_overlay(raw: bytes, overlay: list[dict], ctx: dict) -> bytes:
-    """Stampa i segnaposto (risolti con ctx) sopra il PDF originale."""
+def _pdf_stamp_overlay(raw: bytes, overlay: list[dict], ctx: dict,
+                       images: Optional[dict] = None) -> bytes:
+    """Stampa i segnaposto (risolti con ctx) sopra il PDF originale.
+
+    ``images`` mappa chiave→bytes per i segnaposto immagine (es. logo, firma).
+    """
     import fitz  # pymupdf
+    images = images or {}
     doc = fitz.open(stream=raw, filetype="pdf")
     try:
         npages = doc.page_count
@@ -2749,16 +2757,29 @@ def _pdf_stamp_overlay(raw: bytes, overlay: list[dict], ctx: dict) -> bytes:
                 continue
             page = doc[pidx]
             rect = page.rect
-            key = it.get("key") or ""
-            valore = render_text("{" + key + "}", ctx) if key else ""
-            if valore in (None, "", "-"):
-                valore = ""
             x = float(it.get("x", 0)) * rect.width
             y = float(it.get("y", 0)) * rect.height
-            fs = float(it.get("font_size", 11) or 11)
-            # y nel click è il bordo superiore → sposto alla baseline
-            page.insert_text((x, y + fs), str(valore), fontsize=fs,
-                             fontname="helv", color=(0, 0, 0))
+            kind = it.get("kind") or "text"
+            if kind == "image":
+                img = images.get(it.get("key"))
+                if not img:
+                    continue
+                w = max(1.0, float(it.get("w", 0.22)) * rect.width)
+                h = max(1.0, float(it.get("h", 0.10)) * rect.height)
+                try:
+                    page.insert_image(fitz.Rect(x, y, x + w, y + h),
+                                      stream=img, keep_proportion=True)
+                except Exception:
+                    continue
+            else:
+                key = it.get("key") or ""
+                valore = render_text("{" + key + "}", ctx) if key else ""
+                if valore in (None, "", "-"):
+                    valore = ""
+                fs = float(it.get("font_size", 11) or 11)
+                # y nel click è il bordo superiore → sposto alla baseline
+                page.insert_text((x, y + fs), str(valore), fontsize=fs,
+                                 fontname="helv", color=(0, 0, 0))
         return doc.tobytes()
     finally:
         doc.close()
@@ -2844,7 +2865,16 @@ async def genera_pdf_overlay(
     raw, _ct = obj_storage.get_object(path)
     ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
                               body.titolo_id, body.sinistro_id)
-    out = _pdf_stamp_overlay(raw, overlay, ctx)
+    # Immagini per i segnaposto immagine (logo agenzia, firma operatore)
+    images: dict = {}
+    if any((it.get("kind") == "image") for it in overlay):
+        az_full = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+        if m.get("logo_url"):
+            images["logo"] = await _load_logo_bytes({"logo_url": m.get("logo_url")})
+        else:
+            images["logo"] = await _load_logo_bytes(az_full)
+        images["firma_operatore"] = await _load_image_from_url(ctx.get("_firma_operatore_url"))
+    out = _pdf_stamp_overlay(raw, overlay, ctx, images)
     fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
     return Response(out, media_type="application/pdf",
                     headers={"Content-Disposition": f"inline; filename={fname}.pdf"})

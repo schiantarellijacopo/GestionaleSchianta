@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette, Layers } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette, Layers, Printer, Image as ImageIcon } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -5470,6 +5470,25 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
 
     const sezLabel = (r) => { const v = (r || []).find((c) => c != null && String(c).trim()); return v != null ? String(v) : ""; };
 
+    const anteprimaRef = useRef(null);
+    const stampaTabella = () => {
+        const html = anteprimaRef.current?.outerHTML || "";
+        const w = window.open("", "_blank", "width=900,height=700");
+        if (!w) { toast.error("Abilita i popup del browser per stampare"); return; }
+        const titolo = (nome || "Tabella").replace(/[<>&]/g, "");
+        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${titolo}</title><style>
+@page { size: A4; margin: 16mm; }
+* { box-sizing: border-box; }
+body { font-family: Georgia, 'Times New Roman', serif; color:#1e293b; margin:0; }
+h1 { font-size: 18px; margin: 0 0 14px; }
+table { border-collapse: collapse; width: 100%; font-size: 12px; }
+th { background:#1e293b !important; color:#fff !important; border:1px solid #64748b; padding:5px 8px; text-align:left; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+td { border:1px solid #cbd5e1; padding:5px 8px; }
+tr.sez td { background:#e2e8f0 !important; font-weight:700; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+</style></head><body><h1>${titolo}</h1>${html}<script>window.onload=function(){setTimeout(function(){window.print();},150);};</script></body></html>`);
+        w.document.close();
+    };
+
     return (
         <div className="space-y-4" data-testid="tabella-editor">
             <div className="grid sm:grid-cols-2 gap-3">
@@ -5597,36 +5616,42 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
             )}
 
             {showPreview && (
-                <div className="border rounded-lg p-4 bg-white" data-testid="tabella-anteprima">
-                    <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5"><Eye size={13} /> Anteprima impaginata (come apparirà in stampa)</div>
-                    <div className="overflow-x-auto">
-                        <table className="border-collapse w-full text-[13px]">
-                            <tbody>
-                                {mostraInt && (tipo === "checklist" || colonne.length > 0) && (
-                                    <tr>
-                                        {(tipo === "checklist" ? [primaColonna, ...colonne] : colonne).map((h, i) => (
-                                            <th key={i} className="border border-slate-400 bg-slate-800 text-white font-semibold px-2 py-1 text-left">{h}</th>
-                                        ))}
-                                    </tr>
-                                )}
-                                {tipo === "griglia" ? righe.map((r, ri) => (
-                                    isSez(ri) ? (
-                                        <tr key={ri}>
-                                            <td colSpan={colonne.length || 1} className="border border-slate-400 bg-slate-200 font-bold text-slate-900 px-2 py-1" data-testid={`anteprima-sezione-${ri}`}>{sezLabel(r)}</td>
+                <div className="border rounded-lg p-3 bg-slate-100" data-testid="tabella-anteprima">
+                    <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5"><Eye size={13} /> Anteprima impaginata A4 (come apparirà in stampa)</span>
+                        <Button size="sm" variant="outline" className="h-7" onClick={stampaTabella} data-testid="tabella-stampa-btn"><Printer size={13} className="mr-1" />Stampa</Button>
+                    </div>
+                    <div className="overflow-auto max-h-[70vh] flex justify-center py-3">
+                        <div className="bg-white shadow-xl shrink-0" style={{ width: "210mm", minHeight: "297mm", padding: "18mm" }} data-testid="tabella-anteprima-foglio">
+                            {nome && <h2 className="text-lg font-bold text-slate-900 mb-4" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{nome}</h2>}
+                            <table ref={anteprimaRef} className="border-collapse w-full text-[13px]" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
+                                <tbody>
+                                    {mostraInt && (tipo === "checklist" || colonne.length > 0) && (
+                                        <tr>
+                                            {(tipo === "checklist" ? [primaColonna, ...colonne] : colonne).map((h, i) => (
+                                                <th key={i} className="border border-slate-400 bg-slate-800 text-white font-semibold px-2 py-1 text-left">{h}</th>
+                                            ))}
                                         </tr>
-                                    ) : (
-                                        <tr key={ri} className={ri % 2 ? "bg-slate-50" : ""}>
-                                            {r.map((c, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-slate-800">{c}</td>))}
+                                    )}
+                                    {tipo === "griglia" ? righe.map((r, ri) => (
+                                        isSez(ri) ? (
+                                            <tr key={ri} className="sez">
+                                                <td colSpan={colonne.length || 1} className="border border-slate-400 bg-slate-200 font-bold text-slate-900 px-2 py-1" data-testid={`anteprima-sezione-${ri}`}>{sezLabel(r)}</td>
+                                            </tr>
+                                        ) : (
+                                            <tr key={ri} className={ri % 2 ? "bg-slate-50" : ""}>
+                                                {r.map((c, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-slate-800">{c}</td>))}
+                                            </tr>
+                                        )
+                                    )) : voci.map((v, vi) => (
+                                        <tr key={vi} className={vi % 2 ? "bg-slate-50" : ""}>
+                                            <td className="border border-slate-300 px-2 py-1 text-slate-800">{v.testo}</td>
+                                            {colonne.map((_, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-center">{v.spunte[ci] ? "✓" : ""}</td>))}
                                         </tr>
-                                    )
-                                )) : voci.map((v, vi) => (
-                                    <tr key={vi} className={vi % 2 ? "bg-slate-50" : ""}>
-                                        <td className="border border-slate-300 px-2 py-1 text-slate-800">{v.testo}</td>
-                                        {colonne.map((_, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-center">{v.spunte[ci] ? "✓" : ""}</td>))}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             )}
@@ -5645,7 +5670,7 @@ function PdfVisualEditor({ modello, onClose }) {
     const [mode, setMode] = useState("overlay"); // overlay | testo
     const [pagine, setPagine] = useState(null);
     const [overlay, setOverlay] = useState([]);
-    const [selKey, setSelKey] = useState(null);     // segnaposto da posizionare
+    const [sel, setSel] = useState(null);     // {key, kind} da posizionare
     const [activeIdx, setActiveIdx] = useState(null); // item selezionato
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -5653,6 +5678,7 @@ function PdfVisualEditor({ modello, onClose }) {
     const [corpo, setCorpo] = useState(modello.corpo || "");
     const corpoRef = useRef(null);
     const savedRef = useRef(false);
+    const dragRef = useRef(null); // {idx, el}
     const close = () => onClose(savedRef.current);
 
     const load = () => {
@@ -5666,14 +5692,35 @@ function PdfVisualEditor({ modello, onClose }) {
 
     const clamp = (v) => Math.max(0, Math.min(1, v));
     const onPageClick = (pi, e) => {
-        if (!selKey) { toast.info("Scegli prima un segnaposto, poi clicca sul punto del PDF"); return; }
+        if (!sel) { toast.info("Scegli prima un segnaposto o un'immagine, poi clicca sul punto del PDF"); return; }
         const rect = e.currentTarget.getBoundingClientRect();
         const x = clamp((e.clientX - rect.left) / rect.width);
         const y = clamp((e.clientY - rect.top) / rect.height);
-        setOverlay((ov) => { const n = [...ov, { page: pi, x, y, key: selKey, font_size: 11 }]; setActiveIdx(n.length - 1); return n; });
+        setOverlay((ov) => {
+            const item = sel.kind === "image"
+                ? { page: pi, x: clamp(x), y: clamp(y), key: sel.key, kind: "image", w: 0.22, h: 0.1, font_size: 11 }
+                : { page: pi, x, y, key: sel.key, kind: "text", font_size: 11 };
+            const n = [...ov, item]; setActiveIdx(n.length - 1); return n;
+        });
     };
     const updateItem = (idx, patch) => setOverlay((ov) => ov.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
     const removeItem = (idx) => { setOverlay((ov) => ov.filter((_, i) => i !== idx)); setActiveIdx(null); };
+
+    // Trascinamento segnaposto col mouse
+    const startDrag = (idx, el, e) => { e.stopPropagation(); e.preventDefault(); setActiveIdx(idx); dragRef.current = { idx, el }; };
+    useEffect(() => {
+        const move = (e) => {
+            const d = dragRef.current; if (!d || !d.el) return;
+            const rect = d.el.getBoundingClientRect();
+            const x = clamp((e.clientX - rect.left) / rect.width);
+            const y = clamp((e.clientY - rect.top) / rect.height);
+            setOverlay((ov) => ov.map((o, i) => (i === d.idx ? { ...o, x, y } : o)));
+        };
+        const up = () => { dragRef.current = null; };
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", up);
+        return () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    }, []);
 
     const salvaOverlay = async () => {
         setSaving(true);
@@ -5739,9 +5786,17 @@ function PdfVisualEditor({ modello, onClose }) {
                     <div className="flex gap-3 overflow-hidden flex-1">
                         {/* Palette segnaposto */}
                         <div className="w-64 shrink-0 overflow-y-auto border rounded-lg p-2 bg-sky-50/40" data-testid="pdf-overlay-palette">
-                            <p className="text-[11px] text-slate-500 mb-2">1) Seleziona un segnaposto · 2) clicca sul PDF per posizionarlo.</p>
-                            {selKey && <div className="mb-2 text-xs bg-sky-600 text-white rounded px-2 py-1 font-mono flex items-center justify-between" data-testid="pdf-overlay-selkey">{`{${selKey}}`}<button onClick={() => setSelKey(null)}><XCircle size={13} /></button></div>}
-                            <SegnapostoSezione onInsert={(k) => setSelKey(k)} compact />
+                            <p className="text-[11px] text-slate-500 mb-2">1) Seleziona un segnaposto o un'immagine · 2) clicca sul PDF per posizionarlo · trascinalo per spostarlo.</p>
+                            {sel && <div className="mb-2 text-xs bg-sky-600 text-white rounded px-2 py-1 font-mono flex items-center justify-between" data-testid="pdf-overlay-selkey">{sel.kind === "image" ? `🖼 ${sel.key}` : `{${sel.key}}`}<button onClick={() => setSel(null)}><XCircle size={13} /></button></div>}
+                            <div className="mb-2">
+                                <p className="text-[10px] font-semibold text-slate-500 uppercase mb-1">Immagini</p>
+                                <div className="flex flex-col gap-1">
+                                    <button type="button" onClick={() => setSel({ key: "logo", kind: "image" })} className={`text-left text-xs rounded px-2 py-1 border flex items-center gap-1.5 ${sel?.key === "logo" ? "bg-sky-600 text-white border-sky-600" : "bg-white hover:bg-sky-50 border-slate-200"}`} data-testid="pdf-overlay-img-logo"><ImageIcon size={12} />Logo agenzia</button>
+                                    <button type="button" onClick={() => setSel({ key: "firma_operatore", kind: "image" })} className={`text-left text-xs rounded px-2 py-1 border flex items-center gap-1.5 ${sel?.key === "firma_operatore" ? "bg-sky-600 text-white border-sky-600" : "bg-white hover:bg-sky-50 border-slate-200"}`} data-testid="pdf-overlay-img-firma"><ImageIcon size={12} />Firma operatore</button>
+                                </div>
+                            </div>
+                            <p className="text-[10px] font-semibold text-slate-500 uppercase mb-1">Testo</p>
+                            <SegnapostoSezione onInsert={(k) => setSel({ key: k, kind: "text" })} compact />
                         </div>
                         {/* Canvas PDF */}
                         <div className="flex-1 overflow-y-auto bg-slate-100 rounded-lg p-3 space-y-4" data-testid="pdf-overlay-canvas">
@@ -5758,16 +5813,29 @@ function PdfVisualEditor({ modello, onClose }) {
                             {(pagine || []).map((pg) => (
                                 <div key={pg.index} className="relative mx-auto shadow-lg bg-white" style={{ width: "100%", maxWidth: 760 }}>
                                     <img src={pg.image} alt={`pagina ${pg.index + 1}`} className="w-full block select-none" draggable={false}
-                                        onClick={(e) => onPageClick(pg.index, e)} style={{ cursor: selKey ? "crosshair" : "default" }} data-testid={`pdf-page-${pg.index}`} />
+                                        onClick={(e) => onPageClick(pg.index, e)} style={{ cursor: sel ? "crosshair" : "default" }} data-testid={`pdf-page-${pg.index}`} />
                                     {overlay.map((o, idx) => o.page === pg.index && (
-                                        <div key={idx}
-                                            onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
-                                            className={`absolute font-mono px-1 rounded cursor-pointer whitespace-nowrap ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
-                                            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, fontSize: `${o.font_size || 11}px` }}
-                                            data-testid={`pdf-overlay-item-${idx}`}
-                                            title="Clicca per selezionare">
-                                            {`{${o.key}}`}
-                                        </div>
+                                        o.kind === "image" ? (
+                                            <div key={idx}
+                                                onPointerDown={(e) => startDrag(idx, e.currentTarget.parentElement, e)}
+                                                onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
+                                                className={`absolute rounded flex items-center justify-center text-[10px] font-semibold cursor-move select-none ${activeIdx === idx ? "ring-2 ring-amber-500 bg-amber-200/60 text-amber-900" : "bg-sky-500/20 text-sky-800 border border-dashed border-sky-500"}`}
+                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${(o.w || 0.22) * 100}%`, height: `${(o.h || 0.1) * 100}%` }}
+                                                data-testid={`pdf-overlay-item-${idx}`}
+                                                title="Trascina per spostare">
+                                                <ImageIcon size={14} className="mr-1" />{o.key === "logo" ? "Logo" : "Firma"}
+                                            </div>
+                                        ) : (
+                                            <div key={idx}
+                                                onPointerDown={(e) => startDrag(idx, e.currentTarget.parentElement, e)}
+                                                onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
+                                                className={`absolute font-mono px-1 rounded cursor-move whitespace-nowrap select-none ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
+                                                style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, fontSize: `${o.font_size || 11}px` }}
+                                                data-testid={`pdf-overlay-item-${idx}`}
+                                                title="Trascina per spostare">
+                                                {`{${o.key}}`}
+                                            </div>
+                                        )
                                     ))}
                                 </div>
                             ))}
@@ -5777,20 +5845,27 @@ function PdfVisualEditor({ modello, onClose }) {
                             <div className="text-xs font-semibold text-slate-600">Segnaposti: {overlay.length}</div>
                             {activeIdx != null && overlay[activeIdx] ? (
                                 <div className="space-y-2">
-                                    <div className="font-mono text-xs text-sky-700">{`{${overlay[activeIdx].key}}`}</div>
-                                    <div>
-                                        <Label className="text-[11px]">Dimensione testo</Label>
-                                        <Input type="number" min={6} max={40} value={overlay[activeIdx].font_size}
-                                            onChange={(e) => updateItem(activeIdx, { font_size: Number(e.target.value) || 11 })}
-                                            className="h-8" data-testid="pdf-overlay-fontsize" />
-                                    </div>
+                                    <div className="font-mono text-xs text-sky-700">{overlay[activeIdx].kind === "image" ? `🖼 ${overlay[activeIdx].key}` : `{${overlay[activeIdx].key}}`}</div>
+                                    {overlay[activeIdx].kind === "image" ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <div><Label className="text-[11px]">Largh. %</Label><Input type="number" min={2} max={100} value={Math.round((overlay[activeIdx].w || 0.22) * 100)} onChange={(e) => updateItem(activeIdx, { w: clamp((Number(e.target.value) || 1) / 100) })} className="h-8" data-testid="pdf-overlay-img-w" /></div>
+                                            <div><Label className="text-[11px]">Alt. %</Label><Input type="number" min={2} max={100} value={Math.round((overlay[activeIdx].h || 0.1) * 100)} onChange={(e) => updateItem(activeIdx, { h: clamp((Number(e.target.value) || 1) / 100) })} className="h-8" data-testid="pdf-overlay-img-h" /></div>
+                                        </div>
+                                    ) : (
+                                        <div>
+                                            <Label className="text-[11px]">Dimensione testo</Label>
+                                            <Input type="number" min={6} max={40} value={overlay[activeIdx].font_size}
+                                                onChange={(e) => updateItem(activeIdx, { font_size: Number(e.target.value) || 11 })}
+                                                className="h-8" data-testid="pdf-overlay-fontsize" />
+                                        </div>
+                                    )}
                                     <div className="grid grid-cols-2 gap-2">
                                         <div><Label className="text-[11px]">X %</Label><Input type="number" value={Math.round(overlay[activeIdx].x * 100)} onChange={(e) => updateItem(activeIdx, { x: clamp((Number(e.target.value) || 0) / 100) })} className="h-8" /></div>
                                         <div><Label className="text-[11px]">Y %</Label><Input type="number" value={Math.round(overlay[activeIdx].y * 100)} onChange={(e) => updateItem(activeIdx, { y: clamp((Number(e.target.value) || 0) / 100) })} className="h-8" /></div>
                                     </div>
                                     <Button size="sm" variant="outline" className="w-full h-8 text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => removeItem(activeIdx)} data-testid="pdf-overlay-remove"><Trash2 size={13} className="mr-1" />Rimuovi</Button>
                                 </div>
-                            ) : <p className="text-[11px] text-slate-400 italic">Clicca un segnaposto nel PDF per modificarne posizione e dimensione.</p>}
+                            ) : <p className="text-[11px] text-slate-400 italic">Clicca o trascina un elemento nel PDF per modificarne posizione e dimensione.</p>}
                         </div>
                     </div>
                 ) : (
