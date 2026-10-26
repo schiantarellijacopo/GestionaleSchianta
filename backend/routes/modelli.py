@@ -1858,9 +1858,32 @@ def _enumerate_paragraphs(doc):
     return out
 
 
+def _run_color_hex(r):
+    try:
+        c = r.font.color
+        if c is not None and c.rgb is not None:
+            return str(c.rgb)
+    except Exception:
+        pass
+    return None
+
+
 def _para_to_json(p, idx):
-    segments = [{"text": r.text, "b": bool(r.bold), "i": bool(r.italic),
-                 "u": bool(r.underline)} for r in p.runs]
+    segments = []
+    for r in p.runs:
+        seg = {"text": r.text, "b": bool(r.bold), "i": bool(r.italic),
+               "u": bool(r.underline), "color": _run_color_hex(r)}
+        try:
+            if r.font.name:
+                seg["font"] = r.font.name
+        except Exception:
+            pass
+        try:
+            if r.font.size is not None:
+                seg["size"] = round(r.font.size.pt, 1)
+        except Exception:
+            pass
+        segments.append(seg)
     text = "".join(r.text for r in p.runs)
     try:
         style = (p.style.name if p.style else "") or ""
@@ -2002,6 +2025,177 @@ async def inserisci_segnaposto(
     await log_attivita(user, "inserisci_segnaposto", "modello", mid, m.get("nome"))
     return {"ok": True, "placeholders": placeholders,
             "inserted": sum(len(v) for v in per_para.values())}
+
+
+def _para_base_font(p):
+    for r in p.runs:
+        try:
+            return {"name": r.font.name,
+                    "size": (r.font.size.pt if r.font.size is not None else None)}
+        except Exception:
+            return {"name": None, "size": None}
+    return {"name": None, "size": None}
+
+
+def _rebuild_paragraph(p, runs, base):
+    """Ricostruisce i run di un paragrafo dal contenuto editato, applicando
+    grassetto/corsivo/sottolineato/colore e mantenendo font e corpo base."""
+    from docx.oxml.ns import qn
+    from docx.shared import RGBColor, Pt
+    for r_elm in list(p._p.findall(qn("w:r"))):
+        p._p.remove(r_elm)
+    for rr in runs:
+        text = str(rr.get("text") or "")
+        parts = text.split("\n")
+        first = True
+        for part in parts:
+            if not first:
+                brk = p.add_run()
+                brk.add_break()
+            run = p.add_run(part)
+            run.bold = bool(rr.get("bold"))
+            run.italic = bool(rr.get("italic"))
+            run.underline = bool(rr.get("underline"))
+            col = rr.get("color")
+            if col:
+                try:
+                    run.font.color.rgb = RGBColor.from_string(
+                        str(col).replace("#", "").upper())
+                except Exception:
+                    pass
+            fn = rr.get("font") or base.get("name")
+            if fn:
+                run.font.name = fn
+            sz = rr.get("size") or base.get("size")
+            if sz:
+                try:
+                    run.font.size = Pt(float(sz))
+                except Exception:
+                    pass
+            first = False
+
+
+def _remove_paragraph(p):
+    from docx.oxml.ns import qn
+    el = p._p
+    parent = el.getparent()
+    if parent is None:
+        return
+    # In una cella Word deve restare almeno un paragrafo: se è l'ultimo, svuota.
+    if parent.tag == qn("w:tc") and len(parent.findall(qn("w:p"))) <= 1:
+        for r_elm in list(el.findall(qn("w:r"))):
+            el.remove(r_elm)
+        return
+    parent.remove(el)
+
+
+class SalvaContenutoBody(BaseModel):
+    paragraphs: List[dict] = []
+
+
+@router.post("/librerie/modelli/{mid}/salva-contenuto")
+async def salva_contenuto(
+    mid: str, body: SalvaContenutoBody,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Salva le modifiche al testo/formattazione del Word fedele: ricostruisce
+    i paragrafi editati e rimuove quelli cancellati, mantenendo il resto."""
+    import io
+    import storage as obj_storage
+    from docx import Document
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    if not m.get("word_fedele") or not m.get("word_storage_path"):
+        raise HTTPException(400, "Questo modello non è un Word fedele")
+    raw, _ct = obj_storage.get_object(m["word_storage_path"])
+    doc = Document(io.BytesIO(raw))
+    paras = _enumerate_paragraphs(doc)
+    to_delete = []
+    for item in body.paragraphs:
+        try:
+            pi = int(item.get("p_index"))
+        except Exception:
+            continue
+        if pi < 0 or pi >= len(paras):
+            continue
+        if item.get("deleted"):
+            to_delete.append(pi)
+            continue
+        base = _para_base_font(paras[pi])
+        _rebuild_paragraph(paras[pi], item.get("runs") or [], base)
+    for pi in to_delete:
+        _remove_paragraph(paras[pi])
+    out = io.BytesIO()
+    doc.save(out)
+    new_bytes = out.getvalue()
+    obj_storage.put_object(
+        m["word_storage_path"], new_bytes,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    testo = _estrai_testo_docx(new_bytes)
+    placeholders = sorted(set(_PLACEHOLDER_RE.findall(testo)))
+    await db.template_modelli.update_one(
+        {"id": mid},
+        {"$set": {"placeholders": placeholders,
+                  "richiede_firma": ("firma" in placeholders)}})
+    await log_attivita(user, "salva_contenuto_word", "modello", mid, m.get("nome"))
+    return {"ok": True, "placeholders": placeholders,
+            "edited": len([x for x in body.paragraphs if not x.get("deleted")]),
+            "deleted": len(to_delete)}
+
+
+@router.post("/librerie/modelli/{mid}/duplica")
+async def duplica_modello(
+    mid: str,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Duplica un modello (template). Se è un Word fedele, copia anche il file."""
+    import uuid as _uuid
+    import os as _os
+    import storage as obj_storage
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    new = dict(m)
+    new.pop("agenzia_tenant_id", None)
+    nid = str(_uuid.uuid4())
+    new["id"] = nid
+    new["nome"] = (m.get("nome") or "Modello") + " (copia)"
+    new["created_at"] = _now_iso()
+    new["updated_at"] = _now_iso()
+    if m.get("word_fedele") and m.get("word_storage_path"):
+        raw, ct = obj_storage.get_object(m["word_storage_path"])
+        path = f"{_os.environ.get('APP_NAME', 'assicura')}/modelli_word/{nid}.docx"
+        obj_storage.put_object(
+            path, raw,
+            ct or "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        new["word_storage_path"] = path
+    await db.template_modelli.insert_one(new)
+    new.pop("_id", None)
+    await log_attivita(user, "duplica_modello", "modello", nid, new["nome"])
+    return new
+
+
+@router.post("/librerie/tabelle/{tid}/duplica")
+async def duplica_tabella(
+    tid: str, user: dict = Depends(current_user),
+) -> dict:
+    """Duplica una tabella riutilizzabile con un nuovo slug/nome."""
+    from tenant import assign_tenant
+    t = await db.modelli_tabelle.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Tabella non trovata")
+    new = dict(t)
+    new.pop("agenzia_tenant_id", None)
+    new["id"] = str(uuid.uuid4())
+    new["nome"] = (t.get("nome") or "Tabella") + " (copia)"
+    new["slug"] = await _slug_unico(_slugify_tabella(new["nome"]))
+    new["created_at"] = datetime.now(timezone.utc).isoformat()
+    new.pop("updated_at", None)
+    new = assign_tenant(user, new)
+    await db.modelli_tabelle.insert_one(new)
+    return _tabella_out(new)
+
 
 
 

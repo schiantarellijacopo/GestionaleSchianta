@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2 } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -5313,6 +5313,10 @@ function TabelleManager() {
         catch (e) { toast.error(errMsg(e, "Errore")); }
     };
     const copyToken = (tok) => { navigator.clipboard.writeText(tok); toast.success(`Copiato ${tok}`); };
+    const duplica = async (t) => {
+        try { await api.post(`/librerie/tabelle/${t.id}/duplica`); toast.success(`Tabella duplicata: "${t.nome} (copia)" ✓`); load(); }
+        catch (e) { toast.error(errMsg(e, "Errore nella duplicazione")); }
+    };
 
     if (editing) return <TabellaEditor tabella={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
 
@@ -5340,6 +5344,7 @@ function TabelleManager() {
                         </div>
                         <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 shrink-0">{t.tipo === "checklist" ? "Checklist" : "Griglia"}</span>
                         <Button size="sm" variant="outline" className="h-8" onClick={() => setEditing(t)} data-testid={`tabella-edit-${t.slug}`}><Pencil size={13} /></Button>
+                        <Button size="sm" variant="outline" className="h-8 text-violet-600 border-violet-200 hover:bg-violet-50" onClick={() => duplica(t)} data-testid={`tabella-dup-${t.slug}`} title="Duplica tabella"><Copy size={13} /></Button>
                         <Button size="sm" variant="outline" className="h-8 text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => elimina(t)} data-testid={`tabella-del-${t.slug}`}><Trash2 size={13} /></Button>
                     </div>
                 ))}
@@ -5496,113 +5501,152 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
 
 function WordVisualEditor({ modello, onClose }) {
     const [struttura, setStruttura] = useState(null);
-    const [insertions, setInsertions] = useState([]); // {p_index, offset, token, _k}
-    const [caret, setCaret] = useState(null);          // {p_index, offset}
+    const [dirty, setDirty] = useState(() => new Set());
+    const [deleted, setDeleted] = useState(() => new Set());
     const [saving, setSaving] = useState(false);
+    const [color, setColor] = useState("#c0392b");
+    const refs = useRef({});        // p_index -> editable element
+    const htmlCache = useRef({});   // p_index -> initial html (costruito una volta)
+    const savedRange = useRef(null);
+    const lastFocused = useRef(null);
 
-    const load = () => api.get(`/librerie/modelli/${modello.id}/struttura-word`)
-        .then((r) => { setStruttura(r.data); setInsertions([]); setCaret(null); })
-        .catch(() => { toast.error("Impossibile aprire il documento"); onClose(false); });
+    const escapeHtml = (s) => (s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const segToHtml = (seg) => {
+        let t = escapeHtml(seg.text || "");
+        if (seg.color) t = `<span style="color:#${seg.color}">${t}</span>`;
+        if (seg.u) t = `<u>${t}</u>`;
+        if (seg.i) t = `<em>${t}</em>`;
+        if (seg.b) t = `<strong>${t}</strong>`;
+        return t;
+    };
+    const paraHtml = (block) => {
+        if (htmlCache.current[block.p_index] == null) {
+            const h = (block.segments || []).map(segToHtml).join("");
+            htmlCache.current[block.p_index] = h || "<br>";
+        }
+        return htmlCache.current[block.p_index];
+    };
+
+    const load = () => {
+        htmlCache.current = {};
+        api.get(`/librerie/modelli/${modello.id}/struttura-word`)
+            .then((r) => { setStruttura(r.data); setDirty(new Set()); setDeleted(new Set()); })
+            .catch(() => { toast.error("Impossibile aprire il documento"); onClose(false); });
+    };
     useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-    const addInsertion = (key) => {
-        if (!caret) { toast.info("Clicca prima nel documento, nel punto dove inserire il segnaposto"); return; }
-        const token = `{${key}}`;
-        setInsertions((arr) => [...arr, { p_index: caret.p_index, offset: caret.offset, token, _k: Date.now() + Math.random() }]);
-    };
-    const removeInsertion = (k) => setInsertions((arr) => arr.filter((x) => x._k !== k));
-
-    const handleParaClick = (pIndex) => {
+    const markDirty = (pi) => setDirty((s) => { if (s.has(pi)) return s; const n = new Set(s); n.add(pi); return n; });
+    const rememberSel = (pi) => {
+        lastFocused.current = pi;
         const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        let node = sel.anchorNode;
-        const within = node && node.nodeType === 3 ? (sel.anchorOffset || 0) : 0;
-        if (node && node.nodeType === 3) node = node.parentElement;
-        let base = null;
-        while (node && node.getAttribute) {
-            const v = node.getAttribute("data-ostart");
-            if (v != null) { base = parseInt(v, 10); break; }
-            node = node.parentElement;
-        }
-        if (base == null) return;
-        setCaret({ p_index: pIndex, offset: base + within });
+        if (sel && sel.rangeCount > 0) savedRange.current = sel.getRangeAt(0).cloneRange();
+    };
+    const restoreSel = () => {
+        const pi = lastFocused.current;
+        if (pi == null || !refs.current[pi]) return false;
+        refs.current[pi].focus();
+        if (savedRange.current) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(savedRange.current); }
+        return true;
     };
 
+    const applyCmd = (cmd, arg) => {
+        if (!restoreSel()) { toast.info("Seleziona prima il testo nel documento"); return; }
+        document.execCommand(cmd, false, arg);
+        if (lastFocused.current != null) markDirty(lastFocused.current);
+        rememberSel(lastFocused.current);
+    };
+    const insertToken = (key) => {
+        if (!restoreSel()) { toast.info("Clicca prima nel documento, nel punto dove inserire il segnaposto"); return; }
+        document.execCommand("insertText", false, `{${key}}`);
+        if (lastFocused.current != null) markDirty(lastFocused.current);
+        rememberSel(lastFocused.current);
+    };
+    const toggleDelete = (pi) => setDeleted((s) => { const n = new Set(s); n.has(pi) ? n.delete(pi) : n.add(pi); return n; });
+
+    const cssToHex = (c) => {
+        if (!c) return null; c = String(c).trim();
+        if (c.startsWith("#")) { let h = c.slice(1); if (h.length === 3) h = h.split("").map((x) => x + x).join(""); return h.toUpperCase(); }
+        const m = c.match(/\d+/g);
+        if (!m || m.length < 3) return null;
+        return m.slice(0, 3).map((n) => (+n).toString(16).padStart(2, "0")).join("").toUpperCase();
+    };
+    const serialize = (el) => {
+        const runs = [];
+        const push = (text, f) => {
+            if (text === "") return;
+            const last = runs[runs.length - 1];
+            if (last && !!last.bold === !!f.bold && !!last.italic === !!f.italic && !!last.underline === !!f.underline && (last.color || null) === (f.color || null)) last.text += text;
+            else runs.push({ text, bold: !!f.bold, italic: !!f.italic, underline: !!f.underline, color: f.color || null });
+        };
+        const walk = (node, f) => {
+            node.childNodes.forEach((ch) => {
+                if (ch.nodeType === 3) { push(ch.nodeValue, f); return; }
+                if (ch.nodeType !== 1) return;
+                const tag = ch.tagName.toLowerCase();
+                if (tag === "br") { push("\n", f); return; }
+                const nf = { ...f }; const st = ch.style || {};
+                if (tag === "b" || tag === "strong") nf.bold = true;
+                if (tag === "i" || tag === "em") nf.italic = true;
+                if (tag === "u" || tag === "ins") nf.underline = true;
+                if (st.fontWeight === "bold" || parseInt(st.fontWeight) >= 600) nf.bold = true;
+                if (st.fontStyle === "italic") nf.italic = true;
+                if (/underline/.test(st.textDecoration || st.textDecorationLine || "")) nf.underline = true;
+                const col = st.color || (ch.getAttribute && ch.getAttribute("color"));
+                if (col) nf.color = cssToHex(col);
+                walk(ch, nf);
+            });
+        };
+        walk(el, { bold: false, italic: false, underline: false, color: null });
+        if (runs.length === 1 && runs[0].text === "\n") return [];
+        return runs;
+    };
+
+    const pending = deleted.size + [...dirty].filter((pi) => !deleted.has(pi)).length;
     const salva = async () => {
-        if (insertions.length === 0) { toast.info("Nessun segnaposto da inserire"); return; }
+        const payload = [];
+        deleted.forEach((pi) => payload.push({ p_index: pi, deleted: true }));
+        dirty.forEach((pi) => { if (deleted.has(pi)) return; const el = refs.current[pi]; if (el) payload.push({ p_index: pi, runs: serialize(el) }); });
+        if (payload.length === 0) { toast.info("Nessuna modifica da salvare"); return; }
         setSaving(true);
         try {
-            const r = await api.post(`/librerie/modelli/${modello.id}/inserisci-segnaposto`,
-                { insertions: insertions.map(({ p_index, offset, token }) => ({ p_index, offset, token })) });
-            toast.success(`Inseriti ${r.data.inserted} segnaposto ✓`);
+            const r = await api.post(`/librerie/modelli/${modello.id}/salva-contenuto`, { paragraphs: payload });
+            toast.success(`Salvato ✓ — ${r.data.edited} modificati, ${r.data.deleted} righe eliminate`);
             load();
         } catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
         setSaving(false);
     };
 
-    const TOKEN_RE = /\{[a-z_][a-z0-9_]*(?::[a-z0-9_]+)?\}/gi;
-    const renderOriginalText = (text, start) => {
-        const out = []; let last = 0; let m; let i = 0; TOKEN_RE.lastIndex = 0;
-        while ((m = TOKEN_RE.exec(text))) {
-            if (m.index > last) out.push(<span key={i++} data-ostart={start + last}>{text.slice(last, m.index)}</span>);
-            out.push(<span key={i++} data-ostart={start + m.index} className="bg-sky-100 text-sky-700 rounded px-0.5">{m[0]}</span>);
-            last = m.index + m[0].length;
-        }
-        if (last < text.length) out.push(<span key={i++} data-ostart={start + last}>{text.slice(last)}</span>);
-        return out;
-    };
+    const SWATCHES = ["#000000", "#c0392b", "#1d4ed8", "#15803d", "#b45309", "#7c3aed"];
 
-    const renderParagraph = (block) => {
-        const insMap = {};
-        insertions.filter((x) => x.p_index === block.p_index).forEach((x) => { (insMap[x.offset] = insMap[x.offset] || []).push(x); });
-        const chars = []; (block.segments || []).forEach((seg) => { for (const ch of seg.text) chars.push({ ch, b: seg.b, i: seg.i, u: seg.u }); });
-        const nodes = []; let buf = ""; let bufFmt = null; let bufStart = 0; let key = 0;
-        const fmtKey = (f) => `${f.b ? 1 : 0}${f.i ? 1 : 0}${f.u ? 1 : 0}`;
-        const flush = () => {
-            if (buf !== "") {
-                const style = { fontWeight: bufFmt.b ? 700 : undefined, fontStyle: bufFmt.i ? "italic" : undefined, textDecoration: bufFmt.u ? "underline" : undefined };
-                nodes.push(<span key={`t${key++}`} style={style}>{renderOriginalText(buf, bufStart)}</span>);
-                buf = "";
-            }
-        };
-        for (let off = 0; off <= chars.length; off++) {
-            if (caret && caret.p_index === block.p_index && caret.offset === off) {
-                flush();
-                nodes.push(<span key={`c${key++}`} className="inline-block w-0.5 h-4 bg-violet-600 align-text-bottom animate-pulse" />);
-            }
-            if (insMap[off]) {
-                flush();
-                insMap[off].forEach((it) => nodes.push(
-                    <span key={`i${it._k}`} contentEditable={false} className="inline-flex items-center gap-0.5 mx-0.5 px-1.5 py-0.5 rounded bg-violet-600 text-white text-xs font-mono select-none align-middle">
-                        {it.token}
-                        <button type="button" onClick={(e) => { e.stopPropagation(); removeInsertion(it._k); }} className="hover:text-rose-200" title="Rimuovi">
-                            <XCircle size={12} />
-                        </button>
-                    </span>));
-            }
-            if (off < chars.length) {
-                const c = chars[off];
-                if (buf === "") { bufStart = off; bufFmt = c; }
-                else if (fmtKey(c) !== fmtKey(bufFmt)) { flush(); bufStart = off; bufFmt = c; }
-                buf += c.ch;
-            }
-        }
-        flush();
-        if (nodes.length === 0) nodes.push(<span key="empty" data-ostart={0} className="text-slate-300 italic">(riga vuota — clicca per inserire)</span>);
-        return nodes;
+    const renderPara = (block) => {
+        const pi = block.p_index; const del = deleted.has(pi);
+        const isHeading = /heading|title/i.test(block.style || "");
+        return (
+            <div key={`p${pi}`} className="group flex items-start gap-1" data-testid={`wve-row-${pi}`}>
+                <div
+                    ref={(el) => { refs.current[pi] = el; }}
+                    contentEditable={!del}
+                    suppressContentEditableWarning
+                    spellCheck={false}
+                    onInput={() => markDirty(pi)}
+                    onFocus={() => rememberSel(pi)}
+                    onKeyUp={() => rememberSel(pi)}
+                    onMouseUp={() => rememberSel(pi)}
+                    dangerouslySetInnerHTML={{ __html: paraHtml(block) }}
+                    className={`flex-1 outline-none rounded px-1 min-h-[1.5em] focus:bg-violet-50/60 ${del ? "line-through opacity-40 pointer-events-none" : ""} ${isHeading ? "text-base font-semibold text-slate-900 mt-1" : "text-sm text-slate-800 leading-relaxed"}`}
+                    data-testid={`wve-para-${pi}`}
+                />
+                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => toggleDelete(pi)}
+                    title={del ? "Ripristina riga" : "Elimina riga"}
+                    className={`opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 p-1 rounded shrink-0 ${del ? "text-emerald-600 hover:bg-emerald-50" : "text-rose-500 hover:bg-rose-50"}`}
+                    data-testid={`wve-del-${pi}`}>
+                    {del ? <Undo2 size={13} /> : <Trash2 size={13} />}
+                </button>
+            </div>
+        );
     };
-
     const renderBlocks = (blocks) => blocks.map((b, i) => {
-        if (b.type === "paragraph") {
-            const isHeading = /heading|title/i.test(b.style || "");
-            return (
-                <p key={`p${b.p_index}`} onClick={() => handleParaClick(b.p_index)}
-                    className={`cursor-text rounded px-1 -mx-1 min-h-[1.4em] hover:bg-violet-50/50 ${isHeading ? "text-base font-semibold text-slate-900 mt-2 mb-1" : "text-sm text-slate-800 leading-relaxed"}`}
-                    data-testid={`wve-para-${b.p_index}`}>
-                    {renderParagraph(b)}
-                </p>
-            );
-        }
+        if (b.type === "paragraph") return renderPara(b);
         return (
             <table key={`tb${i}`} className="border-collapse my-2 w-full">
                 <tbody>
@@ -5618,35 +5662,58 @@ function WordVisualEditor({ modello, onClose }) {
         );
     });
 
+    const ToolBtn = ({ onClick, title, testid, children }) => (
+        <button type="button" title={title} data-testid={testid}
+            onMouseDown={(e) => e.preventDefault()} onClick={onClick}
+            className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-violet-50 hover:text-violet-700 hover:border-violet-300 transition-colors">
+            {children}
+        </button>
+    );
+
     return (
-        <Dialog open onOpenChange={(o) => !o && onClose(false)}>
+        <Dialog open onOpenChange={(o) => !o && onClose(true)}>
             <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col" data-testid="word-visual-editor">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Braces size={16} className="text-violet-700" /> Inserisci segnaposto — {modello.nome}
+                        <Pencil size={16} className="text-violet-700" /> Modifica documento — {modello.nome}
                     </DialogTitle>
                 </DialogHeader>
                 <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-slate-700 shrink-0">
-                    <strong>1)</strong> Clicca nel documento nel punto dove vuoi il dato. <strong>2)</strong> Scegli un segnaposto dall'elenco a destra. <strong>3)</strong> Premi <strong>Salva segnaposto</strong>. Il layout del tuo Word resta identico.
-                    {caret && <span className="ml-2 text-violet-700 font-semibold">• punto selezionato ✓</span>}
+                    Scrivi direttamente nel documento per <strong>modificare o cancellare il testo</strong>. Seleziona una parte e usa i pulsanti per <strong>grassetto</strong> o <strong>colore</strong>. Il cestino a lato di ogni riga <strong>elimina la riga</strong> (anche quelle vuote). Per i dati dinamici, clicca nel punto e scegli un <strong>segnaposto</strong> a destra.
                 </div>
-                <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-3 overflow-hidden min-h-0 mt-2">
+                <div className="flex flex-wrap items-center gap-1.5 border border-slate-200 rounded-lg bg-white px-2 py-1.5 shrink-0" data-testid="wve-toolbar">
+                    <ToolBtn onClick={() => applyCmd("bold")} title="Grassetto" testid="wve-bold"><Bold size={15} /></ToolBtn>
+                    <ToolBtn onClick={() => applyCmd("italic")} title="Corsivo" testid="wve-italic"><Italic size={15} /></ToolBtn>
+                    <ToolBtn onClick={() => applyCmd("underline")} title="Sottolineato" testid="wve-underline"><Underline size={15} /></ToolBtn>
+                    <div className="w-px h-6 bg-slate-200 mx-1" />
+                    <Palette size={15} className="text-slate-400" />
+                    {SWATCHES.map((c) => (
+                        <button key={c} type="button" title={`Colore ${c}`} data-testid={`wve-swatch-${c.slice(1)}`}
+                            onMouseDown={(e) => e.preventDefault()} onClick={() => { setColor(c); applyCmd("foreColor", c); }}
+                            className="h-6 w-6 rounded-full border border-slate-300 hover:scale-110 transition-transform" style={{ backgroundColor: c }} />
+                    ))}
+                    <input type="color" value={color} data-testid="wve-color"
+                        onChange={(e) => { setColor(e.target.value); applyCmd("foreColor", e.target.value); }}
+                        className="h-7 w-9 rounded border border-slate-200 bg-white cursor-pointer p-0.5" title="Colore personalizzato" />
+                    <span className="text-[11px] text-slate-400 ml-auto">Suggerimento: doppio clic per selezionare una parola</span>
+                </div>
+                <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 overflow-hidden min-h-0 mt-2">
                     <div className="border border-slate-200 rounded-lg bg-white overflow-y-auto p-5 shadow-inner" data-testid="wve-document">
                         {!struttura ? <div className="text-slate-400 text-sm p-6">Caricamento documento…</div>
-                            : <div className="max-w-[640px] mx-auto space-y-1">{renderBlocks(struttura.blocks)}</div>}
+                            : <div className="max-w-[640px] mx-auto space-y-0.5">{renderBlocks(struttura.blocks)}</div>}
                     </div>
                     <div className="border border-slate-200 rounded-lg bg-slate-50 overflow-y-auto p-3">
-                        <SegnapostoSezione onInsert={addInsertion} compact />
+                        <SegnapostoSezione onInsert={insertToken} compact />
                     </div>
                 </div>
                 <div className="flex items-center justify-between gap-2 pt-2 shrink-0">
                     <div className="text-xs text-slate-500" data-testid="wve-count">
-                        {insertions.length > 0 ? `${insertions.length} segnaposto da salvare` : "Nessuna modifica in sospeso"}
+                        {pending > 0 ? `${pending} ${pending === 1 ? "modifica" : "modifiche"} da salvare` : "Nessuna modifica in sospeso"}
                     </div>
                     <div className="flex items-center gap-2">
                         <Button variant="outline" onClick={() => onClose(true)} data-testid="wve-close">Chiudi</Button>
-                        <Button onClick={salva} disabled={saving || insertions.length === 0} className="bg-violet-700 hover:bg-violet-800" data-testid="wve-save">
-                            {saving ? "Salvataggio…" : "Salva segnaposto"}
+                        <Button onClick={salva} disabled={saving || pending === 0} className="bg-violet-700 hover:bg-violet-800" data-testid="wve-save">
+                            {saving ? "Salvataggio…" : "Salva modifiche"}
                         </Button>
                     </div>
                 </div>
@@ -5685,6 +5752,13 @@ function ModelliSezione() {
             await api.delete(`/librerie/modelli/${m.id}`);
             toast.success("Modello eliminato"); load();
         } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+
+    const duplica = async (m) => {
+        try {
+            await api.post(`/librerie/modelli/${m.id}/duplica`);
+            toast.success(`Modello duplicato: "${m.nome} (copia)" ✓`); load();
+        } catch (e) { toast.error(errMsg(e, "Errore nella duplicazione")); }
     };
 
     const newPerTab = () => {
@@ -5889,11 +5963,19 @@ function ModelliSezione() {
                                             onClick={(e) => { e.stopPropagation(); setVisivo(m); }}
                                             className="text-[10px] font-medium px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 transition-colors"
                                             data-testid={`modello-visivo-${m.id}`}
-                                            title="Inserisci i segnaposto vedendo il tuo documento impaginato"
+                                            title="Modifica testo, formattazione e segnaposto vedendo il documento impaginato"
                                         >
-                                            ✏️ Segnaposto visivo
+                                            ✏️ Modifica documento
                                         </button>
                                     )}
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); duplica(m); }}
+                                        className="text-[10px] font-medium px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 transition-colors inline-flex items-center gap-1"
+                                        data-testid={`modello-dup-${m.id}`}
+                                        title="Crea una copia di questo modello"
+                                    >
+                                        <Copy size={11} /> Duplica
+                                    </button>
                                     {(m.placeholders || []).slice(0, 4).map((p) => (
                                         <span key={p} className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1 py-0.5 rounded">
                                             {`{${p}}`}
