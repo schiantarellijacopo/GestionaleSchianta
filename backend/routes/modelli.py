@@ -497,6 +497,7 @@ class TabellaBody(BaseModel):
     colonne: List[str] = Field(default_factory=list)
     # griglia
     righe: List[List[str]] = Field(default_factory=list)
+    righe_sezione: List[int] = Field(default_factory=list)  # indici righe = intestazioni di sezione (full-width)
     # checklist
     prima_colonna: Optional[str] = None
     voci: List[VoceChecklist] = Field(default_factory=list)
@@ -512,6 +513,7 @@ def _tabella_out(t: dict) -> dict:
         "mostra_intestazione": t.get("mostra_intestazione", True),
         "colonne": t.get("colonne") or [],
         "righe": t.get("righe") or [],
+        "righe_sezione": t.get("righe_sezione") or [],
         "prima_colonna": t.get("prima_colonna"),
         "voci": t.get("voci") or [],
         "token": "{tabella:" + (t.get("slug") or "") + "}",
@@ -631,6 +633,7 @@ async def crea_tabella(body: TabellaBody, user: dict = Depends(current_user)) ->
         "mostra_intestazione": body.mostra_intestazione,
         "colonne": body.colonne,
         "righe": body.righe,
+        "righe_sezione": body.righe_sezione,
         "prima_colonna": body.prima_colonna,
         "voci": [v.model_dump() for v in body.voci],
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -652,6 +655,7 @@ async def aggiorna_tabella(tid: str, body: TabellaBody, user: dict = Depends(cur
         "mostra_intestazione": body.mostra_intestazione,
         "colonne": body.colonne,
         "righe": body.righe,
+        "righe_sezione": body.righe_sezione,
         "prima_colonna": body.prima_colonna,
         "voci": [v.model_dump() for v in body.voci],
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -1087,9 +1091,10 @@ def _slugify_tabella(nome: str) -> str:
 
 
 def _tabella_righe_render(tab: dict, ctx: dict):
-    """Risolve una tabella in (headers, rows) con i segnaposto sostituiti.
+    """Risolve una tabella in (headers, rows, sezioni) con i segnaposto sostituiti.
 
     headers è ``None`` quando l'intestazione non va mostrata.
+    sezioni è il set degli indici di riga che sono intestazioni di sezione (full-width).
     """
     tipo = tab.get("tipo") or "griglia"
     mostra = tab.get("mostra_intestazione", True)
@@ -1106,13 +1111,14 @@ def _tabella_righe_render(tab: dict, ctx: dict):
                 checked = spunte[i] if i < len(spunte) else False
                 cells.append("X" if checked else "")
             rows.append(cells)
-        return headers, rows
+        return headers, rows, set()
     # griglia
     cols = tab.get("colonne") or []
     headers = [render_text(c, ctx) for c in cols] if (cols and mostra) else None
-    rows = [[render_text(str(c if c is not None else ""), ctx) for c in row]
-            for row in (tab.get("righe") or [])]
-    return headers, rows
+    righe = tab.get("righe") or []
+    rows = [[render_text(str(c if c is not None else ""), ctx) for c in row] for row in righe]
+    sezioni = {i for i in (tab.get("righe_sezione") or []) if 0 <= i < len(rows)}
+    return headers, rows, sezioni
 
 
 async def _load_tabelle_map(slugs) -> dict:
@@ -1135,8 +1141,9 @@ def _esc_html(s: str) -> str:
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def _docx_build_tabella(doc, headers, rows) -> None:
+def _docx_build_tabella(doc, headers, rows, sezioni=None) -> None:
     """Costruisce e appende una tabella Word (python-docx) al documento."""
+    sezioni = sezioni or set()
     ncols = len(headers) if headers else (len(rows[0]) if rows else 1)
     if ncols < 1:
         ncols = 1
@@ -1154,13 +1161,37 @@ def _docx_build_tabella(doc, headers, rows) -> None:
             for p in cells[i].paragraphs:
                 for run in p.runs:
                     run.bold = True
-    for r in rows:
+    for ri, r in enumerate(rows):
         cells = table.add_row().cells
+        if ri in sezioni:
+            _docx_sezione_row(cells, r, ncols)
+            continue
         for i, c in enumerate(r):
             if i >= ncols:
                 break
             cells[i].text = str(c if c is not None else "")
     doc.add_paragraph("")
+
+
+def _docx_sezione_row(cells, r, ncols) -> None:
+    """Rende una riga di sezione: celle unite, testo in grassetto, sfondo chiaro."""
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    label = next((str(c) for c in r if c is not None and str(c).strip()), "")
+    merged = cells[0]
+    for i in range(1, ncols):
+        merged = merged.merge(cells[i])
+    merged.text = label
+    for p in merged.paragraphs:
+        for run in p.runs:
+            run.bold = True
+    try:
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"), "clear")
+        shd.set(qn("w:fill"), "E2E8F0")
+        merged._tc.get_or_add_tcPr().append(shd)
+    except Exception:
+        pass
 
 
 def _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors):

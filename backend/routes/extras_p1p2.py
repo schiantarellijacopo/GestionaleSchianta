@@ -38,7 +38,7 @@ async def documenti_mancanti(
     Il conteggio (`totali`) è quello REALE (non limitato dalla paginazione delle liste)
     così quando l'utente allega un documento il badge diminuisce immediatamente.
     """
-    LIMIT = 500  # max righe per lista (paginazione UI)
+    LIMIT = 20000  # max righe per lista (mostra tutti i documenti mancanti)
 
     # === 1. POLIZZE SENZA ALLEGATO ===
     today = _now_iso()[:10]
@@ -197,7 +197,7 @@ async def documenti_mancanti(
          "stato": {"$nin": ["ERROR"]}},
         {"_id": 0, "id": 1, "nome_file": 1, "firmatario_nome": 1, "stato": 1,
          "entita_tipo": 1, "entita_id": 1, "created_at": 1, "signing_url": 1},
-    ).sort("created_at", -1).to_list(500)
+    ).sort("created_at", -1).to_list(20000)
 
     return {
         "polizze_senza_allegato": polizze_senza,
