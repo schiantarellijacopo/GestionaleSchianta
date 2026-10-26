@@ -5652,6 +5652,8 @@ function PdfVisualEditor({ modello, onClose }) {
     const [noPdf, setNoPdf] = useState(false);
     const [corpo, setCorpo] = useState(modello.corpo || "");
     const corpoRef = useRef(null);
+    const savedRef = useRef(false);
+    const close = () => onClose(savedRef.current);
 
     const load = () => {
         setLoading(true);
@@ -5675,7 +5677,7 @@ function PdfVisualEditor({ modello, onClose }) {
 
     const salvaOverlay = async () => {
         setSaving(true);
-        try { await api.post(`/librerie/modelli/${modello.id}/pdf-overlay`, { overlay }); toast.success(`Segnaposto PDF salvati ✓ (${overlay.length})`); }
+        try { await api.post(`/librerie/modelli/${modello.id}/pdf-overlay`, { overlay }); savedRef.current = true; toast.success(`Segnaposto PDF salvati ✓ (${overlay.length})`); }
         catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
         finally { setSaving(false); }
     };
@@ -5688,7 +5690,7 @@ function PdfVisualEditor({ modello, onClose }) {
             default: !!modello.default, attivo: modello.attivo !== false, note: modello.note || null,
             richiede_firma: !!modello.richiede_firma, logo_url: modello.logo_url || null,
         };
-        try { await api.put(`/librerie/modelli/${modello.id}`, b); toast.success("Testo salvato ✓"); }
+        try { await api.put(`/librerie/modelli/${modello.id}`, b); savedRef.current = true; modello.corpo = corpo; toast.success("Testo salvato ✓"); }
         catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
         finally { setSaving(false); }
     };
@@ -5716,7 +5718,7 @@ function PdfVisualEditor({ modello, onClose }) {
     };
 
     return (
-        <Dialog open onOpenChange={() => onClose(false)}>
+        <Dialog open onOpenChange={() => close()}>
             <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col" data-testid="pdf-visual-editor">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2 text-base">
@@ -5760,8 +5762,8 @@ function PdfVisualEditor({ modello, onClose }) {
                                     {overlay.map((o, idx) => o.page === pg.index && (
                                         <div key={idx}
                                             onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
-                                            className={`absolute font-mono text-[11px] px-1 rounded cursor-pointer whitespace-nowrap ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
-                                            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%` }}
+                                            className={`absolute font-mono px-1 rounded cursor-pointer whitespace-nowrap ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
+                                            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, fontSize: `${o.font_size || 11}px` }}
                                             data-testid={`pdf-overlay-item-${idx}`}
                                             title="Clicca per selezionare">
                                             {`{${o.key}}`}
@@ -5808,7 +5810,7 @@ function PdfVisualEditor({ modello, onClose }) {
                 )}
 
                 <DialogFooter className="border-t pt-3">
-                    <Button variant="outline" onClick={() => onClose(false)} data-testid="pdf-visual-close">Chiudi</Button>
+                    <Button variant="outline" onClick={() => close()} data-testid="pdf-visual-close">Chiudi</Button>
                     {mode === "overlay" ? (
                         <>
                             {!noPdf && <Button variant="outline" onClick={anteprimaPdf} data-testid="pdf-overlay-anteprima"><Eye size={14} className="mr-1" />Anteprima PDF</Button>}
@@ -5902,8 +5904,9 @@ function WordVisualEditor({ modello, onClose }) {
     const restoreSel = () => {
         const pi = lastFocused.current;
         if (pi == null || !refs.current[pi]) return false;
+        const saved = savedRange.current;  // capture before focus() (focus fires rememberSel and would overwrite it)
         refs.current[pi].focus();
-        if (savedRange.current) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(savedRange.current); }
+        if (saved) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(saved); savedRange.current = saved; }
         return true;
     };
 

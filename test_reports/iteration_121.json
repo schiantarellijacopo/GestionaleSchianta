@@ -1,0 +1,47 @@
+{
+  "summary": "Frontend-only UI testing (Playwright, desktop 1920x1080) of Librerie > Gestioni Modelli: TabellaEditor (righe-sezione, segnaposto nelle celle, anteprima, persistenza), new PdfVisualEditor (overlay + testo) and regression of WordVisualEditor / 'Segnaposto visivo'. The sandbox agency account does not exist in this DB (login gives 'Credenziali non valide'; no tenant or user found), so all writes were done on the admin tenant with TEST_-prefixed data, which was then deleted (2 modelli + 1 tabella). Tabelle: all checks passed. PDF overlay: all checks passed. PDF testo: saving works, but the dialog shows old text when reopened. WordVisualEditor: saving works, but placeholders are inserted at the START of the paragraph instead of at the caret (regression bug).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "WordVisualEditor.insertToken/restoreSel (Librerie.jsx ~5902-5921)", "issue": "Placeholder from the palette is always inserted at the start of the paragraph, not at the caret, both after a mouse click at the end of the text and after typing. Reproduced twice. Saving and persistence of the edit work.", "selector": "[data-testid^=wve-para-] + [data-testid^=segnaposto-item-]", "priority": "HIGH"},
+      {"component": "PdfVisualEditor (testo mode) + ModelliCard (Librerie.jsx 6369, 5811)", "issue": "After 'Salva testo' (backend saves corpo correctly), closing and reopening the editor without reloading the page shows the OLD corpo. onClose is always called with false, so the list is never reloaded and the stale `modello` prop is used. A second save from there would overwrite the new text with the old one.", "selector": "[data-testid=pdf-visual-close], [data-testid=pdf-testo-corpo]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "PdfVisualEditor overlay", "issues": ["Overlay chips always render at text-[11px] whatever font_size is set (16 looked the same as 11), so the preview does not match the stamped size", "Placeholders cannot be dragged; repositioning is only possible via the X%/Y% inputs", "Removing a placeholder or closing the dialog with unsaved changes gives no warning"]},
+      {"screen": "TabellaEditor", "issues": ["'Anteprima' is an inline preview only, with no print or paginated (A4) view or print button, although the request asked for an 'impaginata/stampabile' preview", "The active (default variant) 'Anteprima' toggle looks washed out (white text on light sky background), low contrast"]}
+    ]
+  },
+  "passed_tests": [
+    "Tabelle: open manager (modelli-tabelle-btn), new griglia, rename columns",
+    "Tabelle: add data rows + 2 righe-sezione; sezione row is visually distinct (slate-200 bg, Layers icon, bold full-width input)",
+    "Tabelle: convert data row -> sezione -> back (cell data kept)",
+    "Tabelle: palette placeholder inserted at caret in a data cell ('Max {azienda_nome}') and in a sezione title",
+    "Tabelle: Anteprima shows header (dark), data rows, and sezioni with colSpan=all columns, bold grey",
+    "Tabelle: save -> reopen -> full page reload: 2 sezioni + cell placeholders persisted",
+    "PDF: 'PDF visivo' button present on pdf_* cards (9); editor opens; no-PDF state shows pdf-upload-origine, save disabled, anteprima hidden",
+    "PDF overlay: upload PDF -> 2 pages rendered as base64 PNG (pdf-page-0/1); select key -> click -> pdf-overlay-item-0; fontsize 16; second item on page 2; save toast '(2)'; anteprima opens new tab; reopen shows 2 items with fontsize 16; remove works",
+    "PDF backend check: overlay persisted with page/x/y/font_size; genera-pdf-overlay 200 application/pdf contains the stamped values; overlay kept after the testo PUT",
+    "PDF testo: corpo edited, placeholder inserted at caret position, 'Testo salvato' toast, corpo saved in DB",
+    "Regression: WordVisualEditor edit + save + reopen persisted; 'Segnaposto visivo' on email/sms/whatsapp opens the form with the palette (130 items), SMS insert works"
+  ],
+  "test_report_links": [],
+  "action_items": [
+    "WordVisualEditor restoreSel: refs.current[pi].focus() fires onFocus -> rememberSel, which overwrites savedRange with the caret at the start before addRange runs. Fix: const r = savedRange.current; focus(); then addRange(r), or skip rememberSel while restoring",
+    "PdfVisualEditor: after salvaCorpo, update the local modello/parent list (call onClose(true) on close, or pass an onSaved that runs load()) so reopening shows the saved corpo",
+    "Optional: make overlay chip fontSize follow o.font_size; add drag-to-move; add a print button / A4 layout to the TabellaEditor anteprima; improve active toggle contrast",
+    "Re-create the sandbox agency (test@sandbox.it) or update /app/memory/test_credentials.md; it does not exist in the current DB"
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is 7.7k+ lines; split TabelleManager/TabellaEditor/PdfVisualEditor/WordVisualEditor into separate modules",
+    "PdfVisualEditor.salvaCorpo rebuilds the whole PUT body from a possibly stale modello prop, so it can overwrite fields changed elsewhere; prefer a PATCH or refetch before saving",
+    "PdfVisualEditor Dialog onOpenChange always calls onClose(false), so overlay or text changes never refresh the cards (placeholders chips stay stale)"
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped as requested)", "frontend": "~88% (2 functional bugs out of ~17 checks)"},
+  "test_credentials": "Admin account from /app/memory/test_credentials.md works. The sandbox account in test_credentials.md is not valid: no user or tenant in the DB.",
+  "seed_data_creation": "Created TEST_PDF_Visivo_T1 (pdf_altro), TEST_Word_T1 (word_fedele) and table 'TEST_T1 Sezioni' on the admin tenant; all deleted at the end.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Navigation: /librerie -> lib-tab-modelli -> modelli-tab-{email|sms|whatsapp|pdf|word}; Tabelle via modelli-tabelle-btn. The PDF editor button is modello-pdfvisivo-{id} (only for pdf_* tipo and !word_fedele). Word editor is modello-visivo-{id} for word_fedele. To get a word_fedele model, POST /api/librerie/modelli/importa-word-fedele (multipart file .docx + nome). Retest: WVE caret insert and PDF testo reopen stale corpo."
+}
