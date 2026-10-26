@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -5150,13 +5150,29 @@ const MODELLI_GRUPPI = [
     },
 ];
 
-function SegnapostoSezione() {
+const SEGNAPOSTO_PREF_KEY = "segnaposto_preferiti_v1";
+
+function SegnapostoSezione({ onInsert = null, compact = false }) {
     const [data, setData] = useState(null);
     const [q, setQ] = useState("");
+    const [gruppoAttivo, setGruppoAttivo] = useState("");   // "" = tutti
+    const [preferiti, setPreferiti] = useState(() => {
+        try { return JSON.parse(localStorage.getItem(SEGNAPOSTO_PREF_KEY) || "[]"); }
+        catch { return []; }
+    });
 
     useEffect(() => {
         api.get("/librerie/placeholders").then((r) => setData(r.data)).catch(() => setData({ gruppi: [], totale: 0 }));
     }, []);
+
+    const salvaPreferiti = (arr) => {
+        setPreferiti(arr);
+        try { localStorage.setItem(SEGNAPOSTO_PREF_KEY, JSON.stringify(arr)); } catch { /* noop */ }
+    };
+    const togglePreferito = (key, e) => {
+        e?.stopPropagation();
+        salvaPreferiti(preferiti.includes(key) ? preferiti.filter((k) => k !== key) : [...preferiti, key]);
+    };
 
     const copia = (token) => {
         navigator.clipboard?.writeText(token).then(
@@ -5164,54 +5180,123 @@ function SegnapostoSezione() {
             () => toast.error("Impossibile copiare"),
         );
     };
+    const handleClick = (it) => {
+        if (onInsert) onInsert(it.key);
+        else copia(it.token);
+    };
 
     if (!data) return <div className="p-6 text-slate-400 text-sm">Caricamento…</div>;
 
     const ql = q.trim().toLowerCase();
-    const gruppi = data.gruppi
-        .map((g) => ({
-            ...g,
-            items: g.items.filter((it) => !ql || it.key.toLowerCase().includes(ql) || (it.label || "").toLowerCase().includes(ql)),
-        }))
+    const matchItem = (it) => !ql || it.key.toLowerCase().includes(ql) || (it.label || "").toLowerCase().includes(ql) || (it.esempio || "").toLowerCase().includes(ql);
+
+    // Tutti i gruppi filtrati per testo + gruppo attivo
+    const gruppiFiltrati = data.gruppi
+        .filter((g) => !gruppoAttivo || g.gruppo === gruppoAttivo)
+        .map((g) => ({ ...g, items: g.items.filter(matchItem) }))
         .filter((g) => g.items.length > 0);
+
+    // Elenco piatto per risolvere i preferiti
+    const flat = data.gruppi.flatMap((g) => g.items);
+    const itemsPreferiti = preferiti
+        .map((k) => flat.find((it) => it.key === k))
+        .filter(Boolean)
+        .filter(matchItem)
+        .filter((it) => !gruppoAttivo || data.gruppi.find((g) => g.gruppo === gruppoAttivo)?.items.some((x) => x.key === it.key));
+
+    const RenderItem = (it) => {
+        const fav = preferiti.includes(it.key);
+        return (
+            <div
+                key={it.key}
+                onClick={() => handleClick(it)}
+                className="flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg border border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40 transition-colors group cursor-pointer"
+                data-testid={`segnaposto-item-${it.key}`}
+                title={onInsert ? `Inserisci ${it.token}` : `Copia ${it.token}`}
+            >
+                <div className="min-w-0">
+                    <div className="font-mono text-xs text-sky-700 truncate">{it.token}</div>
+                    <div className="text-[11px] text-slate-500 truncate">{it.label}</div>
+                    {it.esempio && <div className="text-[10px] text-emerald-600 truncate italic">es. {it.esempio}</div>}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                    <button
+                        type="button"
+                        onClick={(e) => togglePreferito(it.key, e)}
+                        className="p-0.5 rounded hover:bg-amber-50"
+                        data-testid={`segnaposto-fav-${it.key}`}
+                        title={fav ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}
+                    >
+                        <Star size={14} className={fav ? "text-amber-400 fill-amber-400" : "text-slate-300 group-hover:text-amber-300"} />
+                    </button>
+                    {onInsert
+                        ? <Plus size={14} className="text-slate-300 group-hover:text-sky-500" />
+                        : <Copy size={14} className="text-slate-300 group-hover:text-sky-500" />}
+                </div>
+            </div>
+        );
+    };
 
     return (
         <div className="space-y-5" data-testid="segnaposto-sezione">
-            <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-slate-700">
-                <div className="font-semibold text-sky-800 mb-1">Come si usano i segnaposto {"{…}"}</div>
-                <p>Scrivi il segnaposto (es. <code className="bg-white px-1 rounded border">{"{cliente}"}</code>) nel testo del modello, oppure nel tuo file <strong>Word/PDF</strong> prima di caricarlo. In fase di generazione il programma li sostituisce automaticamente con i dati reali di <strong>cliente, polizza, agenzia e collaboratore</strong>.</p>
-                <p className="mt-1">Per la firma digitale usa <code className="bg-white px-1 rounded border">{"{firma}"}</code> dove deve firmare il cliente e <code className="bg-white px-1 rounded border">{"{data_firma}"}</code> per la data della firma.</p>
-                <p className="mt-1 text-xs text-slate-500">Suggerimento: clicca su un segnaposto per copiarlo.</p>
-            </div>
+            {!compact && (
+                <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-slate-700">
+                    <div className="font-semibold text-sky-800 mb-1">Come si usano i segnaposto {"{…}"}</div>
+                    <p>Scrivi il segnaposto (es. <code className="bg-white px-1 rounded border">{"{cliente}"}</code>) nel testo del modello, oppure nel tuo file <strong>Word/PDF</strong> prima di caricarlo. In fase di generazione il programma li sostituisce automaticamente con i dati reali di <strong>cliente, polizza, agenzia e collaboratore</strong>.</p>
+                    <p className="mt-1">Per la firma digitale usa <code className="bg-white px-1 rounded border">{"{firma}"}</code> dove deve firmare il cliente e <code className="bg-white px-1 rounded border">{"{data_firma}"}</code> per la data della firma.</p>
+                    <p className="mt-1 text-xs text-slate-500">Suggerimento: {onInsert ? "clicca su un segnaposto per inserirlo nel testo" : "clicca su un segnaposto per copiarlo"}. Usa la ⭐ per salvarlo tra i preferiti.</p>
+                </div>
+            )}
 
             <div className="relative max-w-sm">
                 <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
                 <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca segnaposto…" className="pl-8 h-9" data-testid="segnaposto-search" />
             </div>
 
-            {gruppi.map((g) => (
-                <div key={g.gruppo} data-testid={`segnaposto-gruppo-${g.gruppo}`}>
-                    <h3 className="text-sm font-semibold text-slate-800 mb-2">{g.gruppo}</h3>
+            {/* Filtri rapidi per gruppo */}
+            <div className="flex flex-wrap gap-1.5" data-testid="segnaposto-filtri-gruppo">
+                <button
+                    type="button"
+                    onClick={() => setGruppoAttivo("")}
+                    className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${gruppoAttivo === "" ? "bg-sky-600 border-sky-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:border-sky-400"}`}
+                    data-testid="segnaposto-filtro-tutti"
+                >
+                    Tutti
+                </button>
+                {data.gruppi.map((g) => (
+                    <button
+                        key={g.gruppo}
+                        type="button"
+                        onClick={() => setGruppoAttivo(gruppoAttivo === g.gruppo ? "" : g.gruppo)}
+                        className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors ${gruppoAttivo === g.gruppo ? "bg-sky-600 border-sky-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:border-sky-400"}`}
+                        data-testid={`segnaposto-filtro-${g.gruppo}`}
+                    >
+                        {g.gruppo}
+                    </button>
+                ))}
+            </div>
+
+            {/* Preferiti in cima */}
+            {itemsPreferiti.length > 0 && (
+                <div data-testid="segnaposto-gruppo-preferiti">
+                    <h3 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
+                        <Star size={14} className="fill-amber-400 text-amber-400" /> Preferiti
+                    </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                        {g.items.map((it) => (
-                            <button
-                                key={it.key}
-                                onClick={() => copia(it.token)}
-                                className="flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg border border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40 transition-colors group"
-                                data-testid={`segnaposto-item-${it.key}`}
-                                title={`Copia ${it.token}`}
-                            >
-                                <div className="min-w-0">
-                                    <div className="font-mono text-xs text-sky-700 truncate">{it.token}</div>
-                                    <div className="text-[11px] text-slate-500 truncate">{it.label}</div>
-                                </div>
-                                <Copy size={14} className="text-slate-300 group-hover:text-sky-500 shrink-0" />
-                            </button>
-                        ))}
+                        {itemsPreferiti.map((it) => RenderItem(it))}
+                    </div>
+                </div>
+            )}
+
+            {gruppiFiltrati.map((g) => (
+                <div key={g.gruppo} data-testid={`segnaposto-gruppo-${g.gruppo}`}>
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">{g.gruppo} <span className="text-slate-400 font-normal">({g.items.length})</span></h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {g.items.map((it) => RenderItem(it))}
                     </div>
                 </div>
             ))}
-            {gruppi.length === 0 && <div className="text-slate-400 text-sm italic">Nessun segnaposto corrisponde alla ricerca.</div>}
+            {gruppiFiltrati.length === 0 && itemsPreferiti.length === 0 && <div className="text-slate-400 text-sm italic">Nessun segnaposto corrisponde alla ricerca.</div>}
         </div>
     );
 }
@@ -5951,37 +6036,8 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             </div>
                         </div>
 
-                        <div className="mt-2 space-y-2 max-h-72 overflow-y-auto">
-                            {Object.entries(
-                                PLACEHOLDERS_DOC.reduce((acc, p) => {
-                                    const cat = p.cat || "Altro";
-                                    if (!acc[cat]) acc[cat] = [];
-                                    acc[cat].push(p);
-                                    return acc;
-                                }, {})
-                            ).map(([cat, items]) => (
-                                <div key={cat} className="bg-white border border-slate-200 rounded p-2">
-                                    <div className="text-[10px] font-bold uppercase tracking-wider text-sky-700 mb-1.5">
-                                        {cat} <span className="text-slate-400 font-mono">({items.length})</span>
-                                    </div>
-                                    <table className="w-full text-xs">
-                                        <tbody>
-                                            {items.map((p) => (
-                                                <tr key={p.k} className="border-t border-slate-100 hover:bg-sky-50">
-                                                    <td className="py-1 pr-2">
-                                                        <button type="button" onClick={() => insertPlaceholder(p.k)}
-                                                            className="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 bg-white hover:bg-sky-100 hover:border-sky-400 font-mono whitespace-nowrap"
-                                                            data-testid={`ph-${p.k}`}>
-                                                            {`{${p.k}}`}
-                                                        </button>
-                                                    </td>
-                                                    <td className="py-1 text-slate-600 text-[11px]">{p.desc}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            ))}
+                        <div className="mt-2 max-h-80 overflow-y-auto pr-1">
+                            <SegnapostoSezione onInsert={insertPlaceholder} compact />
                         </div>
                     </div>
 

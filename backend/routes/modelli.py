@@ -308,6 +308,144 @@ _PLACEHOLDER_CATALOGO = [
 # per azzerare i segnaposto non valorizzati in fase di stampa.
 _PLACEHOLDER_DISPONIBILI = [k for _grp, _voci in _PLACEHOLDER_CATALOGO for k, _lbl in _voci]
 
+# Valori d'esempio mostrati nell'interfaccia accanto a ogni segnaposto, così
+# l'operatore capisce al volo cosa produrrà il segnaposto nel documento finale.
+_PLACEHOLDER_ESEMPI = {
+    # Agenzia
+    "azienda_nome": "Rossi Assicurazioni S.r.l.",
+    "azienda_forma_giuridica": "S.r.l.",
+    "azienda_partita_iva": "01234567890",
+    "azienda_codice_fiscale": "01234567890",
+    "agenzia_rui": "A000123456",
+    "agenzia_rui_sezione": "A",
+    "agenzia_data_iscrizione_rui": "15/03/2007",
+    "azienda_indirizzo": "Via Roma 12",
+    "azienda_comune": "Milano",
+    "azienda_provincia": "MI",
+    "azienda_cap": "20121",
+    "azienda_nazione": "Italia",
+    "azienda_telefono": "02 1234567",
+    "azienda_fax": "02 7654321",
+    "azienda_email": "info@rossiassicurazioni.it",
+    "azienda_pec": "rossiassicurazioni@pec.it",
+    "azienda_sito_web": "www.rossiassicurazioni.it",
+    "azienda_iban": "IT60X0542811101000000123456",
+    "azienda_banca": "Intesa Sanpaolo",
+    "azienda_capitale_sociale": "€ 10.000,00",
+    "azienda_rea": "MI-1234567",
+    "data_oggi": "26/10/2026",
+    # Anagrafica
+    "cliente": "Mario Rossi",
+    "cliente_nome": "Mario",
+    "cliente_cognome": "Rossi",
+    "cliente_ragione_sociale": "Rossi S.r.l.",
+    "cliente_tipo": "Persona fisica",
+    "cliente_indirizzo": "Via Garibaldi 5, 20121 Milano (MI)",
+    "cliente_via": "Via Garibaldi 5",
+    "cliente_comune": "Milano",
+    "cliente_cap": "20121",
+    "cliente_provincia": "MI",
+    "cliente_nazione": "Italia",
+    "cliente_cf": "RSSMRA80A01F205X",
+    "cliente_codice_fiscale": "RSSMRA80A01F205X",
+    "cliente_partita_iva": "01234567890",
+    "cliente_email": "mario.rossi@email.it",
+    "cliente_pec": "mario.rossi@pec.it",
+    "cliente_telefono": "02 9876543",
+    "cliente_cellulare": "333 1234567",
+    "cliente_data_nascita": "01/01/1980",
+    "cliente_luogo_nascita": "Milano",
+    "cliente_provincia_nascita": "MI",
+    "cliente_sesso": "M",
+    "cliente_stato_civile": "Coniugato",
+    "cliente_titolo_studio": "Laurea",
+    "cliente_professione": "Impiegato",
+    "cliente_iban": "IT60X0542811101000000654321",
+    "cliente_amministratore": "Mario Rossi",
+    # Polizza
+    "numero_polizza": "123456789",
+    "ramo": "RC Auto",
+    "prodotto": "Auto Protetta",
+    "stato_polizza": "In vigore",
+    "frazionamento": "Annuale",
+    "effetto": "01/01/2026",
+    "data_effetto": "01/01/2026",
+    "scadenza": "31/12/2026",
+    "data_scadenza": "31/12/2026",
+    "premio": "€ 650,00",
+    "premio_lordo": "€ 650,00",
+    "premio_netto": "€ 520,00",
+    "premio_imposte": "€ 130,00",
+    "premio_tasse": "€ 130,00",
+    "premio_ssn": "€ 10,50",
+    "premio_accessori": "€ 15,00",
+    "provvigioni_polizza": "€ 78,00",
+    "importo": "€ 650,00",
+    "mandato": "Mandato n. 4521",
+    "targa": "AB123CD",
+    "veicolo_marca": "Fiat",
+    "veicolo_modello": "Panda",
+    "veicolo_tipo": "Autovettura",
+    "veicolo_immatricolazione": "03/2019",
+    "massimali": "€ 6.450.000",
+    "franchigia": "€ 250,00",
+    "capitale_assicurato": "€ 150.000,00",
+    "oggetto_assicurato": "Abitazione Via Garibaldi 5",
+    # Titolo / Quietanza
+    "numero_titolo": "T-2026-00123",
+    "titolo_tipo": "Quietanza",
+    "titolo_effetto": "01/01/2026",
+    "titolo_scadenza": "31/12/2026",
+    "titolo_stato": "Incassato",
+    "titolo_importo_lordo": "€ 650,00",
+    "titolo_importo_netto": "€ 520,00",
+    "titolo_imposte": "€ 130,00",
+    "titolo_ssn": "€ 10,50",
+    "titolo_accessori": "€ 15,00",
+    "titolo_provvigioni": "€ 78,00",
+    "titolo_descrizione": "Quietanza annuale RC Auto",
+    "titolo_data_incasso": "02/01/2026",
+    "titolo_importo_pagato": "€ 650,00",
+    "titolo_sconto": "€ 0,00",
+    "titolo_mezzo_pagamento": "Bonifico bancario",
+    # Sinistro
+    "numero_sinistro": "SIN-2026-0456",
+    "numero_sinistro_interno": "INT-0456",
+    "data_sinistro": "10/05/2026",
+    "data_denuncia": "12/05/2026",
+    "data_apertura_sinistro": "12/05/2026",
+    "anno_sinistro": "2026",
+    "tipologia_sinistro": "Collisione",
+    "luogo_sinistro": "Via Milano, Torino",
+    "ramo_sinistro": "RC Auto",
+    "stato_sinistro": "Aperto",
+    "descrizione_sinistro": "Tamponamento a un incrocio con danni al paraurti posteriore",
+    "riserva_sinistro": "€ 3.500,00",
+    "liquidazione_sinistro": "€ 2.800,00",
+    "data_liquidazione_sinistro": "20/06/2026",
+    # Compagnia
+    "compagnia": "Generali",
+    "compagnia_nome": "Generali Italia S.p.A.",
+    "compagnia_codice": "GEN",
+    "compagnia_email": "sinistri@generali.it",
+    "compagnia_telefono": "800 123456",
+    "compagnia_sito_web": "www.generali.it",
+    "compagnia_referente": "Dott. Bianchi",
+    # Collaboratore / Operatore
+    "operatore_nome": "Luca Verdi",
+    "operatore_email": "luca.verdi@rossiassicurazioni.it",
+    "operatore_telefono": "02 1234500",
+    "operatore_codice_fiscale": "VRDLCU85M01F205Y",
+    "operatore_partita_iva": "09876543210",
+    "operatore_iban": "IT60X0542811101000000999888",
+    "operatore_rui": "E000654321",
+    "operatore_sezione": "E",
+    # Grafica e firma
+    "logo": "[logo agenzia]",
+    "firma_operatore": "[firma operatore]",
+    "firma": "[campo firma cliente]",
+    "data_firma": "26/10/2026",
+}
 
 
 @router.get("/librerie/placeholders")
@@ -316,7 +454,10 @@ async def lista_placeholders(user: dict = Depends(current_user)) -> dict:
     Vanno inseriti nel testo del modello (o nel Word/PDF caricato): in fase di
     generazione vengono sostituiti con i dati reali di polizza/cliente/agenzia."""
     gruppi = [
-        {"gruppo": nome, "items": [{"key": k, "label": lbl, "token": "{" + k + "}"} for k, lbl in voci]}
+        {"gruppo": nome, "items": [
+            {"key": k, "label": lbl, "token": "{" + k + "}", "esempio": _PLACEHOLDER_ESEMPI.get(k, "")}
+            for k, lbl in voci
+        ]}
         for nome, voci in _PLACEHOLDER_CATALOGO
     ]
     return {"gruppi": gruppi, "totale": sum(len(g["items"]) for g in gruppi)}

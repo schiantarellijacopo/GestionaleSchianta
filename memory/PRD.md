@@ -137,3 +137,8 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 ## [2026-10-26] Riordino colonne: frecce su/giù oltre al drag
 - ColumnManager (componente condiviso di tutte le tabelle): il drag&drop per riordinare esisteva già e funziona; aggiunte frecce ▲▼ su ogni colonna come alternativa affidabile (funziona anche su touch/tablet dove il drag HTML5 non va). Maniglia grip resa più visibile; etichetta "Trascina o usa ▲▼ per riordinare". move(idx,delta) salva l'ordine come il drag.
 - Verificato E2E su Titoli: freccia giù su "Contratto" lo sposta sotto "Targa" e la tabella si aggiorna; drag già verificato. Vale per tutte le tabelle (Titoli, Polizze, Sinistri, Anagrafiche…).
+
+## Segnaposto — enhancement (26/10/2026)
+- Aggiunti valori d'esempio a tutti i 126 segnaposto in /librerie/placeholders (backend `_PLACEHOLDER_ESEMPI`).
+- `SegnapostoSezione` ora: inserimento diretto nel corpo (prop onInsert), preferiti persistenti (localStorage), anteprima valori, filtri rapidi per gruppo. Riusato in dialog standalone (copia) e nell editor modelli (inserisce).
+- Verificato end-to-end: insert, filtro gruppo, preferiti, esempi.
