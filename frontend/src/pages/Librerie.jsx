@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback, memo } from "react";
 import { api, API_BASE } from "@/lib/api";
 import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";import { Card } from "@/components/ui/card";
@@ -5282,7 +5282,7 @@ function SegnapostoSezione({ onInsert = null, compact = false }) {
                     <h3 className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
                         <Star size={14} className="fill-amber-400 text-amber-400" /> Preferiti
                     </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className={`grid gap-2 ${compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"}`}>
                         {itemsPreferiti.map((it) => RenderItem(it))}
                     </div>
                 </div>
@@ -5291,7 +5291,7 @@ function SegnapostoSezione({ onInsert = null, compact = false }) {
             {gruppiFiltrati.map((g) => (
                 <div key={g.gruppo} data-testid={`segnaposto-gruppo-${g.gruppo}`}>
                     <h3 className="text-sm font-semibold text-slate-800 mb-2">{g.gruppo} <span className="text-slate-400 font-normal">({g.items.length})</span></h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className={`grid gap-2 ${compact ? "grid-cols-1" : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"}`}>
                         {g.items.map((it) => RenderItem(it))}
                     </div>
                 </div>
@@ -5317,6 +5317,31 @@ function TabelleManager() {
         try { await api.post(`/librerie/tabelle/${t.id}/duplica`); toast.success(`Tabella duplicata: "${t.nome} (copia)" ✓`); load(); }
         catch (e) { toast.error(errMsg(e, "Errore nella duplicazione")); }
     };
+    const [uploadingPdf, setUploadingPdf] = useState(false);
+    const importaPdf = async (e) => {
+        const f = e.target.files?.[0];
+        e.target.value = "";
+        if (!f) return;
+        setUploadingPdf(true);
+        toast.info("Analisi del PDF in corso… estraggo la tabella");
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            const r = await api.post("/librerie/tabelle/estrai-da-pdf", fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Tabella estratta — rivedila e salva ✓");
+            setEditing({
+                tipo: "griglia",
+                mostra_intestazione: r.data.mostra_intestazione !== false,
+                colonne: r.data.colonne?.length ? r.data.colonne : ["Colonna 1", "Colonna 2"],
+                righe: r.data.righe?.length ? r.data.righe : [["", ""]],
+                voci: [],
+                prima_colonna: r.data.prima_colonna || "Voce",
+                nome: r.data.nome || "",
+            });
+        } catch (err) {
+            toast.error(errMsg(err, "Impossibile estrarre la tabella dal PDF"));
+        } finally { setUploadingPdf(false); }
+    };
 
     if (editing) return <TabellaEditor tabella={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); }} />;
 
@@ -5324,10 +5349,18 @@ function TabelleManager() {
         <div className="space-y-3" data-testid="tabelle-manager">
             <div className="flex items-center justify-between gap-3">
                 <p className="text-sm text-slate-500">Crea tabelle (griglia o checklist) e richiamale nei modelli col loro segnaposto. Le celle possono contenere segnaposto come {"{cliente}"}.</p>
-                <Button onClick={() => setEditing({ tipo: "griglia", mostra_intestazione: true, colonne: ["Colonna 1", "Colonna 2"], righe: [["", ""]], voci: [], prima_colonna: "Voce" })}
-                    className="bg-amber-600 hover:bg-amber-700 h-8 shrink-0" data-testid="tabella-new-btn">
-                    <Plus size={14} className="mr-1" />Nuova tabella
-                </Button>
+                <div className="flex items-center gap-2 shrink-0">
+                    <label className={`inline-flex items-center gap-1 px-3 h-8 rounded-md border border-violet-300 text-violet-700 text-sm font-medium cursor-pointer hover:bg-violet-50 ${uploadingPdf ? "opacity-60 pointer-events-none" : ""}`}
+                        title="Carica un PDF con una tabella: la estraggo e ti precompilo la griglia"
+                        data-testid="tabella-importa-pdf">
+                        <Upload size={14} /> {uploadingPdf ? "Analisi…" : "Importa da PDF"}
+                        <input type="file" hidden accept="application/pdf" onChange={importaPdf} data-testid="tabella-importa-pdf-input" />
+                    </label>
+                    <Button onClick={() => setEditing({ tipo: "griglia", mostra_intestazione: true, colonne: ["Colonna 1", "Colonna 2"], righe: [["", ""]], voci: [], prima_colonna: "Voce" })}
+                        className="bg-amber-600 hover:bg-amber-700 h-8" data-testid="tabella-new-btn">
+                        <Plus size={14} className="mr-1" />Nuova tabella
+                    </Button>
+                </div>
             </div>
             {items === null ? <p className="text-sm text-slate-400">Caricamento…</p> :
              items.length === 0 ? <p className="text-sm text-slate-400">Nessuna tabella ancora.</p> :
@@ -5499,6 +5532,37 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
     );
 }
 
+const EditablePara = memo(function EditablePara({ pi, html, editable, isHeading, onRegister, onInput, onSel, onToggleDelete }) {
+    const ref = useRef(null);
+    useEffect(() => {
+        if (ref.current) { ref.current.innerHTML = html; onRegister(pi, ref.current); }
+        return () => onRegister(pi, null);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return (
+        <div className="group flex items-start gap-1" data-testid={`wve-row-${pi}`}>
+            <div
+                ref={ref}
+                contentEditable={editable}
+                suppressContentEditableWarning
+                spellCheck={false}
+                onInput={() => onInput(pi)}
+                onFocus={() => onSel(pi)}
+                onKeyUp={() => onSel(pi)}
+                onMouseUp={() => onSel(pi)}
+                className={`flex-1 outline-none rounded px-1 min-h-[1.5em] focus:bg-violet-50/60 ${!editable ? "line-through opacity-40 pointer-events-none" : ""} ${isHeading ? "text-base font-semibold text-slate-900 mt-1" : "text-sm text-slate-800 leading-relaxed"}`}
+                data-testid={`wve-para-${pi}`}
+            />
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onToggleDelete(pi)}
+                title={editable ? "Elimina riga" : "Ripristina riga"}
+                className={`opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 p-1 rounded shrink-0 ${!editable ? "text-emerald-600 hover:bg-emerald-50" : "text-rose-500 hover:bg-rose-50"}`}
+                data-testid={`wve-del-${pi}`}>
+                {!editable ? <Undo2 size={13} /> : <Trash2 size={13} />}
+            </button>
+        </div>
+    );
+});
+
 function WordVisualEditor({ modello, onClose }) {
     const [struttura, setStruttura] = useState(null);
     const [dirty, setDirty] = useState(() => new Set());
@@ -5535,12 +5599,14 @@ function WordVisualEditor({ modello, onClose }) {
     };
     useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-    const markDirty = (pi) => setDirty((s) => { if (s.has(pi)) return s; const n = new Set(s); n.add(pi); return n; });
-    const rememberSel = (pi) => {
+    const markDirty = useCallback((pi) => setDirty((s) => { if (s.has(pi)) return s; const n = new Set(s); n.add(pi); return n; }), []);
+    const rememberSel = useCallback((pi) => {
         lastFocused.current = pi;
         const sel = window.getSelection();
         if (sel && sel.rangeCount > 0) savedRange.current = sel.getRangeAt(0).cloneRange();
-    };
+    }, []);
+    const registerRef = useCallback((pi, node) => { if (node) refs.current[pi] = node; else delete refs.current[pi]; }, []);
+    const toggleDelete = useCallback((pi) => setDeleted((s) => { const n = new Set(s); n.has(pi) ? n.delete(pi) : n.add(pi); return n; }), []);
     const restoreSel = () => {
         const pi = lastFocused.current;
         if (pi == null || !refs.current[pi]) return false;
@@ -5561,7 +5627,6 @@ function WordVisualEditor({ modello, onClose }) {
         if (lastFocused.current != null) markDirty(lastFocused.current);
         rememberSel(lastFocused.current);
     };
-    const toggleDelete = (pi) => setDeleted((s) => { const n = new Set(s); n.has(pi) ? n.delete(pi) : n.add(pi); return n; });
 
     const cssToHex = (c) => {
         if (!c) return null; c = String(c).trim();
@@ -5619,30 +5684,11 @@ function WordVisualEditor({ modello, onClose }) {
     const SWATCHES = ["#000000", "#c0392b", "#1d4ed8", "#15803d", "#b45309", "#7c3aed"];
 
     const renderPara = (block) => {
-        const pi = block.p_index; const del = deleted.has(pi);
+        const pi = block.p_index;
         const isHeading = /heading|title/i.test(block.style || "");
         return (
-            <div key={`p${pi}`} className="group flex items-start gap-1" data-testid={`wve-row-${pi}`}>
-                <div
-                    ref={(el) => { refs.current[pi] = el; }}
-                    contentEditable={!del}
-                    suppressContentEditableWarning
-                    spellCheck={false}
-                    onInput={() => markDirty(pi)}
-                    onFocus={() => rememberSel(pi)}
-                    onKeyUp={() => rememberSel(pi)}
-                    onMouseUp={() => rememberSel(pi)}
-                    dangerouslySetInnerHTML={{ __html: paraHtml(block) }}
-                    className={`flex-1 outline-none rounded px-1 min-h-[1.5em] focus:bg-violet-50/60 ${del ? "line-through opacity-40 pointer-events-none" : ""} ${isHeading ? "text-base font-semibold text-slate-900 mt-1" : "text-sm text-slate-800 leading-relaxed"}`}
-                    data-testid={`wve-para-${pi}`}
-                />
-                <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => toggleDelete(pi)}
-                    title={del ? "Ripristina riga" : "Elimina riga"}
-                    className={`opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 p-1 rounded shrink-0 ${del ? "text-emerald-600 hover:bg-emerald-50" : "text-rose-500 hover:bg-rose-50"}`}
-                    data-testid={`wve-del-${pi}`}>
-                    {del ? <Undo2 size={13} /> : <Trash2 size={13} />}
-                </button>
-            </div>
+            <EditablePara key={`p${pi}`} pi={pi} html={paraHtml(block)} editable={!deleted.has(pi)}
+                isHeading={isHeading} onRegister={registerRef} onInput={markDirty} onSel={rememberSel} onToggleDelete={toggleDelete} />
         );
     };
     const renderBlocks = (blocks) => blocks.map((b, i) => {
@@ -5966,6 +6012,16 @@ function ModelliSezione() {
                                             title="Modifica testo, formattazione e segnaposto vedendo il documento impaginato"
                                         >
                                             ✏️ Modifica documento
+                                        </button>
+                                    )}
+                                    {!m.word_fedele && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setEditing(m); setOpen(true); }}
+                                            className="text-[10px] font-medium px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+                                            data-testid={`modello-visivo-${m.id}`}
+                                            title="Modifica il testo e inserisci i segnaposto cliccando sul pannello visivo"
+                                        >
+                                            ✏️ Segnaposto visivo
                                         </button>
                                     )}
                                     <button

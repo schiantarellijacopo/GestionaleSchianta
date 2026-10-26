@@ -1,0 +1,33 @@
+{
+  "summary": "Frontend-only testing of the Word visual editor (WordVisualEditor) and the duplicate buttons for models and tables, logged in as jacopo@schiantarelli.it. Things that work: navigation, opening the editor, toolbar and palette rendering, the trash/undo button per line (strikethrough and pending counter), saving deletions (the empty lines really are gone after reopening), duplicating a model and duplicating a table. CRITICAL bug: edits, bold, color and placeholder insertions are lost. Any React re-render resets every paragraph's innerHTML to the original text, so the formatting never reaches the save request (I captured the request body to confirm this). Persistence of bold/color/inserted text after reopening therefore FAILS.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "WordVisualEditor renderPara (Librerie.jsx ~L5626-5638)", "issue": "With React 19.0.0, dangerouslySetInnerHTML={{__html: paraHtml(block)}} creates a new object on every render, and React re-applies innerHTML each time. Every state change (markDirty adding a new p_index, toggleDelete, setColor, setSaving) wipes all live DOM edits in all paragraphs. Effects: (a) the first keystroke in a paragraph is lost and the caret jumps to the start (typing ' XYZ' at the end gave 'XYZCon la presente...'); (b) bold/color on a fresh paragraph is undone right away (MutationObserver shows execCommand producing <b>Cordiali</b>, then the next mutation restores 'Cordiali saluti.'); (c) the first placeholder insert on a fresh paragraph is lost; (d) clicking a trash button or editing another paragraph wipes earlier formatting. The intercepted save body was {p_index:3, runs:[{text:'Cordiali saluti.', bold:false,...}]} even though the DOM had shown 'Cordiali saluti. FINE'. Save then says 'Salvato ✓ — N modificati' but nothing changes.", "selector": "[data-testid^='wve-para-']", "priority": "CRITICAL"},
+      {"component": "WordVisualEditor placeholder palette (SegnapostoSezione compact)", "issue": "In the 340px side column, each card in the 3-column grid is about 80px wide. Tokens and labels are cut off ('{cl…', 'Clie…'), and the favourite star sits near the middle of the card, so clicking the card often toggles the favourite instead of inserting the placeholder. Use 1–2 columns in compact mode and show the full token.", "selector": "[data-testid^='segnaposto-item-']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Edit, bold/color, save, reopen", "issue": "Formatting and text changes are not persisted because the DOM is reset before serialize(). Deletions do persist.", "affected_selectors": ["wve-bold", "wve-swatch-c0392b", "wve-save", "wve-para-*"]}
+    ],
+    "design_issues": [
+      {"screen": "Word visual editor", "issues": ["Placeholder palette is too narrow (see ui_bugs).", "Insertion happens at the restored caret. After the reset bug the caret is at the start of the paragraph, so {cliente} went to the start instead of the end."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "CRITICAL: stop React from overwriting contentEditable content. Option 1: cache the {__html} object per p_index in htmlCache (htmlCache.current[pi] = {__html: h}) and pass that same object every render, so the identity never changes. Option 2 (more robust): drop dangerouslySetInnerHTML and set el.innerHTML once inside the ref callback when the element first mounts (or after load()). Option 3: put the paragraph in a React.memo child component with stable props. Then retest: type at the end of a fresh paragraph, double-click a word, apply bold and red, click trash on another row, insert a placeholder in a third row, save, reopen, and check that <b>/<span color> and {cliente} persist.",
+    "Make the compact placeholder palette use 1–2 columns so tokens are readable and the star isn't hit by accident."
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is 7400+ lines; WordVisualEditor, SegnapostoSezione, TabelleManager and ModelliSezione should be split into separate files.",
+    "ToolBtn is defined inside the WordVisualEditor render, so its component identity changes on every render and the buttons remount. Move it out of the component.",
+    "Backend salva_contenuto is index-safe (deletions happen after edits), so the bug is purely on the frontend."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "62% (5/8 flows pass: listing/open editor, delete empty line + persist, model duplicate, table duplicate, toolbar/palette render. Fail: bold/color edit, placeholder insert, persistence of text/format)"},
+  "seed_data_creation": "None kept. The duplicated model 'SMOKE UI Editor (copia)' and table 'dichiarazioni_di_ricevuta_copia' were deleted via API. Note: two empty paragraphs of 'SMOKE UI Editor' were deleted during save tests; it now has 4 paragraphs: CONTRATTO ASSICURATIVO / Spett.le Cliente, / Con la presente... / Cordiali saluti.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Model id 5cc5eebb-ce97-40a3-8c01-396383228861. Navigation: /librerie, then lib-tab-modelli, then modelli-tab-word, then modello-visivo-<id>. To select a word, double-click at the text position (bounding_box x+20), not the element centre, because the div is full width. Palette cards inside the dialog: '[data-testid=word-visual-editor] [data-testid=segnaposto-item-cliente]'. Click the card's left edge after scroll_into_view_if_needed; clicking outside the dialog closes it. Use page.route('**/salva-contenuto') to inspect the save body.",
+  "rca of the issue": "Reproduce: open the editor, double-click 'Cordiali', click Bold. execCommand returns true and the DOM briefly becomes <b>Cordiali</b>, then markDirty -> setDirty -> re-render -> React 19 re-applies dangerouslySetInnerHTML because the {__html} object is new -> the DOM goes back to the original. The same happens for the first keystroke and on toggleDelete. Fix: keep the __html object identity stable, or set innerHTML imperatively once."
+}

@@ -669,6 +669,45 @@ async def elimina_tabella(tid: str, user: dict = Depends(current_user)) -> dict:
     return {"ok": True}
 
 
+@router.post("/librerie/tabelle/estrai-da-pdf")
+async def estrai_tabella_da_pdf(
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Carica un PDF e ne estrae la tabella principale come griglia (colonne + righe).
+    NON salva: restituisce i dati per precompilare l'editor tabella."""
+    if file is None:
+        raise HTTPException(400, "Nessun file caricato")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "File vuoto")
+    nome_default = (file.filename or "Tabella da PDF").rsplit(".", 1)[0]
+    colonne: list = []
+    righe: list = []
+    nome = nome_default
+    estratta = _estrai_tabella_pdf(raw)
+    if estratta:
+        colonne, righe = estratta
+    else:
+        testo = _estrai_testo_pdf(raw)
+        if not testo:
+            raise HTTPException(422, "Il PDF non contiene testo estraibile (potrebbe essere una scansione immagine)")
+        ai = await _ai_estrai_tabella(testo, user)
+        if not ai:
+            raise HTTPException(422, "Non è stato possibile riconoscere una tabella nel PDF")
+        nome = ai[0] or nome_default
+        colonne, righe = ai[1], ai[2]
+    return {
+        "nome": nome or nome_default,
+        "tipo": "griglia",
+        "mostra_intestazione": True,
+        "colonne": colonne,
+        "righe": righe,
+        "prima_colonna": "Voce",
+        "voci": [],
+    }
+
+
 def _estrai_testo_pdf(raw: bytes) -> str:
     """Estrae il testo da un PDF (pdfplumber)."""
     import io
@@ -679,6 +718,70 @@ def _estrai_testo_pdf(raw: bytes) -> str:
         return "\n\n".join(pagine).strip()
     except Exception as e:  # noqa
         raise HTTPException(400, f"Impossibile leggere il PDF: {str(e)[:150]}")
+
+
+def _estrai_tabella_pdf(raw: bytes):
+    """Estrae la prima tabella significativa da un PDF come (colonne, righe)."""
+    import io
+    import pdfplumber
+    best = None
+    try:
+        with pdfplumber.open(io.BytesIO(raw)) as pdf:
+            for pg in pdf.pages:
+                for tbl in (pg.extract_tables() or []):
+                    rows = [[(c or "").strip().replace("\n", " ") for c in r]
+                            for r in tbl if any((c or "").strip() for c in r)]
+                    if len(rows) >= 2 and len(rows[0]) >= 2:
+                        cells = sum(len(r) for r in rows)
+                        if best is None or cells > best[0]:
+                            best = (cells, rows)
+    except Exception:  # noqa
+        best = None
+    if not best:
+        return None
+    rows = best[1]
+    ncol = max(len(r) for r in rows)
+    norm = [r + [""] * (ncol - len(r)) for r in rows]
+    colonne = [c or f"Colonna {i + 1}" for i, c in enumerate(norm[0])]
+    righe = norm[1:]
+    return colonne, righe
+
+
+async def _ai_estrai_tabella(testo: str, user: dict):
+    """Fallback AI: estrae la tabella principale come (nome, colonne, righe)."""
+    import os
+    import json as _json
+    prompt = (
+        "Dal seguente documento estrai la TABELLA principale e restituiscila come JSON con questa forma esatta:\n"
+        '{"nome": "...", "colonne": ["...","..."], "righe": [["...","..."], ["...","..."]]}\n'
+        "Regole: la riga di intestazione va in 'colonne'; ogni riga di dati in 'righe' con lo stesso numero di celle "
+        "delle colonne; mantieni l'italiano; NON aggiungere spiegazioni o markdown, SOLO il JSON valido.\n\n"
+        "DOCUMENTO:\n" + testo[:20000]
+    )
+    try:
+        from llm_compat import LlmChat, UserMessage
+        chat = LlmChat(
+            api_key=os.environ.get("EMERGENT_LLM_KEY"),
+            session_id=f"tabella_pdf_{user.get('id')}",
+            system_message="Estrai tabelle da documenti e rispondi solo con JSON valido.",
+        ).with_model("anthropic", "claude-sonnet-4-6")
+        resp = await chat.send_message(UserMessage(text=prompt))
+        s = str(resp).strip() if resp else ""
+        if "```" in s:
+            s = s.split("```")[1]
+            if s.startswith("json"):
+                s = s[4:]
+            s = s.strip()
+        data = _json.loads(s)
+    except Exception:  # noqa
+        return None
+    colonne = [str(c) for c in (data.get("colonne") or [])]
+    if not colonne:
+        return None
+    ncol = len(colonne)
+    righe = [([str(c) for c in r] + [""] * ncol)[:ncol] for r in (data.get("righe") or [])]
+    nome = str(data.get("nome") or "").strip()
+    return nome, colonne, righe
 
 
 def _estrai_testo_docx(raw: bytes) -> str:
