@@ -573,7 +573,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             {/* Tabella con header sticky + prime 3 colonne congelate */}
             <div className="flex justify-end mb-2">{colsPicker}</div>
             <div ref={fill.ref} style={fill.style} className="flex flex-col min-h-0">
-            <div className="tbl-scroll flex-fill flex-1" style={{ "--c1-w": "36px", "--c2-w": "140px", "--c3-w": "100px" }}>
+            <div className="tbl-scroll flex-fill flex-1" style={storicoMode ? { "--c1-w": "150px", "--c2-w": "90px", "--c3-w": "140px" } : { "--c1-w": "36px", "--c2-w": "140px", "--c3-w": "100px" }}>
                 {list === null ? <Loading /> : list.length === 0 ? <Empty /> : (
                     <table className="tbl-compact freeze-3 w-full text-xs">
                         <thead>
