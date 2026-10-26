@@ -1,0 +1,21 @@
+{
+  "summary": "Targeted frontend retest of 2 bugs from iteration_121 in Librerie > Gestioni Modelli. Both FIXED and verified via Playwright + API persistence check.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "verified": [
+    "FIX #1 WordVisualEditor: click mid-paragraph (caret offset 56) + palette click inserted {azienda_nome} at offset 56 (not at start). After typing ' XYZ' at End, second token inserted right after XYZ. Second paragraph mid-click insertion also correct. Saved (Salva modifiche) -> GET /struttura-word confirms tokens persisted at correct positions.",
+    "FIX #2 PdfVisualEditor 'Documento impaginato': edited pdf-testo-corpo, saved (toast 'Testo salvato ✓'), closed via pdf-visual-close, reopened without page reload -> shows NEW text. Repeated twice (round1 -> round2) both correct; card preview also updated; GET confirms persisted corpo."
+  ],
+  "test_report_links": ["/app/tests/mk_wordfedele.py", "/app/tests/pdf_model.py", "/app/tests/chk_models.py"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "PdfVisualEditor.salvaCorpo mutates the prop object (modello.corpo = corpo) - works but is a React anti-pattern; parent reload via onClose(true) already covers it.",
+    "WordVisualEditor wve-close always calls onClose(true) causing a list reload even with no changes (minor)."
+  ],
+  "updated_files": ["/app/tests/mk_wordfedele.py", "/app/tests/pdf_model.py", "/app/tests/chk_models.py"],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100%"},
+  "seed_data_creation": "Created TEST_WVE_cursor (word_fedele) and TEST_PDF_corpo (pdf_altro); both deleted at end (DELETE 200).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Use /app/tests/mk_wordfedele.py to create a word_fedele model via importa-word-fedele; /app/tests/pdf_model.py [create|get <id>|cleanup <ids>] for a TEST pdf model. Palette has ~129 segnaposto-item-* entries."
+}
