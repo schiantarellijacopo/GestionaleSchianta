@@ -116,3 +116,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Backend /regolazione-premio ora include collaboratore_id e collaboratore_nome (enrich da users).
 - Frontend RegolazionePremio: barra filtri con ricerca testo (cliente/polizza/compagnia/ramo/prodotto/collaboratore), select Compagnia, select Collaboratore, intervallo date Scadenza (dal/al), "Pulisci filtri" e conteggio "X di Y". Filtri client-side (la lista è già caricata), si combinano con i pill di stato. Collaboratore mostrato come sottotitolo nella colonna Compagnia.
 - Verificato E2E (tenant Schiantarelli preview): ricerca "730" → 1 di 2; opzioni collaboratore popolate; filtri render corretti.
+
+## [2026-10-26] Sezione "Segnaposto {…}" + placeholder firma
+- Aggiunto {data_firma} e documentato {firma} in _PLACEHOLDER_DISPONIBILI (routes/modelli.py).
+- Nuovo endpoint GET /librerie/placeholders: catalogo raggruppato (_PLACEHOLDER_CATALOGO) con key/label/token. 52 segnaposto in 6 gruppi.
+- Nuova scheda Librerie "Segnaposto {…}" (SegnapostoSezione in Librerie.jsx): istruzioni d'uso, ricerca, griglia raggruppata con copia-al-clic. Spiega che i segnaposto vanno scritti nel modello o nel Word/PDF e vengono sostituiti coi dati reali in generazione; {firma}/{data_firma} per la firma digitale.
+- Verificato: endpoint 52 voci; scheda mostra 52 item, copia funzionante. NB: la sostituzione testuale piena avviene sul corpo del modello/Word; per i PDF caricati la posizione firma/data viene localizzata ({firma}/{data_firma}).

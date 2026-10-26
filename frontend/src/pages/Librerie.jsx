@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -65,6 +65,7 @@ const SECTIONS = [
     { key: "comunicazioni", label: "Comunicazioni (Email/SMS/WhatsApp)", icon: <Mail size={14} />, endpoint: "/librerie/comunicazioni", custom: true },
     { key: "modelli", label: "Gestioni Modelli (template)", icon: <FileText size={14} />, endpoint: "/librerie/modelli", custom: true },
     { key: "mup-modelli", label: "Modelli MUP (precontrattuale)", icon: <ClipboardList size={14} />, endpoint: "/librerie/mup-modelli", custom: true },
+    { key: "segnaposto", label: "Segnaposto {…}", icon: <Braces size={14} />, custom: true },
     { key: "questionari", label: "Questionari", icon: <ClipboardList size={14} />, custom: true },
     { key: "permessi", label: "Permessi Profili", icon: <Shield size={14} />, endpoint: "/permessi-profili", custom: true },
     { key: "prodotti", label: "Prodotti", icon: <Package size={14} />, endpoint: "/librerie/prodotti" },
@@ -287,6 +288,7 @@ export default function Librerie() {
                             : s.key === "comunicazioni" ? <ComunicazioniSezione />
                             : s.key === "modelli" ? <ModelliSezione />
                             : s.key === "mup-modelli" ? <ModelliMupSezione />
+                            : s.key === "segnaposto" ? <SegnapostoSezione />
                             : s.key === "questionari" ? <QuestionariManager />
                             : s.key === "permessi" ? <PermessiSezione />
                             : s.key === "visibilita-doc" ? <VisibilitaDocSezione />
@@ -5147,6 +5149,72 @@ const MODELLI_GRUPPI = [
         tipi: ["word"],
     },
 ];
+
+function SegnapostoSezione() {
+    const [data, setData] = useState(null);
+    const [q, setQ] = useState("");
+
+    useEffect(() => {
+        api.get("/librerie/placeholders").then((r) => setData(r.data)).catch(() => setData({ gruppi: [], totale: 0 }));
+    }, []);
+
+    const copia = (token) => {
+        navigator.clipboard?.writeText(token).then(
+            () => toast.success(`Copiato ${token}`),
+            () => toast.error("Impossibile copiare"),
+        );
+    };
+
+    if (!data) return <div className="p-6 text-slate-400 text-sm">Caricamento…</div>;
+
+    const ql = q.trim().toLowerCase();
+    const gruppi = data.gruppi
+        .map((g) => ({
+            ...g,
+            items: g.items.filter((it) => !ql || it.key.toLowerCase().includes(ql) || (it.label || "").toLowerCase().includes(ql)),
+        }))
+        .filter((g) => g.items.length > 0);
+
+    return (
+        <div className="space-y-5" data-testid="segnaposto-sezione">
+            <div className="rounded-lg border border-sky-200 bg-sky-50 p-4 text-sm text-slate-700">
+                <div className="font-semibold text-sky-800 mb-1">Come si usano i segnaposto {"{…}"}</div>
+                <p>Scrivi il segnaposto (es. <code className="bg-white px-1 rounded border">{"{cliente}"}</code>) nel testo del modello, oppure nel tuo file <strong>Word/PDF</strong> prima di caricarlo. In fase di generazione il programma li sostituisce automaticamente con i dati reali di <strong>cliente, polizza, agenzia e collaboratore</strong>.</p>
+                <p className="mt-1">Per la firma digitale usa <code className="bg-white px-1 rounded border">{"{firma}"}</code> dove deve firmare il cliente e <code className="bg-white px-1 rounded border">{"{data_firma}"}</code> per la data della firma.</p>
+                <p className="mt-1 text-xs text-slate-500">Suggerimento: clicca su un segnaposto per copiarlo.</p>
+            </div>
+
+            <div className="relative max-w-sm">
+                <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca segnaposto…" className="pl-8 h-9" data-testid="segnaposto-search" />
+            </div>
+
+            {gruppi.map((g) => (
+                <div key={g.gruppo} data-testid={`segnaposto-gruppo-${g.gruppo}`}>
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">{g.gruppo}</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {g.items.map((it) => (
+                            <button
+                                key={it.key}
+                                onClick={() => copia(it.token)}
+                                className="flex items-center justify-between gap-2 text-left px-3 py-2 rounded-lg border border-slate-200 bg-white hover:border-sky-300 hover:bg-sky-50/40 transition-colors group"
+                                data-testid={`segnaposto-item-${it.key}`}
+                                title={`Copia ${it.token}`}
+                            >
+                                <div className="min-w-0">
+                                    <div className="font-mono text-xs text-sky-700 truncate">{it.token}</div>
+                                    <div className="text-[11px] text-slate-500 truncate">{it.label}</div>
+                                </div>
+                                <Copy size={14} className="text-slate-300 group-hover:text-sky-500 shrink-0" />
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            ))}
+            {gruppi.length === 0 && <div className="text-slate-400 text-sm italic">Nessun segnaposto corrisponde alla ricerca.</div>}
+        </div>
+    );
+}
 
 function ModelliSezione() {
     const [items, setItems] = useState(null);

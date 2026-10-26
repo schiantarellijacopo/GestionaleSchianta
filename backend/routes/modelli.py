@@ -168,8 +168,91 @@ _PLACEHOLDER_DISPONIBILI = [
     "operatore_nome", "operatore_email", "operatore_telefono", "operatore_rui", "operatore_sezione",
     "agenzia_rui", "azienda_iban", "azienda_pec",
     # Immagini e firma (gestite come elementi grafici, non testo)
-    "logo", "firma_operatore", "firma",
+    "logo", "firma_operatore", "firma", "data_firma",
 ]
+
+
+# Catalogo segnaposto raggruppato per la sezione "Segnaposto" (Librerie).
+# Ogni voce: (chiave, etichetta leggibile). I gruppi sono mostrati in ordine.
+_PLACEHOLDER_CATALOGO = [
+    ("Agenzia", [
+        ("azienda_nome", "Ragione sociale agenzia"),
+        ("azienda_indirizzo", "Indirizzo agenzia"),
+        ("azienda_telefono", "Telefono agenzia"),
+        ("azienda_email", "Email agenzia"),
+        ("azienda_pec", "PEC agenzia"),
+        ("azienda_iban", "IBAN agenzia"),
+        ("agenzia_rui", "N. iscrizione RUI agenzia"),
+        ("data_oggi", "Data di oggi"),
+    ]),
+    ("Polizza", [
+        ("numero_polizza", "Numero polizza"),
+        ("ramo", "Ramo"),
+        ("prodotto", "Prodotto"),
+        ("stato_polizza", "Stato polizza"),
+        ("compagnia", "Compagnia"),
+        ("compagnia_nome", "Compagnia (nome esteso)"),
+        ("effetto", "Data effetto"),
+        ("data_effetto", "Data effetto (alt.)"),
+        ("scadenza", "Data scadenza"),
+        ("data_scadenza", "Data scadenza (alt.)"),
+        ("premio", "Premio"),
+        ("premio_lordo", "Premio lordo"),
+        ("importo", "Importo"),
+    ]),
+    ("Cliente / Contraente", [
+        ("cliente", "Cliente (nome completo o ragione sociale)"),
+        ("cliente_nome", "Nome"),
+        ("cliente_cognome", "Cognome"),
+        ("cliente_indirizzo", "Indirizzo"),
+        ("cliente_comune", "Comune"),
+        ("cliente_cap", "CAP"),
+        ("cliente_provincia", "Provincia"),
+        ("cliente_cf", "Codice fiscale"),
+        ("cliente_codice_fiscale", "Codice fiscale (alt.)"),
+        ("cliente_partita_iva", "Partita IVA"),
+        ("cliente_email", "Email"),
+        ("cliente_telefono", "Telefono"),
+        ("cliente_cellulare", "Cellulare"),
+        ("cliente_data_nascita", "Data di nascita"),
+        ("cliente_luogo_nascita", "Luogo di nascita"),
+        ("cliente_professione", "Professione"),
+        ("cliente_iban", "IBAN cliente"),
+    ]),
+    ("Sinistro", [
+        ("numero_sinistro", "Numero sinistro"),
+        ("data_sinistro", "Data sinistro"),
+        ("descrizione_sinistro", "Descrizione sinistro"),
+        ("stato_sinistro", "Stato sinistro"),
+        ("data_denuncia", "Data denuncia"),
+    ]),
+    ("Collaboratore / Operatore", [
+        ("operatore_nome", "Nome collaboratore"),
+        ("operatore_email", "Email collaboratore"),
+        ("operatore_telefono", "Telefono collaboratore"),
+        ("operatore_rui", "N. RUI collaboratore"),
+        ("operatore_sezione", "Sezione RUI collaboratore"),
+    ]),
+    ("Grafica e firma", [
+        ("logo", "Logo dell'agenzia (immagine)"),
+        ("firma_operatore", "Firma dell'operatore (immagine)"),
+        ("firma", "DOVE firma il cliente (campo firma digitale)"),
+        ("data_firma", "Data della firma del cliente"),
+    ]),
+]
+
+
+
+@router.get("/librerie/placeholders")
+async def lista_placeholders(user: dict = Depends(current_user)) -> dict:
+    """Elenco di TUTTI i segnaposto {...} supportati, raggruppati per categoria.
+    Vanno inseriti nel testo del modello (o nel Word/PDF caricato): in fase di
+    generazione vengono sostituiti con i dati reali di polizza/cliente/agenzia."""
+    gruppi = [
+        {"gruppo": nome, "items": [{"key": k, "label": lbl, "token": "{" + k + "}"} for k, lbl in voci]}
+        for nome, voci in _PLACEHOLDER_CATALOGO
+    ]
+    return {"gruppi": gruppi, "totale": sum(len(g["items"]) for g in gruppi)}
 
 
 def _estrai_testo_pdf(raw: bytes) -> str:
