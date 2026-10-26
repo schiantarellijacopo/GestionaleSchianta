@@ -129,3 +129,7 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Segnaposto conosciuti senza valore → stringa vuota (niente {token} grezzi in stampa). In modalità firma {firma}/{data_firma} restano come marcatori per il posizionamento.
 - Frontend: pulsante verde "Carica Word fedele", badge "Word fedele" sulle card, UsaModelloDialog instrada a genera-fedele (PDF/Word/Invia a firma) quando word_fedele.
 - Verificato E2E: upload docx con {cliente}/{numero_polizza}/{firma}/{data_firma} → DOCX compilato senza token grezzi (layout ok), PDF 200, firma Yousign ok=True signing_url status ongoing.
+
+## [2026-10-26] Tabelle: dato completo nelle colonne congelate (no troncamento)
+- index.css: le frozen cells (.tbl-scroll .freeze-2/3 prime colonne) non troncano più con ellissi ma vanno a capo (white-space: normal, overflow-wrap: anywhere, vertical-align: top), mantenendo la larghezza fissa per l'allineamento delle colonne bloccate. Modifica globale → vale per tutte le tabelle. Override singolo ancora possibile con classe wrap-cell.
+- Verificato su Titoli (tenant Schiantarelli): nomi contraente lunghi ora interamente visibili su più righe.

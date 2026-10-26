@@ -142,12 +142,16 @@ h1, h2, h3, h4, h5 {
 .tbl-scroll .freeze-3 tbody td:nth-child(3),
 .tbl-scroll .freeze-3 thead th:nth-child(3) { width: var(--c3-w, 160px); min-width: var(--c3-w, 160px); max-width: var(--c3-w, 160px); }
 
-/* Truncate automatico nelle frozen cells, salvo override `wrap-cell` */
+/* Le frozen cells mostrano il DATO COMPLETO andando a capo (wrap) invece di
+   troncare con ellissi. La larghezza resta fissa (per l'allineamento delle
+   colonne congelate), ma il testo lungo va su più righe. Override `wrap-cell`. */
 .tbl-scroll .freeze-3 tbody td:nth-child(-n+3):not(.wrap-cell),
 .tbl-scroll .freeze-2 tbody td:nth-child(-n+2):not(.wrap-cell) {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    white-space: normal;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    vertical-align: top;
 }
 
 /* Le tabelle ANNIDATE (es. la riga espansa "Collegati" del network anagrafiche)
