@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Columns3, GripVertical, RotateCcw } from "lucide-react";
+import { Columns3, GripVertical, RotateCcw, ChevronUp, ChevronDown } from "lucide-react";
 
 let PREFS_CACHE = null;
 let PREFS_PROMISE = null;
@@ -104,6 +104,15 @@ function ColumnPicker({ tableKey, ordered, hiddenSet, save, reset }) {
         keys.splice(idx, 0, moved);
         save({ order: keys, hidden: [...hiddenSet] });
     };
+    // Sposta su/giù (alternativa al drag, funziona anche su touch)
+    const move = (idx, delta) => {
+        const to = idx + delta;
+        if (to < 0 || to >= ordered.length) return;
+        const keys = ordered.map((c) => c.key);
+        const [moved] = keys.splice(idx, 1);
+        keys.splice(to, 0, moved);
+        save({ order: keys, hidden: [...hiddenSet] });
+    };
 
     return (
         <Popover>
@@ -116,7 +125,7 @@ function ColumnPicker({ tableKey, ordered, hiddenSet, save, reset }) {
             <PopoverContent align="end" className="w-64 p-2" data-testid={`colonne-popover-${tableKey}`}>
                 <div className="flex items-center justify-between mb-1 px-1">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-                        Trascina per riordinare
+                        Trascina o usa ▲▼ per riordinare
                     </span>
                     <button onClick={reset} className="text-slate-400 hover:text-sky-600 flex items-center gap-1 text-[10px]"
                             title="Ripristina colonne predefinite"
@@ -133,11 +142,11 @@ function ColumnPicker({ tableKey, ordered, hiddenSet, save, reset }) {
                              onDragLeave={() => setOverIdx((v) => (v === i ? null : v))}
                              onDrop={() => drop(i)}
                              onDragEnd={() => { dragIdx.current = null; setOverIdx(null); }}
-                             className={`flex items-center gap-2 px-1.5 py-1 rounded text-xs cursor-grab active:cursor-grabbing ${
+                             className={`flex items-center gap-2 px-1.5 py-1 rounded text-xs ${
                                  overIdx === i ? "bg-sky-50 border border-sky-300" : "hover:bg-slate-50 border border-transparent"
                              }`}
                              data-testid={`colonna-item-${tableKey}-${c.key}`}>
-                            <GripVertical size={12} className="text-slate-300 shrink-0" />
+                            <GripVertical size={13} className="text-slate-400 shrink-0 cursor-grab active:cursor-grabbing" />
                             <input type="checkbox"
                                    checked={c.locked || !hiddenSet.has(c.key)}
                                    disabled={c.locked}
@@ -145,6 +154,20 @@ function ColumnPicker({ tableKey, ordered, hiddenSet, save, reset }) {
                                    onClick={(e) => e.stopPropagation()}
                                    data-testid={`colonna-check-${tableKey}-${c.key}`} />
                             <span className="truncate flex-1">{c.label || c.key}</span>
+                            <div className="flex flex-col shrink-0 -my-0.5">
+                                <button type="button" onClick={(e) => { e.stopPropagation(); move(i, -1); }}
+                                        disabled={i === 0}
+                                        className="text-slate-300 hover:text-sky-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
+                                        title="Sposta su" data-testid={`colonna-up-${tableKey}-${c.key}`}>
+                                    <ChevronUp size={13} />
+                                </button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); move(i, 1); }}
+                                        disabled={i === ordered.length - 1}
+                                        className="text-slate-300 hover:text-sky-600 disabled:opacity-20 disabled:hover:text-slate-300 leading-none"
+                                        title="Sposta giù" data-testid={`colonna-down-${tableKey}-${c.key}`}>
+                                    <ChevronDown size={13} />
+                                </button>
+                            </div>
                         </div>
                     ))}
                 </div>

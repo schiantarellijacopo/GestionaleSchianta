@@ -133,3 +133,7 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 ## [2026-10-26] Tabelle: dato completo nelle colonne congelate (no troncamento)
 - index.css: le frozen cells (.tbl-scroll .freeze-2/3 prime colonne) non troncano più con ellissi ma vanno a capo (white-space: normal, overflow-wrap: anywhere, vertical-align: top), mantenendo la larghezza fissa per l'allineamento delle colonne bloccate. Modifica globale → vale per tutte le tabelle. Override singolo ancora possibile con classe wrap-cell.
 - Verificato su Titoli (tenant Schiantarelli): nomi contraente lunghi ora interamente visibili su più righe.
+
+## [2026-10-26] Riordino colonne: frecce su/giù oltre al drag
+- ColumnManager (componente condiviso di tutte le tabelle): il drag&drop per riordinare esisteva già e funziona; aggiunte frecce ▲▼ su ogni colonna come alternativa affidabile (funziona anche su touch/tablet dove il drag HTML5 non va). Maniglia grip resa più visibile; etichetta "Trascina o usa ▲▼ per riordinare". move(idx,delta) salva l'ordine come il drag.
+- Verificato E2E su Titoli: freccia giù su "Contratto" lo sposta sotto "Targa" e la tabella si aggiorna; drag già verificato. Vale per tutte le tabelle (Titoli, Polizze, Sinistri, Anagrafiche…).
