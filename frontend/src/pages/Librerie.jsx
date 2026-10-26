@@ -5482,10 +5482,13 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
 body { font-family: Georgia, 'Times New Roman', serif; color:#1e293b; margin:0; }
 h1 { font-size: 18px; margin: 0 0 14px; }
 table { border-collapse: collapse; width: 100%; font-size: 12px; }
+thead { display: table-header-group; }
+tfoot { display: table-footer-group; }
 th { background:#1e293b !important; color:#fff !important; border:1px solid #64748b; padding:5px 8px; text-align:left; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 td { border:1px solid #cbd5e1; padding:5px 8px; }
+tr { page-break-inside: avoid; break-inside: avoid; }
 tbody tr:nth-of-type(even):not(.sez) td { background:#f8fafc !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
-tr.sez td { background:#e2e8f0 !important; font-weight:700; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+tr.sez td { background:#e2e8f0 !important; font-weight:700; -webkit-print-color-adjust:exact; print-color-adjust:exact; page-break-after: avoid; break-after: avoid; page-break-before: auto; }
 </style></head><body><h1>${titolo}</h1>${html}<script>window.onload=function(){setTimeout(function(){window.print();},150);};</script></body></html>`);
         w.document.close();
     };
@@ -5626,14 +5629,16 @@ tr.sez td { background:#e2e8f0 !important; font-weight:700; -webkit-print-color-
                         <div className="bg-white shadow-xl shrink-0" style={{ width: "210mm", minHeight: "297mm", padding: "18mm" }} data-testid="tabella-anteprima-foglio">
                             {nome && <h2 className="text-lg font-bold text-slate-900 mb-4" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>{nome}</h2>}
                             <table ref={anteprimaRef} className="border-collapse w-full text-[13px]" style={{ fontFamily: "Georgia, 'Times New Roman', serif" }}>
-                                <tbody>
-                                    {mostraInt && (tipo === "checklist" || colonne.length > 0) && (
+                                {mostraInt && (tipo === "checklist" || colonne.length > 0) && (
+                                    <thead>
                                         <tr>
                                             {(tipo === "checklist" ? [primaColonna, ...colonne] : colonne).map((h, i) => (
                                                 <th key={i} className="border border-slate-400 bg-slate-800 text-white font-semibold px-2 py-1 text-left">{h}</th>
                                             ))}
                                         </tr>
-                                    )}
+                                    </thead>
+                                )}
+                                <tbody>
                                     {tipo === "griglia" ? righe.map((r, ri) => (
                                         isSez(ri) ? (
                                             <tr key={ri} className="sez">

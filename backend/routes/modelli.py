@@ -291,14 +291,34 @@ _PLACEHOLDER_CATALOGO = [
         ("compagnia_referente", "Referente compagnia"),
     ]),
     ("Collaboratore / Operatore", [
-        ("operatore_nome", "Nome collaboratore"),
+        ("operatore_nome", "Nome completo collaboratore"),
+        ("operatore_cognome", "Cognome / Ragione sociale collaboratore"),
+        ("operatore_nome_proprio", "Nome proprio collaboratore"),
+        ("operatore_luogo_nascita", "Luogo di nascita collaboratore"),
+        ("operatore_data_nascita", "Data di nascita collaboratore"),
+        ("operatore_indirizzo", "Indirizzo residenza (via e civico)"),
+        ("operatore_cap", "CAP residenza collaboratore"),
+        ("operatore_comune", "Comune / Città residenza collaboratore"),
+        ("operatore_residenza", "Residenza completa (via, CAP, comune)"),
+        ("operatore_sede_legale", "Indirizzo sede legale completo"),
+        ("operatore_ufficio", "Indirizzo ufficio completo"),
         ("operatore_email", "Email collaboratore"),
-        ("operatore_telefono", "Telefono collaboratore"),
+        ("operatore_pec", "PEC collaboratore"),
+        ("operatore_telefono", "Telefono cellulare collaboratore"),
+        ("operatore_telefono_ufficio", "Telefono ufficio collaboratore"),
+        ("operatore_fax", "Fax ufficio collaboratore"),
         ("operatore_codice_fiscale", "Codice fiscale collaboratore"),
         ("operatore_partita_iva", "Partita IVA collaboratore"),
         ("operatore_iban", "IBAN collaboratore"),
+        ("operatore_codice_gestionale", "Codice gestionale / produttore"),
+        ("operatore_mansione", "Mansione collaboratore"),
+        ("operatore_carica", "Carica collaboratore"),
+        ("operatore_tipologia", "Tipologia utente collaboratore"),
         ("operatore_rui", "N. RUI collaboratore"),
         ("operatore_sezione", "Sezione RUI collaboratore"),
+        ("operatore_rui_albo", "Albo iscrizione (IVASS/RUI/OAM)"),
+        ("operatore_rui_qualifica", "Qualifica RUI collaboratore"),
+        ("operatore_rui_data_iscrizione", "Data iscrizione RUI collaboratore"),
     ]),
     ("Grafica e firma", [
         ("logo", "Logo dell'agenzia (immagine)"),
@@ -437,13 +457,33 @@ _PLACEHOLDER_ESEMPI = {
     "compagnia_referente": "Dott. Bianchi",
     # Collaboratore / Operatore
     "operatore_nome": "Luca Verdi",
+    "operatore_cognome": "Verdi",
+    "operatore_nome_proprio": "Luca",
+    "operatore_luogo_nascita": "Milano (MI)",
+    "operatore_data_nascita": "01/08/1985",
+    "operatore_indirizzo": "Via Dante 10",
+    "operatore_cap": "20121",
+    "operatore_comune": "Milano (MI)",
+    "operatore_residenza": "Via Dante 10, 20121 Milano (MI)",
+    "operatore_sede_legale": "Via Dante 10, 20121 Milano (MI)",
+    "operatore_ufficio": "Via Torino 45, 20123 Milano (MI)",
     "operatore_email": "luca.verdi@rossiassicurazioni.it",
-    "operatore_telefono": "02 1234500",
+    "operatore_pec": "luca.verdi@pec.it",
+    "operatore_telefono": "348 1234567",
+    "operatore_telefono_ufficio": "02 1234500",
+    "operatore_fax": "02 1234599",
     "operatore_codice_fiscale": "VRDLCU85M01F205Y",
     "operatore_partita_iva": "09876543210",
     "operatore_iban": "IT60X0542811101000000999888",
+    "operatore_codice_gestionale": "PRD-00123",
+    "operatore_mansione": "Consulente assicurativo",
+    "operatore_carica": "Collaboratore",
+    "operatore_tipologia": "Collaboratore di rete",
     "operatore_rui": "E000654321",
     "operatore_sezione": "E",
+    "operatore_rui_albo": "IVASS",
+    "operatore_rui_qualifica": "Addetto all'attività di distribuzione",
+    "operatore_rui_data_iscrizione": "15/03/2015",
     # Grafica e firma
     "logo": "[logo agenzia]",
     "firma_operatore": "[firma operatore]",
@@ -1496,15 +1536,46 @@ async def build_context(cliente_id: Optional[str] = None,
     if operatore_id:
         u = await db.users.find_one({"id": operatore_id}, {"_id": 0}) or {}
         if u:
+            def _join_addr(via, cap, citta):
+                via = (via or "").strip()
+                cap = (cap or "").strip()
+                citta = (citta or "").strip()
+                if not any([via, cap, citta]):
+                    return ""
+                loc = " ".join(x for x in [cap, citta] if x).strip()
+                return ", ".join(x for x in [via, loc] if x)
+            residenza = _join_addr(u.get("indirizzo"), u.get("residenza_cap"), u.get("residenza_citta"))
+            sede_legale = _join_addr(u.get("sede_legale_via"), u.get("sede_legale_cap"), u.get("sede_legale_citta"))
+            ufficio = _join_addr(u.get("ufficio_via"), u.get("ufficio_cap"), u.get("ufficio_citta"))
             ctx.update({
                 "operatore_nome": u.get("name") or u.get("nome") or "",
+                "operatore_cognome": u.get("cognome_ragione_sociale") or "",
+                "operatore_nome_proprio": u.get("nome_proprio") or "",
+                "operatore_luogo_nascita": u.get("luogo_nascita") or "",
+                "operatore_data_nascita": _fmt_date_doc(u.get("data_nascita")) if u.get("data_nascita") else "",
+                "operatore_indirizzo": u.get("indirizzo") or "",
+                "operatore_cap": u.get("residenza_cap") or "",
+                "operatore_comune": u.get("residenza_citta") or "",
+                "operatore_residenza": residenza,
+                "operatore_sede_legale": sede_legale,
+                "operatore_ufficio": ufficio,
                 "operatore_email": u.get("email") or "",
+                "operatore_pec": u.get("pec") or "",
                 "operatore_telefono": u.get("telefono") or "",
+                "operatore_telefono_ufficio": u.get("telefono_ufficio") or "",
+                "operatore_fax": u.get("fax_ufficio") or "",
                 "operatore_codice_fiscale": u.get("codice_fiscale") or "",
                 "operatore_partita_iva": u.get("partita_iva") or "",
                 "operatore_iban": u.get("iban") or "",
+                "operatore_codice_gestionale": u.get("codice_gestionale_produttore") or "",
+                "operatore_mansione": u.get("mansione") or "",
+                "operatore_carica": u.get("carica") or "",
+                "operatore_tipologia": u.get("tipologia_utente") or "",
                 "operatore_rui": u.get("rui") or u.get("rui_numero_iscrizione") or az.get("rui") or "",
                 "operatore_sezione": u.get("rui_sezione") or az.get("rui_sezione") or "",
+                "operatore_rui_albo": u.get("rui_albo") or "",
+                "operatore_rui_qualifica": u.get("rui_qualifica") or "",
+                "operatore_rui_data_iscrizione": _fmt_date_doc(u.get("rui_data_iscrizione")) if u.get("rui_data_iscrizione") else "",
             })
             # URL firma collaboratore (interno: usato per inserire l'immagine, non come testo)
             ctx["_firma_operatore_url"] = u.get("firma_digitale_url")
@@ -1615,6 +1686,12 @@ async def preview_modello(body: PreviewBody, user: dict = Depends(current_user))
     ctx.setdefault("azienda_telefono", az_cfg.get("telefono") or "+39 0342 000000")
     ctx.setdefault("azienda_email", az_cfg.get("email") or "info@agenzia.it")
     ctx.setdefault("azienda_indirizzo", az_cfg.get("indirizzo") or "Via Roma 1, 23100 Sondrio")
+
+    # Placeholder collaboratore/operatore: in anteprima (senza operatore reale)
+    # mostriamo i valori d'esempio così l'utente vede cosa produrranno.
+    for _k, _v in _PLACEHOLDER_ESEMPI.items():
+        if _k.startswith("operatore_"):
+            ctx.setdefault(_k, _v)
 
     return {
         "tipo": body.tipo,
