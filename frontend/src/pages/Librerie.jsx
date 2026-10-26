@@ -5252,6 +5252,7 @@ function ModelliSezione() {
         setOpen(true);
     };
 
+    const [showSegnaposto, setShowSegnaposto] = useState(false);
     const [uploadingPdf, setUploadingPdf] = useState(false);
     const caricaDoc = async (e, endpoint, label) => {
         const f = e.target.files?.[0];
@@ -5353,6 +5354,10 @@ function ModelliSezione() {
                         <Button onClick={newPerTab}
                             className="bg-violet-700 hover:bg-violet-800 h-8" data-testid="modelli-new">
                             <Plus size={14} className="mr-1" />Nuovo {gruppoCorrente?.label}
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowSegnaposto(true)}
+                            className="h-8 border-sky-300 text-sky-700 hover:bg-sky-50" data-testid="modelli-segnaposto-btn">
+                            <Braces size={14} className="mr-1" />Segnaposto
                         </Button>
                         {(activeTab === "pdf" || activeTab === "word") && (
                             <>
@@ -5462,6 +5467,17 @@ function ModelliSezione() {
                 />
             )}
             {azione && <UsaModelloDialog modello={azione.modello} mode={azione.mode} onClose={() => setAzione(null)} />}
+
+            <Dialog open={showSegnaposto} onOpenChange={setShowSegnaposto}>
+                <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto" data-testid="modelli-segnaposto-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Braces size={16} className="text-sky-700" /> Elenco segnaposto {"{…}"}
+                        </DialogTitle>
+                    </DialogHeader>
+                    <SegnapostoSezione />
+                </DialogContent>
+            </Dialog>
         </Card>
     );
 }
