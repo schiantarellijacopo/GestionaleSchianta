@@ -111,3 +111,8 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Fix backend: quota_collaboratore_endpoint ora, per schemi con percentuale_su_premio_netto>0 e premio_netto presente, calcola la quota direttamente dal netto (via _quota_collab_da_schema) anche con totale=0, senza passare dal corto-circuito. _provv_breakdown (stats/E-C) invariato.
 - Verificato via API: totale=0+netto=500 → 22,50; schema ripartizione 70% con totale=0 → 0 (invariato), totale=100 → 70.
 - Verificato E2E nel form (screenshot): netto 500 → riga collaboratore 22,50 e Totale ripartito 22,50 € (prima 40,96).
+
+## [2026-10-26] Regolazione Premio: ricerca + filtri (collaboratore, compagnia, date)
+- Backend /regolazione-premio ora include collaboratore_id e collaboratore_nome (enrich da users).
+- Frontend RegolazionePremio: barra filtri con ricerca testo (cliente/polizza/compagnia/ramo/prodotto/collaboratore), select Compagnia, select Collaboratore, intervallo date Scadenza (dal/al), "Pulisci filtri" e conteggio "X di Y". Filtri client-side (la lista è già caricata), si combinano con i pill di stato. Collaboratore mostrato come sottotitolo nella colonna Compagnia.
+- Verificato E2E (tenant Schiantarelli preview): ricerca "730" → 1 di 2; opzioni collaboratore popolate; filtri render corretti.

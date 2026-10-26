@@ -102,6 +102,10 @@ async def list_regolazioni(
     comps = {c["id"]: c.get("nome") async for c in db.compagnie.find(
         {"id": {"$in": compagnia_ids}}, {"_id": 0, "id": 1, "nome": 1},
     )}
+    collab_ids = list({p.get("collaboratore_id") for p in polizze if p.get("collaboratore_id")})
+    collabs = {u["id"]: (u.get("name") or u.get("email")) async for u in db.users.find(
+        {"id": {"$in": collab_ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1},
+    )}
 
     # Titoli di regolazione collegati: servono per chiudere automaticamente
     # l'attività quando il titolo generato risulta già saldato (incassato/coperto).
@@ -174,6 +178,8 @@ async def list_regolazioni(
             "contraente_nome": _anag_nome(a),
             "contraente_email": a.get("email"),
             "compagnia": comps.get(p.get("compagnia_id"), "—"),
+            "collaboratore_id": p.get("collaboratore_id"),
+            "collaboratore_nome": collabs.get(p.get("collaboratore_id"), "—"),
             "effetto": p.get("effetto"),
             "scadenza": p.get("scadenza"),
             "base_tipo": p.get("regolazione_base"),

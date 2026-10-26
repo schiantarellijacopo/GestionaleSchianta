@@ -11,7 +11,7 @@ import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import RegolazionePremioDialog from "@/components/RegolazionePremioDialog";
-import { Mail, Calculator, Receipt, ExternalLink, AlertCircle, Download, CheckCircle2, Paperclip, Trash2, Upload, Loader2, FileText } from "lucide-react";
+import { Mail, Calculator, Receipt, ExternalLink, AlertCircle, Download, CheckCircle2, Paperclip, Trash2, Upload, Loader2, FileText, Search } from "lucide-react";
 import { toast } from "sonner";
 
 const STATI = [
@@ -48,6 +48,11 @@ export default function RegolazionePremio() {
     const [rows, setRows] = useState(null);
     const [stats, setStats] = useState(null);
     const [filtro, setFiltro] = useState("");
+    const [search, setSearch] = useState("");
+    const [fCompagnia, setFCompagnia] = useState("");
+    const [fCollab, setFCollab] = useState("");
+    const [fDal, setFDal] = useState("");
+    const [fAl, setFAl] = useState("");
     const [calcolaRow, setCalcolaRow] = useState(null);
     const [letteraRow, setLetteraRow] = useState(null);
     const [titoloRow, setTitoloRow] = useState(null);
@@ -64,6 +69,27 @@ export default function RegolazionePremio() {
     useEffect(() => { load(); }, [load]);
 
     if (rows === null) return <Loading />;
+
+    const compagnieOpts = Array.from(new Set((rows || []).map((r) => r.compagnia).filter((x) => x && x !== "—"))).sort();
+    const collabOpts = Array.from(
+        new Map((rows || []).filter((r) => r.collaboratore_id).map((r) => [r.collaboratore_id, r.collaboratore_nome])).entries()
+    ).sort((a, b) => (a[1] || "").localeCompare(b[1] || ""));
+
+    const q = search.trim().toLowerCase();
+    const visibleRows = (rows || []).filter((r) => {
+        if (q) {
+            const hay = [r.contraente_nome, r.numero_polizza, r.compagnia, r.ramo, r.prodotto, r.collaboratore_nome]
+                .map((x) => (x || "").toString().toLowerCase()).join(" ");
+            if (!hay.includes(q)) return false;
+        }
+        if (fCompagnia && r.compagnia !== fCompagnia) return false;
+        if (fCollab && r.collaboratore_id !== fCollab) return false;
+        if (fDal && (!r.scadenza || r.scadenza < fDal)) return false;
+        if (fAl && (!r.scadenza || r.scadenza > fAl)) return false;
+        return true;
+    });
+    const filtriAttivi = search || fCompagnia || fCollab || fDal || fAl;
+    const resetFiltri = () => { setSearch(""); setFCompagnia(""); setFCollab(""); setFDal(""); setFAl(""); };
 
     return (
         <div data-testid="regolazione-premio-page">
@@ -94,6 +120,51 @@ export default function RegolazionePremio() {
                 ))}
             </div>
 
+            <div className="flex flex-wrap items-end gap-2 mb-4" data-testid="reg-filtri">
+                <div className="relative flex-1 min-w-[220px]">
+                    <Search size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Input
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        placeholder="Cerca cliente, polizza, compagnia, ramo…"
+                        className="pl-8 h-9"
+                        data-testid="reg-search"
+                    />
+                </div>
+                <select
+                    value={fCompagnia}
+                    onChange={(e) => setFCompagnia(e.target.value)}
+                    className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 min-w-[150px]"
+                    data-testid="reg-filter-compagnia"
+                >
+                    <option value="">Tutte le compagnie</option>
+                    {compagnieOpts.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select
+                    value={fCollab}
+                    onChange={(e) => setFCollab(e.target.value)}
+                    className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 min-w-[150px]"
+                    data-testid="reg-filter-collaboratore"
+                >
+                    <option value="">Tutti i collaboratori</option>
+                    {collabOpts.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
+                </select>
+                <div className="flex items-center gap-1">
+                    <Label className="text-[11px] text-slate-500">Scadenza dal</Label>
+                    <Input type="date" value={fDal} onChange={(e) => setFDal(e.target.value)} className="h-9 w-[140px]" data-testid="reg-filter-dal" />
+                </div>
+                <div className="flex items-center gap-1">
+                    <Label className="text-[11px] text-slate-500">al</Label>
+                    <Input type="date" value={fAl} onChange={(e) => setFAl(e.target.value)} className="h-9 w-[140px]" data-testid="reg-filter-al" />
+                </div>
+                {filtriAttivi && (
+                    <Button variant="ghost" size="sm" className="h-9 text-slate-500" onClick={resetFiltri} data-testid="reg-filter-reset">
+                        Pulisci filtri
+                    </Button>
+                )}
+                <span className="text-xs text-slate-400 ml-auto self-center" data-testid="reg-count">{visibleRows.length} di {rows.length}</span>
+            </div>
+
             <Card className="border-slate-200 overflow-hidden">
                 <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -110,10 +181,10 @@ export default function RegolazionePremio() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                            {rows.length === 0 && (
-                                <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400 italic">Nessuna polizza soggetta a regolazione premio</td></tr>
+                            {visibleRows.length === 0 && (
+                                <tr><td colSpan={8} className="px-3 py-10 text-center text-slate-400 italic">{rows.length === 0 ? "Nessuna polizza soggetta a regolazione premio" : "Nessun risultato per i filtri selezionati"}</td></tr>
                             )}
-                            {rows.map((r) => (
+                            {visibleRows.map((r) => (
                                 <tr key={r.polizza_id} className={r.da_inviare ? "bg-rose-50/40" : ""} data-testid={`reg-row-${r.polizza_id}`}>
                                     <td className="px-3 py-2.5">
                                         <Link to={`/anagrafiche/${r.contraente_id}`} className="font-medium text-slate-800 hover:text-violet-700">
@@ -125,7 +196,12 @@ export default function RegolazionePremio() {
                                         <Link to={`/polizze/${r.polizza_id}`} className="text-sky-700 hover:underline font-mono text-xs">{r.numero_polizza}</Link>
                                         <div className="text-[10px] text-slate-500">{r.ramo} {r.tasso ? `· ${r.tasso}%` : ""}</div>
                                     </td>
-                                    <td className="px-3 py-2.5 text-slate-600">{r.compagnia}</td>
+                                    <td className="px-3 py-2.5 text-slate-600">
+                                        {r.compagnia}
+                                        {r.collaboratore_nome && r.collaboratore_nome !== "—" && (
+                                            <div className="text-[10px] text-slate-400">{r.collaboratore_nome}</div>
+                                        )}
+                                    </td>
                                     <td className="px-3 py-2.5 text-slate-600">{fmtDate(r.scadenza)}</td>
                                     <td className="px-3 py-2.5">
                                         <span className={r.da_inviare ? "text-rose-600 font-semibold" : "text-slate-600"}>{fmtDate(r.data_invio_prevista)}</span>
