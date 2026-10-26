@@ -322,7 +322,7 @@ export default function Titoli({ storicoMode = false } = {}) {
             tdClass: "text-xs text-sky-700 font-mono font-medium uppercase",
             render: (t) => t.targa || <span className="text-slate-300">—</span>,
         },
-        { key: "contraente", label: "Contraente", sort: "contraente_nome", tdClass: "text-xs", render: (t) => t.contraente_nome || "-" },
+        { key: "contraente", label: "Contraente", sort: "contraente_nome", thClass: "min-w-[220px]", tdClass: "text-xs", render: (t) => t.contraente_nome || "-" },
         { key: "compagnia", label: "Compagnia", sort: "compagnia_nome", thClass: "w-[120px]", tdClass: "text-xs text-slate-700", render: (t) => t.compagnia_nome || "-" },
         {
             key: "collaboratore", label: "Collaboratore", sort: "collaboratore_nome", thClass: "w-[100px]", tdClass: "text-xs text-slate-700",
@@ -387,12 +387,13 @@ export default function Titoli({ storicoMode = false } = {}) {
             ),
         },
         {
-            key: "azione", label: "Azione", locked: true, thClass: "w-[110px] text-center", tdClass: "text-center",
+            key: "azione", label: "Azione", locked: true, thClass: "w-[48px] text-center", tdClass: "text-center",
             render: (t) => (
                 !storicoMode && t.stato !== "incassato" && t.stato !== "stornato" ? (
-                    <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700"
+                    <Button size="icon" className="h-7 w-7 bg-emerald-600 hover:bg-emerald-700"
+                            title="Incasso / Copertura"
                             onClick={() => setPaying(t)} data-testid={`titolo-incassa-${t.id}`}>
-                        Incasso/Copertura
+                        <Wallet size={14} />
                     </Button>
                 ) : (
                     <span className="text-xs text-emerald-700">✓ {fmtDate(t.data_incasso)}</span>

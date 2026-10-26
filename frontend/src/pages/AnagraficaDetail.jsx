@@ -29,6 +29,7 @@ import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
     Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool, AlertTriangle,
+    Receipt, Bell,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -1462,12 +1463,54 @@ const DIARIO_TIPI = [
     { v: "altro", l: "Altro", i: <BookText size={12} /> },
 ];
 
+// Categorie "attività" per suddividere il Diario (comunicazioni, incassi, documenti, email, chat…).
+const DIARIO_CATEGORIE = [
+    { k: "incassi", l: "Incassi", i: <Receipt size={13} /> },
+    { k: "avvisi", l: "Comunicazione avvisi", i: <Bell size={13} /> },
+    { k: "email", l: "Email", i: <Mail size={13} /> },
+    { k: "whatsapp", l: "WhatsApp", i: <MessageCircle size={13} /> },
+    { k: "chat", l: "Chat", i: <BookText size={13} /> },
+    { k: "documenti", l: "Documenti", i: <FileText size={13} /> },
+    { k: "contatti", l: "Telefonate / Incontri", i: <Phone size={13} /> },
+    { k: "note", l: "Note / Altro", i: <BookText size={13} /> },
+];
+
+// Deriva la categoria-attività di una voce di diario dal tipo/titolo/canale.
+function diarioCategoria(v) {
+    const t = (v.titolo || "").toLowerCase();
+    const canale = (v.payload || {}).canale;
+    // Le comunicazioni/avvisi inviati (hanno storico_avvisi_id) hanno priorità.
+    if ((v.payload || {}).storico_avvisi_id) return "avvisi";
+    if (/incasso|incassat|quietanz|pagament|rimborso|provvigion/.test(t) || (v.payload || {}).pagamento || (v.payload || {}).titolo_id) return "incassi";
+    if (v.tipo === "whatsapp" || canale === "whatsapp" || /whatsapp/.test(t)) return "whatsapp";
+    if (v.tipo === "email" || canale === "email" || /\be-?mail\b/.test(t)) return "email";
+    if (v.tipo === "chat" || canale === "chat") return "chat";
+    if (v.tipo === "documento" || /document|allegat|caricato|\.pdf/.test(t)) return "documenti";
+    if (v.tipo === "telefonata" || v.tipo === "incontro") return "contatti";
+    return "note";
+}
+
+function DiarioFiltroChip({ active, onClick, label, icon = null, count, testid }) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            data-testid={testid}
+            className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border transition-colors ${active ? "bg-sky-600 border-sky-600 text-white" : "bg-white border-slate-300 text-slate-600 hover:border-sky-400"}`}
+        >
+            {icon}{label}
+            <span className={`num text-[10px] px-1.5 rounded-full ${active ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{count}</span>
+        </button>
+    );
+}
+
 function DiarioTab({ anagrafica_id, canEdit }) {
     const [list, setList] = useState(null);
     const [open, setOpen] = useState(false);
     const [editing, setEditing] = useState(null);
     const [viewingMsg, setViewingMsg] = useState(null);  // dialog "visualizza + rimanda"
     const [viewVoce, setViewVoce] = useState(null);  // vista completa voce (email ricevute, note)
+    const [cat, setCat] = useState("tutti");  // filtro categoria-attività
     const load = () => api.get(`/anagrafiche/${anagrafica_id}/diario`).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
 
@@ -1478,6 +1521,67 @@ function DiarioTab({ anagrafica_id, canEdit }) {
 
     // Voci di comunicazione (payload.storico_avvisi_id presente) sono rimandabili
     const isComunicazione = (v) => !!(v.payload && v.payload.storico_avvisi_id);
+
+    const renderVoce = (v) => {
+        const tipo = DIARIO_TIPI.find((t) => t.v === v.tipo) || DIARIO_TIPI[4];
+        const isCom = isComunicazione(v);
+        const canale = v.payload?.canale;
+        return (
+            <li key={v.id} className="px-4 py-3 hover:bg-slate-50 flex gap-3" data-testid={`diario-${v.id}`}>
+                <div className="w-9 h-9 rounded-full bg-sky-50 text-sky-700 flex items-center justify-center shrink-0">{tipo.i}</div>
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-sm">{v.titolo}</div>
+                        <div className="flex items-center gap-1">
+                            {canale && (
+                                <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                                    canale === "whatsapp" ? "bg-emerald-100 text-emerald-800" :
+                                    canale === "email" ? "bg-sky-100 text-sky-800" :
+                                    canale === "sms" ? "bg-violet-100 text-violet-800" :
+                                    "bg-slate-100 text-slate-700"
+                                }`}>{canale}</span>
+                            )}
+                            <span className="badge badge-neutral">{tipo.l}</span>
+                        </div>
+                    </div>
+                    {v.descrizione && <div className="text-xs text-slate-600 mt-1 whitespace-pre-line line-clamp-2">{v.descrizione}</div>}
+                    <div className="text-[11px] text-slate-400 mt-2 num flex items-center gap-2 flex-wrap">
+                        <span>{fmtDate(v.data_evento)} · {v.autore_nome || "—"}</span>
+                        {isCom && (
+                            <>
+                                <button
+                                    onClick={() => setViewingMsg(v)}
+                                    className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
+                                    data-testid={`diario-view-${v.id}`}
+                                >
+                                    👁 Visualizza
+                                </button>
+                                {(canale === "whatsapp" || canale === "email") && (
+                                    <button
+                                        onClick={() => setViewingMsg({ ...v, _autoRimanda: false })}
+                                        className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium"
+                                        data-testid={`diario-resend-${v.id}`}
+                                    >
+                                        ↻ Rimanda
+                                    </button>
+                                )}
+                            </>
+                        )}
+                        {!isCom && v.descrizione && (
+                            <button
+                                onClick={() => setViewVoce(v)}
+                                className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
+                                data-testid={`diario-open-${v.id}`}
+                            >
+                                👁 Apri
+                            </button>
+                        )}
+                    </div>
+                </div>
+                <RowActions onEdit={canEdit ? () => setEditing(v) : null} onDelete={() => elimina(v.id)} label="voce" />
+            </li>
+        );
+    };
 
     return (
         <div className="mt-4">
@@ -1494,70 +1598,33 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                     </Dialog>
                 )}
             </div>
+            {list && list.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mb-3" data-testid="diario-filtri">
+                    <DiarioFiltroChip active={cat === "tutti"} onClick={() => setCat("tutti")} label="Tutti" count={list.length} testid="diario-filtro-tutti" />
+                    {DIARIO_CATEGORIE.map((c) => {
+                        const n = list.filter((v) => diarioCategoria(v) === c.k).length;
+                        if (!n) return null;
+                        return <DiarioFiltroChip key={c.k} active={cat === c.k} onClick={() => setCat(c.k)} label={c.l} icon={c.i} count={n} testid={`diario-filtro-${c.k}`} />;
+                    })}
+                </div>
+            )}
             <Card className="border-slate-200 overflow-hidden">
                 {list === null ? <Loading /> : list.length === 0 ? <div className="p-8 text-center text-slate-500 text-sm">Nessuna voce di diario.</div> : (
-                    <ul className="divide-y divide-slate-100">
-                        {list.map((v) => {
-                            const tipo = DIARIO_TIPI.find((t) => t.v === v.tipo) || DIARIO_TIPI[4];
-                            const isCom = isComunicazione(v);
-                            const canale = v.payload?.canale;
-                            return (
-                                <li key={v.id} className="px-4 py-3 hover:bg-slate-50 flex gap-3" data-testid={`diario-${v.id}`}>
-                                    <div className="w-9 h-9 rounded-full bg-sky-50 text-sky-700 flex items-center justify-center shrink-0">{tipo.i}</div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="font-medium text-sm">{v.titolo}</div>
-                                            <div className="flex items-center gap-1">
-                                                {canale && (
-                                                    <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                                                        canale === "whatsapp" ? "bg-emerald-100 text-emerald-800" :
-                                                        canale === "email" ? "bg-sky-100 text-sky-800" :
-                                                        canale === "sms" ? "bg-violet-100 text-violet-800" :
-                                                        "bg-slate-100 text-slate-700"
-                                                    }`}>{canale}</span>
-                                                )}
-                                                <span className="badge badge-neutral">{tipo.l}</span>
-                                            </div>
-                                        </div>
-                                        {v.descrizione && <div className="text-xs text-slate-600 mt-1 whitespace-pre-line line-clamp-2">{v.descrizione}</div>}
-                                        <div className="text-[11px] text-slate-400 mt-2 num flex items-center gap-2 flex-wrap">
-                                            <span>{fmtDate(v.data_evento)} · {v.autore_nome || "—"}</span>
-                                            {isCom && (
-                                                <>
-                                                    <button
-                                                        onClick={() => setViewingMsg(v)}
-                                                        className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
-                                                        data-testid={`diario-view-${v.id}`}
-                                                    >
-                                                        👁 Visualizza
-                                                    </button>
-                                                    {(canale === "whatsapp" || canale === "email") && (
-                                                        <button
-                                                            onClick={() => setViewingMsg({ ...v, _autoRimanda: false })}
-                                                            className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium"
-                                                            data-testid={`diario-resend-${v.id}`}
-                                                        >
-                                                            ↻ Rimanda
-                                                        </button>
-                                                    )}
-                                                </>
-                                            )}
-                                            {!isCom && v.descrizione && (
-                                                <button
-                                                    onClick={() => setViewVoce(v)}
-                                                    className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
-                                                    data-testid={`diario-open-${v.id}`}
-                                                >
-                                                    👁 Apri
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <RowActions onEdit={canEdit ? () => setEditing(v) : null} onDelete={() => elimina(v.id)} label="voce" />
-                                </li>
-                            );
-                        })}
-                    </ul>
+                    (cat === "tutti" ? DIARIO_CATEGORIE : DIARIO_CATEGORIE.filter((c) => c.k === cat)).map((c) => {
+                        const voci = list.filter((v) => diarioCategoria(v) === c.k);
+                        if (!voci.length) return null;
+                        return (
+                            <div key={c.k} data-testid={`diario-gruppo-${c.k}`}>
+                                <div className="px-4 py-2 bg-slate-50 border-y border-slate-100 flex items-center gap-2 text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                                    <span className="text-sky-700">{c.i}</span>{c.l}
+                                    <span className="ml-auto text-slate-400 num">{voci.length}</span>
+                                </div>
+                                <ul className="divide-y divide-slate-100">
+                                    {voci.map((v) => renderVoce(v))}
+                                </ul>
+                            </div>
+                        );
+                    })
                 )}
             </Card>
             {viewingMsg && (
