@@ -858,6 +858,16 @@ async def crea_modello_da_pdf(
     corpo = await _ai_trasforma_in_modello(testo, user)
     nome_finale = (nome or "").strip() or (file.filename or "Modello da PDF").rsplit(".", 1)[0]
     body = ModelloBody(tipo=tipo, nome=nome_finale, corpo=corpo)
+    import uuid as _uuid
+    import os as _os
+    import storage as obj_storage
+    mid = str(_uuid.uuid4())
+    pdf_path = f"{_os.environ.get('APP_NAME', 'assicura')}/modelli_pdf/{mid}.pdf"
+    try:
+        obj_storage.put_object(pdf_path, raw, "application/pdf")
+        pdf_stored = True
+    except Exception:
+        pdf_stored = False
     doc = TemplateModello(
         tipo=body.tipo,                 # type: ignore[arg-type]
         nome=body.nome.strip(),
@@ -866,6 +876,11 @@ async def crea_modello_da_pdf(
         note=f"Generato da PDF: {file.filename}",
         placeholders=_autodetect_placeholders(body),
     ).model_dump()
+    doc["id"] = mid
+    if pdf_stored:
+        doc["pdf_storage_path"] = pdf_path
+        doc["pdf_filename"] = file.filename
+        doc["pdf_overlay"] = []
     await db.template_modelli.insert_one(doc)
     doc.pop("_id", None)
     await log_attivita(user, "create", "modello", doc["id"], doc["nome"])
@@ -1194,18 +1209,31 @@ def _docx_sezione_row(cells, r, ncols) -> None:
         pass
 
 
-def _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors):
+def _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors, sezioni=None):
     """Costruisce un flowable Table (reportlab) per una tabella riutilizzabile."""
     from reportlab.lib.styles import ParagraphStyle
+    sezioni = sezioni or set()
     hstyle = ParagraphStyle("tab_hdr", parent=styles["Normal"],
                             textColor=rl_colors.white, fontName="Helvetica-Bold", fontSize=9)
     cstyle = ParagraphStyle("tab_cell", parent=styles["Normal"], fontSize=9, leading=11)
+    sstyle = ParagraphStyle("tab_sez", parent=styles["Normal"], fontName="Helvetica-Bold",
+                            fontSize=9, leading=11, textColor=rl_colors.HexColor("#0f172a"))
     checklist = (tab.get("tipo") == "checklist")
     data = []
+    hoff = 1 if headers else 0
+    sez_rows = []  # indici (nella matrice data) delle righe di sezione
     if headers:
         data.append([Paragraph(_esc_html(h).replace("\n", "<br/>"), hstyle) for h in headers])
-    for r in rows:
-        data.append([Paragraph(_esc_html(c).replace("\n", "<br/>"), cstyle) for c in r])
+    ncols0 = len(headers) if headers else (len(rows[0]) if rows else 1)
+    for ri, r in enumerate(rows):
+        if ri in sezioni:
+            label = next((str(c) for c in r if c is not None and str(c).strip()), "")
+            cells = [Paragraph(_esc_html(label).replace("\n", "<br/>"), sstyle)]
+            cells += ["" for _ in range(ncols0 - 1)]
+            data.append(cells)
+            sez_rows.append(len(data) - 1)
+        else:
+            data.append([Paragraph(_esc_html(c).replace("\n", "<br/>"), cstyle) for c in r])
     if not data:
         return None
     ncols = len(data[0])
@@ -1228,10 +1256,21 @@ def _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableSt
     if headers:
         style += [
             ("BACKGROUND", (0, 0), (-1, 0), rl_colors.HexColor("#1e293b")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [rl_colors.white, rl_colors.HexColor("#f1f5f9")]),
         ]
     if checklist and ncols > 1:
         style += [("ALIGN", (1, 0), (-1, -1), "CENTER")]
+    for sr in sez_rows:
+        style += [
+            ("SPAN", (0, sr), (-1, sr)),
+            ("BACKGROUND", (0, sr), (-1, sr), rl_colors.HexColor("#e2e8f0")),
+        ]
+    # zebra solo sulle righe dati (escludendo header e sezioni)
+    if headers:
+        for di in range(hoff, len(data)):
+            if di in sez_rows:
+                continue
+            bg = rl_colors.white if ((di - hoff) % 2 == 0) else rl_colors.HexColor("#f1f5f9")
+            style.append(("BACKGROUND", (0, di), (-1, di), bg))
     t.setStyle(TableStyle(style))
     return t
 
@@ -1671,8 +1710,8 @@ async def genera_documento(mid: str, body: GeneraDocBody,
             if mtab:
                 tab = tabelle_map.get(mtab.group(1))
                 if tab:
-                    headers, rows = _tabella_righe_render(tab, ctx)
-                    _docx_build_tabella(doc, headers, rows)
+                    headers, rows, sezioni_t = _tabella_righe_render(tab, ctx)
+                    _docx_build_tabella(doc, headers, rows, sezioni_t)
                 return
             if t == "{logo}":
                 if logo_bytes:
@@ -1754,8 +1793,8 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         if mtab:
             tab = tabelle_map.get(mtab.group(1))
             if tab:
-                headers, rows = _tabella_righe_render(tab, ctx)
-                flow = _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors)
+                headers, rows, sezioni_t = _tabella_righe_render(tab, ctx)
+                flow = _pdf_build_tabella(tab, headers, rows, styles, mm, Paragraph, Table, TableStyle, rl_colors, sezioni_t)
                 if flow is not None:
                     el.append(Spacer(1, 4))
                     el.append(flow)
@@ -1884,8 +1923,9 @@ def _docx_iter_tables(tables, mapping: dict) -> None:
                     _docx_iter_tables(cell.tables, mapping)
 
 
-def _docx_insert_tabella_before(doc, para, headers, rows) -> None:
+def _docx_insert_tabella_before(doc, para, headers, rows, sezioni=None) -> None:
     """Inserisce una vera tabella Word prima del paragrafo ``para``."""
+    sezioni = sezioni or set()
     ncols = len(headers) if headers else (len(rows[0]) if rows else 1)
     if ncols < 1:
         ncols = 1
@@ -1903,8 +1943,11 @@ def _docx_insert_tabella_before(doc, para, headers, rows) -> None:
             for p in cells[i].paragraphs:
                 for run in p.runs:
                     run.bold = True
-    for r in rows:
+    for ri, r in enumerate(rows):
         cells = table.add_row().cells
+        if ri in sezioni:
+            _docx_sezione_row(cells, r, ncols)
+            continue
         for i, c in enumerate(r):
             if i >= ncols:
                 break
@@ -1939,8 +1982,8 @@ def _fill_docx(raw: bytes, mapping: dict, tabelle_rendered: dict | None = None) 
             m = _TABELLA_RE.search(full)
             if not m or m.group(1) not in tabelle_rendered:
                 continue
-            headers, rows = tabelle_rendered[m.group(1)]
-            _docx_insert_tabella_before(doc, p, headers, rows)
+            headers, rows, sezioni_t = tabelle_rendered[m.group(1)]
+            _docx_insert_tabella_before(doc, p, headers, rows, sezioni_t)
             remaining = _TABELLA_RE.sub("", full)
             if remaining.strip():
                 if p.runs:
@@ -2653,3 +2696,155 @@ async def comunica_invia(body: ComunicaInviaBody, user: dict = Depends(current_u
         raise HTTPException(400, r.get("error") or f"Invio {canale} fallito")
     await log_attivita(user, f"comunica_{canale}", body.entita_tipo, body.entita_id, dest)
     return {"ok": True, "canale": canale, "destinatario": dest}
+
+
+# ===========================================================
+# Editor PDF visivo: overlay segnaposto sul PDF originale
+# ===========================================================
+class PdfOverlayItem(BaseModel):
+    page: int = 0
+    x: float = 0.0            # 0..1 relativo alla larghezza pagina
+    y: float = 0.0            # 0..1 relativo all'altezza pagina
+    key: str                  # chiave segnaposto senza graffe, es. "cliente"
+    font_size: float = 11.0
+
+
+class PdfOverlayBody(BaseModel):
+    overlay: List[PdfOverlayItem] = Field(default_factory=list)
+
+
+def _pdf_render_pages(raw: bytes, dpi: int = 120) -> list[dict]:
+    """Rende ogni pagina del PDF come PNG base64 + dimensioni in punti."""
+    import base64
+    import fitz  # pymupdf
+    out: list[dict] = []
+    doc = fitz.open(stream=raw, filetype="pdf")
+    try:
+        for i, page in enumerate(doc):
+            rect = page.rect
+            pix = page.get_pixmap(dpi=dpi)
+            img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
+            out.append({
+                "index": i,
+                "width_pt": round(rect.width, 2),
+                "height_pt": round(rect.height, 2),
+                "img_w": pix.width,
+                "img_h": pix.height,
+                "image": f"data:image/png;base64,{img_b64}",
+            })
+    finally:
+        doc.close()
+    return out
+
+
+def _pdf_stamp_overlay(raw: bytes, overlay: list[dict], ctx: dict) -> bytes:
+    """Stampa i segnaposto (risolti con ctx) sopra il PDF originale."""
+    import fitz  # pymupdf
+    doc = fitz.open(stream=raw, filetype="pdf")
+    try:
+        npages = doc.page_count
+        for it in overlay or []:
+            pidx = int(it.get("page", 0))
+            if pidx < 0 or pidx >= npages:
+                continue
+            page = doc[pidx]
+            rect = page.rect
+            key = it.get("key") or ""
+            valore = render_text("{" + key + "}", ctx) if key else ""
+            if valore in (None, "", "-"):
+                valore = ""
+            x = float(it.get("x", 0)) * rect.width
+            y = float(it.get("y", 0)) * rect.height
+            fs = float(it.get("font_size", 11) or 11)
+            # y nel click è il bordo superiore → sposto alla baseline
+            page.insert_text((x, y + fs), str(valore), fontsize=fs,
+                             fontname="helv", color=(0, 0, 0))
+        return doc.tobytes()
+    finally:
+        doc.close()
+
+
+@router.get("/librerie/modelli/{mid}/pdf-pagine")
+async def pdf_pagine(mid: str, user: dict = Depends(current_user)) -> dict:
+    """Ritorna le pagine del PDF originale come immagini per l'editor visivo."""
+    import storage as obj_storage
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    path = m.get("pdf_storage_path")
+    if not path:
+        raise HTTPException(400, "Questo modello non ha un PDF originale collegato")
+    raw, _ct = obj_storage.get_object(path)
+    pagine = _pdf_render_pages(raw)
+    return {"pagine": pagine, "overlay": m.get("pdf_overlay") or [], "filename": m.get("pdf_filename")}
+
+
+@router.post("/librerie/modelli/{mid}/pdf-origine", status_code=200)
+async def pdf_origine_upload(
+    mid: str,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Collega (o sostituisce) il PDF originale di un modello esistente."""
+    import os as _os
+    import storage as obj_storage
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".pdf"):
+        raise HTTPException(400, "Carica un file PDF")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "File vuoto")
+    path = m.get("pdf_storage_path") or f"{_os.environ.get('APP_NAME', 'assicura')}/modelli_pdf/{mid}.pdf"
+    obj_storage.put_object(path, raw, "application/pdf")
+    await db.template_modelli.update_one(
+        {"id": mid},
+        {"$set": {"pdf_storage_path": path, "pdf_filename": file.filename,
+                  "updated_at": _now_iso()}})
+    await log_attivita(user, "pdf_origine", "modello", mid, file.filename or "")
+    return {"ok": True, "pdf_storage_path": path, "pdf_filename": file.filename}
+
+
+@router.post("/librerie/modelli/{mid}/pdf-overlay", status_code=200)
+async def pdf_overlay_salva(
+    mid: str, body: PdfOverlayBody,
+    user: dict = Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Salva la disposizione dei segnaposto sopra il PDF originale."""
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    overlay = [it.model_dump() for it in body.overlay]
+    keys = sorted({it["key"] for it in overlay if it.get("key")})
+    merged = sorted(set((m.get("placeholders") or [])) | set(keys))
+    await db.template_modelli.update_one(
+        {"id": mid},
+        {"$set": {"pdf_overlay": overlay, "placeholders": merged, "updated_at": _now_iso()}})
+    await log_attivita(user, "pdf_overlay", "modello", mid, m.get("nome") or "")
+    return {"ok": True, "overlay": overlay}
+
+
+@router.post("/librerie/modelli/{mid}/genera-pdf-overlay")
+async def genera_pdf_overlay(
+    mid: str, body: GeneraDocBody,
+    user: dict = Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """Genera il PDF finale stampando i segnaposto compilati sul PDF originale."""
+    from fastapi.responses import Response
+    import storage as obj_storage
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    path = m.get("pdf_storage_path")
+    if not path:
+        raise HTTPException(400, "Questo modello non ha un PDF originale collegato")
+    overlay = m.get("pdf_overlay") or []
+    raw, _ct = obj_storage.get_object(path)
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
+                              body.titolo_id, body.sinistro_id)
+    out = _pdf_stamp_overlay(raw, overlay, ctx)
+    fname = re.sub(r"[^a-zA-Z0-9_-]+", "_", m.get("nome") or "documento")[:50]
+    return Response(out, media_type="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={fname}.pdf"})

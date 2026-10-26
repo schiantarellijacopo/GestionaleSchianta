@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette, Layers } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -5394,17 +5394,46 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
     const [mostraInt, setMostraInt] = useState(tabella.mostra_intestazione !== false);
     const [colonne, setColonne] = useState(tabella.colonne?.length ? [...tabella.colonne] : (tabella.tipo === "checklist" ? ["Richiesta", "Proposta", "Confermata"] : ["Colonna 1", "Colonna 2"]));
     const [righe, setRighe] = useState(tabella.righe?.length ? tabella.righe.map((r) => [...r]) : [["", ""]]);
+    const [sezioni, setSezioni] = useState(() => (tabella.righe_sezione || []).filter((n) => Number.isInteger(n)));
     const [primaColonna, setPrimaColonna] = useState(tabella.prima_colonna || "Voce");
     const [voci, setVoci] = useState(tabella.voci?.length ? tabella.voci.map((v) => ({ testo: v.testo || "", spunte: [...(v.spunte || [])] })) : [{ testo: "", spunte: [] }]);
     const [busy, setBusy] = useState(false);
+    const [showPreview, setShowPreview] = useState(false);
+    const [showPalette, setShowPalette] = useState(false);
+
+    // Cella attiva per inserimento segnaposto
+    const cellRef = useRef(null);
+    const cellPos = useRef(null);
+    const onCellFocus = (ri, ci, el) => { cellRef.current = el; cellPos.current = { ri, ci }; };
+
+    const isSez = (i) => sezioni.includes(i);
 
     // Griglia helpers
     const addCol = () => { setColonne([...colonne, `Colonna ${colonne.length + 1}`]); setRighe(righe.map((r) => [...r, ""])); };
     const removeCol = (i) => { if (colonne.length <= 1) return; setColonne(colonne.filter((_, x) => x !== i)); setRighe(righe.map((r) => r.filter((_, x) => x !== i))); };
     const setColName = (i, val) => setColonne(colonne.map((c, x) => (x === i ? val : c)));
     const addRow = () => setRighe([...righe, colonne.map(() => "")]);
-    const removeRow = (i) => setRighe(righe.filter((_, x) => x !== i));
+    const addSezione = () => { setRighe([...righe, colonne.map(() => "")]); setSezioni([...sezioni, righe.length]); };
+    const removeRow = (i) => {
+        setRighe(righe.filter((_, x) => x !== i));
+        setSezioni(sezioni.filter((n) => n !== i).map((n) => (n > i ? n - 1 : n)));
+    };
+    const toggleSez = (i) => setSezioni(isSez(i) ? sezioni.filter((n) => n !== i) : [...sezioni, i]);
     const setCell = (ri, ci, val) => setRighe(righe.map((r, x) => (x === ri ? r.map((c, y) => (y === ci ? val : c)) : r)));
+
+    const insertPlaceholder = (key) => {
+        const pos = cellPos.current; const el = cellRef.current;
+        if (!pos || !el) { toast.info("Clicca prima dentro una cella della tabella"); return; }
+        const token = `{${key}}`;
+        const { ri, ci } = pos;
+        const old = (righe[ri] && righe[ri][ci] != null) ? String(righe[ri][ci]) : "";
+        const s = el.selectionStart != null ? el.selectionStart : old.length;
+        const e = el.selectionEnd != null ? el.selectionEnd : s;
+        setCell(ri, ci, old.slice(0, s) + token + old.slice(e));
+        requestAnimationFrame(() => {
+            try { el.focus(); const p = s + token.length; el.setSelectionRange(p, p); } catch { /* noop */ }
+        });
+    };
 
     // Checklist helpers
     const addColCk = () => { setColonne([...colonne, "Colonna"]); setVoci(voci.map((v) => ({ ...v, spunte: [...v.spunte, false] }))); };
@@ -5427,6 +5456,7 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
         const payload = {
             nome: nome.trim(), descrizione: descrizione.trim() || null, tipo, mostra_intestazione: mostraInt,
             colonne, righe: tipo === "griglia" ? righe : [],
+            righe_sezione: tipo === "griglia" ? sezioni.filter((n) => n >= 0 && n < righe.length) : [],
             prima_colonna: tipo === "checklist" ? primaColonna : null,
             voci: tipo === "checklist" ? voci : [],
         };
@@ -5437,6 +5467,8 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
         } catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
         finally { setBusy(false); }
     };
+
+    const sezLabel = (r) => { const v = (r || []).find((c) => c != null && String(c).trim()); return v != null ? String(v) : ""; };
 
     return (
         <div className="space-y-4" data-testid="tabella-editor">
@@ -5465,7 +5497,22 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
                     <input type="checkbox" checked={mostraInt} onChange={(e) => setMostraInt(e.target.checked)} className="h-4 w-4" />
                     Mostra intestazione
                 </label>
+                <div className="flex items-center gap-2 mt-5">
+                    <Button size="sm" variant={showPalette ? "default" : "outline"} className="h-8" onClick={() => setShowPalette((v) => !v)} data-testid="tabella-palette-toggle">
+                        <Braces size={14} className="mr-1" />Segnaposto
+                    </Button>
+                    <Button size="sm" variant={showPreview ? "default" : "outline"} className="h-8" onClick={() => setShowPreview((v) => !v)} data-testid="tabella-preview-toggle">
+                        <Eye size={14} className="mr-1" />Anteprima
+                    </Button>
+                </div>
             </div>
+
+            {showPalette && (
+                <div className="border rounded-lg p-3 bg-sky-50/40 max-h-72 overflow-y-auto" data-testid="tabella-palette">
+                    <p className="text-[11px] text-slate-500 mb-2">Clicca prima dentro una cella, poi scegli un segnaposto da inserire.</p>
+                    <SegnapostoSezione onInsert={insertPlaceholder} compact />
+                </div>
+            )}
 
             {tipo === "griglia" ? (
                 <div className="border rounded-lg p-3 bg-slate-50 space-y-2 overflow-x-auto">
@@ -5479,14 +5526,39 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
                         <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={addCol} data-testid="tabella-add-col"><Plus size={13} className="mr-1" />Colonna</Button>
                     </div>
                     {righe.map((r, ri) => (
-                        <div key={ri} className="flex items-center gap-2 w-max">
-                            {r.map((c, ci) => (
-                                <Input key={ci} value={c} onChange={(e) => setCell(ri, ci, e.target.value)} className="h-8 w-40 shrink-0 bg-white" data-testid={`tabella-cell-${ri}-${ci}`} />
-                            ))}
-                            <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700 shrink-0" title="Rimuovi riga"><Trash2 size={15} /></button>
-                        </div>
+                        isSez(ri) ? (
+                            <div key={ri} className="flex items-center gap-2 w-max" data-testid={`tabella-sezione-row-${ri}`}>
+                                <div className="flex items-center gap-1 bg-slate-200/70 rounded px-2 h-8 shrink-0" style={{ width: `${colonne.length * 168 - 8}px`, maxWidth: "100%" }}>
+                                    <Layers size={13} className="text-slate-500 shrink-0" />
+                                    <Input
+                                        value={r[0] || ""}
+                                        onChange={(e) => setCell(ri, 0, e.target.value)}
+                                        onFocus={(e) => onCellFocus(ri, 0, e.target)}
+                                        className="h-6 flex-1 bg-white/80 font-semibold text-slate-800 border-slate-300"
+                                        placeholder="Titolo sezione (es. AUTOVETTURE)"
+                                        data-testid={`tabella-sezione-input-${ri}`}
+                                    />
+                                </div>
+                                <button onClick={() => toggleSez(ri)} className="text-slate-400 hover:text-slate-700 shrink-0" title="Converti in riga normale" data-testid={`tabella-sezione-off-${ri}`}><Rows3Fallback /></button>
+                                <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700 shrink-0" title="Rimuovi riga"><Trash2 size={15} /></button>
+                            </div>
+                        ) : (
+                            <div key={ri} className="flex items-center gap-2 w-max">
+                                {r.map((c, ci) => (
+                                    <Input key={ci} value={c}
+                                        onChange={(e) => setCell(ri, ci, e.target.value)}
+                                        onFocus={(e) => onCellFocus(ri, ci, e.target)}
+                                        className="h-8 w-40 shrink-0 bg-white" data-testid={`tabella-cell-${ri}-${ci}`} />
+                                ))}
+                                <button onClick={() => toggleSez(ri)} className="text-slate-400 hover:text-amber-600 shrink-0" title="Converti in riga-sezione" data-testid={`tabella-sezione-on-${ri}`}><Layers size={15} /></button>
+                                <button onClick={() => removeRow(ri)} className="text-rose-500 hover:text-rose-700 shrink-0" title="Rimuovi riga"><Trash2 size={15} /></button>
+                            </div>
+                        )
                     ))}
-                    <Button size="sm" variant="outline" className="h-8" onClick={addRow} data-testid="tabella-add-row"><Plus size={13} className="mr-1" />Riga</Button>
+                    <div className="flex items-center gap-2">
+                        <Button size="sm" variant="outline" className="h-8" onClick={addRow} data-testid="tabella-add-row"><Plus size={13} className="mr-1" />Riga</Button>
+                        <Button size="sm" variant="outline" className="h-8" onClick={addSezione} data-testid="tabella-add-sezione"><Layers size={13} className="mr-1" />Riga-sezione</Button>
+                    </div>
                 </div>
             ) : (
                 <div className="border rounded-lg p-3 bg-slate-50 space-y-2 overflow-x-auto">
@@ -5524,6 +5596,41 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
                 </div>
             )}
 
+            {showPreview && (
+                <div className="border rounded-lg p-4 bg-white" data-testid="tabella-anteprima">
+                    <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center gap-1.5"><Eye size={13} /> Anteprima impaginata (come apparirà in stampa)</div>
+                    <div className="overflow-x-auto">
+                        <table className="border-collapse w-full text-[13px]">
+                            <tbody>
+                                {mostraInt && (tipo === "checklist" || colonne.length > 0) && (
+                                    <tr>
+                                        {(tipo === "checklist" ? [primaColonna, ...colonne] : colonne).map((h, i) => (
+                                            <th key={i} className="border border-slate-400 bg-slate-800 text-white font-semibold px-2 py-1 text-left">{h}</th>
+                                        ))}
+                                    </tr>
+                                )}
+                                {tipo === "griglia" ? righe.map((r, ri) => (
+                                    isSez(ri) ? (
+                                        <tr key={ri}>
+                                            <td colSpan={colonne.length || 1} className="border border-slate-400 bg-slate-200 font-bold text-slate-900 px-2 py-1" data-testid={`anteprima-sezione-${ri}`}>{sezLabel(r)}</td>
+                                        </tr>
+                                    ) : (
+                                        <tr key={ri} className={ri % 2 ? "bg-slate-50" : ""}>
+                                            {r.map((c, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-slate-800">{c}</td>))}
+                                        </tr>
+                                    )
+                                )) : voci.map((v, vi) => (
+                                    <tr key={vi} className={vi % 2 ? "bg-slate-50" : ""}>
+                                        <td className="border border-slate-300 px-2 py-1 text-slate-800">{v.testo}</td>
+                                        {colonne.map((_, ci) => (<td key={ci} className="border border-slate-300 px-2 py-1 text-center">{v.spunte[ci] ? "✓" : ""}</td>))}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
             <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={onClose} data-testid="tabella-cancel-btn">Annulla</Button>
                 <Button onClick={salva} disabled={busy} className="bg-amber-600 hover:bg-amber-700" data-testid="tabella-save-btn">{busy ? "Salvataggio…" : "Salva tabella"}</Button>
@@ -5531,6 +5638,191 @@ function TabellaEditor({ tabella, onClose, onSaved }) {
         </div>
     );
 }
+
+const Rows3Fallback = () => <Layers size={15} className="rotate-180" />;
+
+function PdfVisualEditor({ modello, onClose }) {
+    const [mode, setMode] = useState("overlay"); // overlay | testo
+    const [pagine, setPagine] = useState(null);
+    const [overlay, setOverlay] = useState([]);
+    const [selKey, setSelKey] = useState(null);     // segnaposto da posizionare
+    const [activeIdx, setActiveIdx] = useState(null); // item selezionato
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [noPdf, setNoPdf] = useState(false);
+    const [corpo, setCorpo] = useState(modello.corpo || "");
+    const corpoRef = useRef(null);
+
+    const load = () => {
+        setLoading(true);
+        api.get(`/librerie/modelli/${modello.id}/pdf-pagine`)
+            .then((r) => { setPagine(r.data.pagine || []); setOverlay((r.data.overlay || []).map((o) => ({ ...o }))); setNoPdf(false); })
+            .catch((e) => { if (e?.response?.status === 400) setNoPdf(true); else toast.error("Impossibile aprire il PDF"); })
+            .finally(() => setLoading(false));
+    };
+    useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+    const clamp = (v) => Math.max(0, Math.min(1, v));
+    const onPageClick = (pi, e) => {
+        if (!selKey) { toast.info("Scegli prima un segnaposto, poi clicca sul punto del PDF"); return; }
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = clamp((e.clientX - rect.left) / rect.width);
+        const y = clamp((e.clientY - rect.top) / rect.height);
+        setOverlay((ov) => { const n = [...ov, { page: pi, x, y, key: selKey, font_size: 11 }]; setActiveIdx(n.length - 1); return n; });
+    };
+    const updateItem = (idx, patch) => setOverlay((ov) => ov.map((o, i) => (i === idx ? { ...o, ...patch } : o)));
+    const removeItem = (idx) => { setOverlay((ov) => ov.filter((_, i) => i !== idx)); setActiveIdx(null); };
+
+    const salvaOverlay = async () => {
+        setSaving(true);
+        try { await api.post(`/librerie/modelli/${modello.id}/pdf-overlay`, { overlay }); toast.success(`Segnaposto PDF salvati ✓ (${overlay.length})`); }
+        catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
+        finally { setSaving(false); }
+    };
+    const salvaCorpo = async () => {
+        setSaving(true);
+        const b = {
+            tipo: modello.tipo, nome: modello.nome, oggetto: modello.oggetto || null, corpo,
+            sezioni: modello.sezioni || [], sezioni_visibili: modello.sezioni_visibili || [],
+            template_riga: modello.template_riga || null, categoria: modello.categoria || null,
+            default: !!modello.default, attivo: modello.attivo !== false, note: modello.note || null,
+            richiede_firma: !!modello.richiede_firma, logo_url: modello.logo_url || null,
+        };
+        try { await api.put(`/librerie/modelli/${modello.id}`, b); toast.success("Testo salvato ✓"); }
+        catch (e) { toast.error(errMsg(e, "Errore nel salvataggio")); }
+        finally { setSaving(false); }
+    };
+    const insertCorpoToken = (key) => {
+        const el = corpoRef.current; const token = `{${key}}`;
+        if (!el) { setCorpo(corpo + token); return; }
+        const s = el.selectionStart != null ? el.selectionStart : corpo.length;
+        const e2 = el.selectionEnd != null ? el.selectionEnd : s;
+        const nv = corpo.slice(0, s) + token + corpo.slice(e2);
+        setCorpo(nv);
+        requestAnimationFrame(() => { try { el.focus(); const p = s + token.length; el.setSelectionRange(p, p); } catch { /* noop */ } });
+    };
+    const uploadPdf = async (e) => {
+        const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
+        const fd = new FormData(); fd.append("file", f);
+        toast.info("Caricamento PDF originale…");
+        try { await api.post(`/librerie/modelli/${modello.id}/pdf-origine`, fd, { headers: { "Content-Type": "multipart/form-data" } }); toast.success("PDF collegato ✓"); load(); }
+        catch (err) { toast.error(errMsg(err, "Errore upload PDF")); }
+    };
+    const anteprimaPdf = async () => {
+        try {
+            const r = await api.post(`/librerie/modelli/${modello.id}/genera-pdf-overlay`, { formato: "pdf" }, { responseType: "blob" });
+            const url = URL.createObjectURL(r.data); window.open(url, "_blank");
+        } catch (e) { toast.error(errMsg(e, "Errore anteprima")); }
+    };
+
+    return (
+        <Dialog open onOpenChange={() => onClose(false)}>
+            <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col" data-testid="pdf-visual-editor">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2 text-base">
+                        <FileText size={16} className="text-sky-700" /> Editor PDF visivo — {modello.nome}
+                    </DialogTitle>
+                </DialogHeader>
+
+                <div className="flex items-center gap-2 border-b pb-2">
+                    <Button size="sm" variant={mode === "overlay" ? "default" : "outline"} className="h-8" onClick={() => setMode("overlay")} data-testid="pdf-mode-overlay">
+                        <Braces size={14} className="mr-1" /> Segnaposto sul PDF
+                    </Button>
+                    <Button size="sm" variant={mode === "testo" ? "default" : "outline"} className="h-8" onClick={() => setMode("testo")} data-testid="pdf-mode-testo">
+                        <FileText size={14} className="mr-1" /> Documento impaginato
+                    </Button>
+                </div>
+
+                {mode === "overlay" ? (
+                    <div className="flex gap-3 overflow-hidden flex-1">
+                        {/* Palette segnaposto */}
+                        <div className="w-64 shrink-0 overflow-y-auto border rounded-lg p-2 bg-sky-50/40" data-testid="pdf-overlay-palette">
+                            <p className="text-[11px] text-slate-500 mb-2">1) Seleziona un segnaposto · 2) clicca sul PDF per posizionarlo.</p>
+                            {selKey && <div className="mb-2 text-xs bg-sky-600 text-white rounded px-2 py-1 font-mono flex items-center justify-between" data-testid="pdf-overlay-selkey">{`{${selKey}}`}<button onClick={() => setSelKey(null)}><XCircle size={13} /></button></div>}
+                            <SegnapostoSezione onInsert={(k) => setSelKey(k)} compact />
+                        </div>
+                        {/* Canvas PDF */}
+                        <div className="flex-1 overflow-y-auto bg-slate-100 rounded-lg p-3 space-y-4" data-testid="pdf-overlay-canvas">
+                            {loading && <div className="text-slate-400 text-sm p-6">Caricamento PDF…</div>}
+                            {noPdf && !loading && (
+                                <div className="p-6 text-center">
+                                    <p className="text-sm text-slate-600 mb-3">Questo modello non ha un PDF originale collegato. Caricalo per posizionare i segnaposto sopra il documento.</p>
+                                    <label className="inline-flex items-center gap-2 px-3 py-2 rounded bg-sky-600 text-white text-sm cursor-pointer hover:bg-sky-700" data-testid="pdf-upload-origine">
+                                        <Upload size={14} /> Carica PDF originale
+                                        <input type="file" accept="application/pdf" className="hidden" onChange={uploadPdf} />
+                                    </label>
+                                </div>
+                            )}
+                            {(pagine || []).map((pg) => (
+                                <div key={pg.index} className="relative mx-auto shadow-lg bg-white" style={{ width: "100%", maxWidth: 760 }}>
+                                    <img src={pg.image} alt={`pagina ${pg.index + 1}`} className="w-full block select-none" draggable={false}
+                                        onClick={(e) => onPageClick(pg.index, e)} style={{ cursor: selKey ? "crosshair" : "default" }} data-testid={`pdf-page-${pg.index}`} />
+                                    {overlay.map((o, idx) => o.page === pg.index && (
+                                        <div key={idx}
+                                            onClick={(e) => { e.stopPropagation(); setActiveIdx(idx); }}
+                                            className={`absolute font-mono text-[11px] px-1 rounded cursor-pointer whitespace-nowrap ${activeIdx === idx ? "bg-amber-400 text-slate-900 ring-2 ring-amber-600" : "bg-sky-600/90 text-white"}`}
+                                            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%` }}
+                                            data-testid={`pdf-overlay-item-${idx}`}
+                                            title="Clicca per selezionare">
+                                            {`{${o.key}}`}
+                                        </div>
+                                    ))}
+                                </div>
+                            ))}
+                        </div>
+                        {/* Pannello item selezionato */}
+                        <div className="w-56 shrink-0 border rounded-lg p-3 bg-white space-y-3" data-testid="pdf-overlay-props">
+                            <div className="text-xs font-semibold text-slate-600">Segnaposti: {overlay.length}</div>
+                            {activeIdx != null && overlay[activeIdx] ? (
+                                <div className="space-y-2">
+                                    <div className="font-mono text-xs text-sky-700">{`{${overlay[activeIdx].key}}`}</div>
+                                    <div>
+                                        <Label className="text-[11px]">Dimensione testo</Label>
+                                        <Input type="number" min={6} max={40} value={overlay[activeIdx].font_size}
+                                            onChange={(e) => updateItem(activeIdx, { font_size: Number(e.target.value) || 11 })}
+                                            className="h-8" data-testid="pdf-overlay-fontsize" />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-2">
+                                        <div><Label className="text-[11px]">X %</Label><Input type="number" value={Math.round(overlay[activeIdx].x * 100)} onChange={(e) => updateItem(activeIdx, { x: clamp((Number(e.target.value) || 0) / 100) })} className="h-8" /></div>
+                                        <div><Label className="text-[11px]">Y %</Label><Input type="number" value={Math.round(overlay[activeIdx].y * 100)} onChange={(e) => updateItem(activeIdx, { y: clamp((Number(e.target.value) || 0) / 100) })} className="h-8" /></div>
+                                    </div>
+                                    <Button size="sm" variant="outline" className="w-full h-8 text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => removeItem(activeIdx)} data-testid="pdf-overlay-remove"><Trash2 size={13} className="mr-1" />Rimuovi</Button>
+                                </div>
+                            ) : <p className="text-[11px] text-slate-400 italic">Clicca un segnaposto nel PDF per modificarne posizione e dimensione.</p>}
+                        </div>
+                    </div>
+                ) : (
+                    <div className="flex gap-3 overflow-hidden flex-1">
+                        <div className="w-64 shrink-0 overflow-y-auto border rounded-lg p-2 bg-sky-50/40" data-testid="pdf-testo-palette">
+                            <p className="text-[11px] text-slate-500 mb-2">Clicca nel testo, poi scegli un segnaposto da inserire.</p>
+                            <SegnapostoSezione onInsert={insertCorpoToken} compact />
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-slate-100 rounded-lg p-4">
+                            <div className="mx-auto bg-white shadow-lg p-8" style={{ maxWidth: 760, minHeight: 400 }}>
+                                <Textarea ref={corpoRef} value={corpo} onChange={(e) => setCorpo(e.target.value)}
+                                    className="w-full min-h-[500px] border-0 focus-visible:ring-0 resize-none text-sm leading-relaxed font-serif"
+                                    placeholder="Testo del documento impaginato…" data-testid="pdf-testo-corpo" />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                <DialogFooter className="border-t pt-3">
+                    <Button variant="outline" onClick={() => onClose(false)} data-testid="pdf-visual-close">Chiudi</Button>
+                    {mode === "overlay" ? (
+                        <>
+                            {!noPdf && <Button variant="outline" onClick={anteprimaPdf} data-testid="pdf-overlay-anteprima"><Eye size={14} className="mr-1" />Anteprima PDF</Button>}
+                            <Button onClick={salvaOverlay} disabled={saving || noPdf} className="bg-sky-600 hover:bg-sky-700" data-testid="pdf-overlay-save">{saving ? "Salvataggio…" : "Salva segnaposto"}</Button>
+                        </>
+                    ) : (
+                        <Button onClick={salvaCorpo} disabled={saving} className="bg-sky-600 hover:bg-sky-700" data-testid="pdf-testo-save">{saving ? "Salvataggio…" : "Salva testo"}</Button>
+                    )}
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
 
 const EditablePara = memo(function EditablePara({ pi, html, editable, isHeading, onRegister, onInput, onSel, onToggleDelete }) {
     const ref = useRef(null);
@@ -5778,6 +6070,7 @@ function ModelliSezione() {
     const [q, setQ] = useState("");
     const [azione, setAzione] = useState(null); // {modello, mode: 'doc'|'wa'}
     const [visivo, setVisivo] = useState(null); // modello word fedele per editor visivo
+    const [pdfVisivo, setPdfVisivo] = useState(null); // modello PDF per editor visivo PDF
 
     const load = () => api.get("/librerie/modelli").then((r) => setItems(r.data || []));
     useEffect(() => { load(); }, []);
@@ -6015,7 +6308,17 @@ function ModelliSezione() {
                                             ✏️ Modifica documento
                                         </button>
                                     )}
-                                    {!m.word_fedele && (
+                                    {!m.word_fedele && m.tipo?.startsWith("pdf_") && (
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setPdfVisivo(m); }}
+                                            className="text-[10px] font-medium px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 transition-colors"
+                                            data-testid={`modello-pdfvisivo-${m.id}`}
+                                            title="Posiziona i segnaposto direttamente sopra il PDF originale e modifica il testo impaginato"
+                                        >
+                                            ✏️ PDF visivo
+                                        </button>
+                                    )}
+                                    {!m.word_fedele && !m.tipo?.startsWith("pdf_") && (
                                         <button
                                             onClick={(e) => { e.stopPropagation(); setEditing(m); setOpen(true); }}
                                             className="text-[10px] font-medium px-2 py-1 rounded bg-sky-600 text-white hover:bg-sky-700 transition-colors"
@@ -6063,6 +6366,7 @@ function ModelliSezione() {
             )}
             {azione && <UsaModelloDialog modello={azione.modello} mode={azione.mode} onClose={() => setAzione(null)} />}
             {visivo && <WordVisualEditor modello={visivo} onClose={(reload) => { setVisivo(null); if (reload) load(); }} />}
+            {pdfVisivo && <PdfVisualEditor modello={pdfVisivo} onClose={(reload) => { setPdfVisivo(null); if (reload) load(); }} />}
 
             <Dialog open={showSegnaposto} onOpenChange={setShowSegnaposto}>
                 <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto" data-testid="modelli-segnaposto-dialog">
