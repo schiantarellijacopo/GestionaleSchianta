@@ -255,6 +255,33 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
         || !!titolo.data_incasso
     );
 
+    // Ricalcolo automatico delle quote collaboratori dallo SCHEMA quando cambia il
+    // premio NETTO/LORDO (o quando gli operatori vengono ereditati dalla polizza).
+    // Evita che resti la quota ANNUALE ereditata (es. 40,96) invece del 4,5% sul
+    // netto di QUESTO titolo (es. 500 → 22,50). Non tocca i titoli già incassati.
+    useEffect(() => {
+        if (incassato) return;
+        const netto = parseFloat(f.importo_netto) || 0;
+        if (!netto || operatori.length === 0) return;
+        let cancel = false;
+        (async () => {
+            const nuovi = await Promise.all(operatori.map(async (o) => {
+                if (!o.operatore_id) return o;
+                const q = await quotaCollaboratore(o.operatore_id, f.provvigioni || 0);
+                return (q != null && Math.abs(q) > 0.0001) ? { ...o, provvigione: q } : o;
+            }));
+            if (cancel) return;
+            const cambiato = nuovi.some((o, i) => (o.provvigione ?? 0) !== (operatori[i].provvigione ?? 0));
+            if (!cambiato) return;
+            setOperatori(nuovi);
+            // Allinea il totale provvigioni alla somma ripartita (coerenza titolo ↔ ripartizione)
+            const somma = round2(nuovi.reduce((s, o) => s + (parseFloat(o.provvigione) || 0), 0));
+            setF((p) => (round2(p.provvigioni) === somma ? p : { ...p, provvigioni: somma }));
+        })();
+        return () => { cancel = true; };
+        // eslint-disable-next-line
+    }, [f.importo_netto, f.importo_lordo, operatori.length]);
+
     const save = async () => {
         const isNew = titolo._new || !titolo.id;
         const opsClean = operatori
@@ -295,7 +322,9 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
             }
             onClose();
         } catch (e) {
-            toast.error(e.response?.data?.detail || "Errore");
+            const d = e.response?.data?.detail;
+            const msg = Array.isArray(d) ? d.map((x) => x.msg || JSON.stringify(x)).join("; ") : (typeof d === "string" ? d : (e.message || "Errore nel salvataggio"));
+            toast.error(msg);
         }
     };
 

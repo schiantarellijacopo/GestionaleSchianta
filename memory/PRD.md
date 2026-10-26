@@ -99,3 +99,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 ## [2026-10-26] Tipi titolo: blocco eliminazione se usato + filtri statistiche dinamici
 - DELETE /librerie/tipi-titolo: oltre ai tipi di sistema, un tipo personalizzato GIÀ USATO in almeno un titolo (conteggio globale via raw_db.titoli) non è eliminabile (400) → si può solo disattivare. Verificato 400 se usato, 200 se non più usato.
 - Filtri "Tipo titolo" in Statistiche (Per Operatore + Premi/Provvigioni) ora leggono l'elenco da /librerie/tipi-titolo?solo_attivi, così i tipi personalizzati appaiono nei report. Quietanza continua a includere i legacy 'rinnovo' lato backend. Verificato con screenshot (dropdown mostra tutti i tipi della libreria).
+
+## [2026-10-26] Fix: errore salvataggio titolo con tipo personalizzato + provvigioni broker
+- CAUSA errore "Errore" al salvataggio: Titolo.tipo era un Literal con lista fissa → i tipi personalizzati della libreria (es. "Franchigia") venivano rifiutati (500). Fix: db_models.Titolo.tipo ora è str libera (default "rinnovo"). Verificato: POST /titoli tipo=franchigia → 201 (prima falliva).
+- Messaggio errore form titolo (TitoloDialog.save) ora mostra il dettaglio reale (incl. errori di validazione 422) invece del generico "Errore".
+- Provvigioni broker errate (mostrava la quota ANNUALE ereditata 40,96 invece del 4,5% sul netto del titolo = 22,50): il backend calcola correttamente (quota-collaboratore con premio_netto=500 → 22,50; con netto=0 → 0, da cui il vecchio fallback alla quota polizza). Fix frontend: nuovo useEffect in TitoloDialog ricalcola le quote dallo schema quando cambia premio netto/lordo o quando gli operatori vengono ereditati, e allinea il totale provvigioni alla somma ripartita. Non tocca i titoli già incassati.
+- NB: fix nel codebase preview; per vederli in produzione (Railway) serve un nuovo deploy.
