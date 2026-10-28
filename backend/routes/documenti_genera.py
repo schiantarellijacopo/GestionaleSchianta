@@ -490,7 +490,16 @@ async def genera_documento(body: dict, user=Depends(current_user)):
     fname = f"{titolo}.pdf"
     stored = await StorageService.put(user=user, entita_tipo=entita, entita_id=entita_id,
                                       filename=f"doc_{entita_id[:8]}.pdf", data=pdf, content_type="application/pdf")
-    categoria = body.get("categoria") or "documento_generato"
+    # La card di destinazione può essere dichiarata a monte nel modello
+    # (document_target_card). Se l'operatore non forza una categoria, usiamo
+    # quella del modello così il documento (e il PDF firmato) finisce nella card
+    # corretta della scheda entità.
+    _target_card = None
+    if template_id:
+        _m = await db.template_modelli.find_one(
+            {"id": template_id}, {"_id": 0, "document_target_card": 1})
+        _target_card = (_m or {}).get("document_target_card") or None
+    categoria = body.get("categoria") or _target_card or "documento_generato"
     alleg = Allegato(entita_tipo=entita, entita_id=entita_id, nome_file=fname,
                      storage_path=stored["storage_path"], storage_provider=stored["storage_provider"],
                      content_type="application/pdf", size=stored.get("size", len(pdf)),

@@ -43,6 +43,7 @@ class ModelloBody(BaseModel):
     note: Optional[str] = None
     richiede_firma: bool = False
     logo_url: Optional[str] = None
+    document_target_card: Optional[str] = None
 
 
 def _autodetect_placeholders(body: ModelloBody) -> list[str]:
@@ -145,6 +146,7 @@ async def create_modello(
         note=body.note,
         richiede_firma=body.richiede_firma,
         logo_url=body.logo_url,
+        document_target_card=body.document_target_card,
         placeholders=placeholders,
     ).model_dump()
     # Se default=True, sbianca altri default dello stesso tipo

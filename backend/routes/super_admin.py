@@ -561,6 +561,7 @@ class AgenziaUpdateBody(BaseModel):
     max_utenti: Optional[int] = None
     note: Optional[str] = None
     yousign_workspace_id: Optional[str] = None
+    firma_provider: Optional[str] = None
 
 
 async def _tenant_stats(tid: str) -> dict:
@@ -577,15 +578,18 @@ async def _tenant_stats(tid: str) -> dict:
 async def list_agenzie(user=Depends(require_user("admin"))) -> list[dict]:
     _ensure_super_admin(user)
     items = await raw_db.tenants.find({}, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
-    # Mappa workspace Yousign per tenant (vive in azienda_config, non in tenants)
+    # Mappa workspace Yousign + provider firma per tenant (vivono in azienda_config)
     ws_map = {}
+    prov_map = {}
     async for cfg in raw_db.azienda_config.find(
-            {}, {"_id": 0, "agenzia_tenant_id": 1, "yousign_workspace_id": 1}):
+            {}, {"_id": 0, "agenzia_tenant_id": 1, "yousign_workspace_id": 1, "firma_provider": 1}):
         ws_map[cfg.get("agenzia_tenant_id")] = cfg.get("yousign_workspace_id") or ""
+        prov_map[cfg.get("agenzia_tenant_id")] = cfg.get("firma_provider") or "yousign"
     # Per ogni tenant, aggiungi il conteggio utenti/clienti/polizze (SOLO cifre)
     for t in items:
         t["stats"] = await _tenant_stats(t["id"])
         t["yousign_workspace_id"] = ws_map.get(t["id"], "")
+        t["firma_provider"] = prov_map.get(t["id"], "yousign")
     return items
 
 
@@ -597,8 +601,9 @@ async def get_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
         raise HTTPException(status_code=404, detail="Tenant non trovato")
     t["stats"] = await _tenant_stats(tid)
     cfg = await raw_db.azienda_config.find_one(
-        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1}) or {}
+        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1, "firma_provider": 1}) or {}
     t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
+    t["firma_provider"] = cfg.get("firma_provider") or "yousign"
     return t
 
 
@@ -750,12 +755,19 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     # Il workspace Yousign è tenant-scoped e vive in azienda_config, non nel tenant
     workspace_id = payload.pop("yousign_workspace_id", None)
+    firma_provider = payload.pop("firma_provider", None)
+    cfg_set = {}
     if workspace_id is not None:
+        cfg_set["yousign_workspace_id"] = workspace_id.strip()
+    if firma_provider is not None:
+        prov = (firma_provider or "").strip().lower()
+        if prov not in ("yousign", "openapi"):
+            raise HTTPException(400, "firma_provider non valido (yousign|openapi)")
+        cfg_set["firma_provider"] = prov
+    if cfg_set:
+        cfg_set.update({"agenzia_tenant_id": tid, "updated_at": _now_iso()})
         await raw_db.azienda_config.update_one(
-            {"agenzia_tenant_id": tid},
-            {"$set": {"yousign_workspace_id": workspace_id.strip(),
-                      "agenzia_tenant_id": tid, "updated_at": _now_iso()}},
-            upsert=True,
+            {"agenzia_tenant_id": tid}, {"$set": cfg_set}, upsert=True,
         )
     payload["updated_at"] = _now_iso()
     res = await raw_db.tenants.update_one({"id": tid}, {"$set": payload})
@@ -767,8 +779,9 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
                      request=request)
     t = await raw_db.tenants.find_one({"id": tid}, {"_id": 0})
     cfg = await raw_db.azienda_config.find_one(
-        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1}) or {}
+        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1, "firma_provider": 1}) or {}
     t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
+    t["firma_provider"] = cfg.get("firma_provider") or "yousign"
     return t
 
 

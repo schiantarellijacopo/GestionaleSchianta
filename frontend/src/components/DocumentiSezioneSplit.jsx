@@ -95,6 +95,7 @@ export default function DocumentiSezioneSplit({
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [entita_tipo, entita_id, applicazione_matricola_id]);
     const firmeByOrig = Object.fromEntries(firme.map((f) => [f.allegato_origine_id, f]));
     const firmatiIds = new Set(firme.filter((f) => f.allegato_firmato_id).map((f) => f.allegato_firmato_id));
+    const firmeBySigned = Object.fromEntries(firme.filter((f) => f.allegato_firmato_id).map((f) => [f.allegato_firmato_id, f]));
 
     const upload = async (fileOrList, { visibile, categoria }) => {
         const files = fileOrList && fileOrList.length !== undefined && !(fileOrList instanceof File)
@@ -206,6 +207,7 @@ export default function DocumentiSezioneSplit({
                             onDelete={elimina}
                             firmeByOrig={firmeByOrig}
                             firmatiIds={firmatiIds}
+                            firmeBySigned={firmeBySigned}
                             onFirmaChange={load}
                         />
                     ))}
@@ -254,6 +256,7 @@ export default function DocumentiSezioneSplit({
                     testid="docs-box-visibili"
                     firmeByOrig={firmeByOrig}
                     firmatiIds={firmatiIds}
+                    firmeBySigned={firmeBySigned}
                     onFirmaChange={load}
                 />
                 {/* === INTERNI === */}
@@ -270,6 +273,7 @@ export default function DocumentiSezioneSplit({
                     testid="docs-box-interni"
                     firmeByOrig={firmeByOrig}
                     firmatiIds={firmatiIds}
+                    firmeBySigned={firmeBySigned}
                     onFirmaChange={load}
                 />
             </div>
@@ -304,7 +308,7 @@ export function RiepilogoMancanti({ categorie, gruppi }) {
     );
 }
 
-function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle, onDelete, uploading, testid, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange }) {
+function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle, onDelete, uploading, testid, firmeByOrig = {}, firmatiIds = new Set(), firmeBySigned = {}, onFirmaChange }) {
     const c = COL[color];
     return (
         <Card className={`overflow-hidden border-2 ${c.ring}`} data-testid={testid}>
@@ -331,7 +335,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
                                     {a.descrizione && <span className="italic truncate">{a.descrizione}</span>}
                                     <span>· {(a.size / 1024).toFixed(0)} KB</span>
                                     {a.created_at && <span>· {a.created_at.slice(0, 10)}</span>}
-                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} />
+                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} recSigned={firmeBySigned[a.id]} />
                                 </div>
                             </div>
                             {canEdit && (
@@ -363,7 +367,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
     );
 }
 
-function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onOcrLibretto, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), onFirmaChange, entita_tipo, entita_id, anagrafica = null }) {
+function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, onOcrLibretto, onToggle, onDelete, firmeByOrig = {}, firmatiIds = new Set(), firmeBySigned = {}, onFirmaChange, entita_tipo, entita_id, anagrafica = null }) {
     const [open, setOpen] = useState(true);
     const c = categoria;
     const manca = !!c.obbligatoria && files.length === 0;
@@ -415,7 +419,7 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                                         : <span className="bg-slate-100 text-slate-500 px-1 rounded">interno</span>}
                                     <span>· {(a.size / 1024).toFixed(0)} KB</span>
                                     {a.created_at && <span>· {a.created_at.slice(0, 10)}</span>}
-                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} />
+                                    <FirmaBadge rec={firmeByOrig[a.id]} isFirmato={firmatiIds.has(a.id)} recSigned={firmeBySigned[a.id]} />
                                 </div>
                             </div>
                             {canEdit && (
@@ -478,8 +482,20 @@ const STATO_FIRMA = {
     DONE: { label: "Firmato", cls: "bg-emerald-100 text-emerald-700" },
     ERROR: { label: "Errore firma", cls: "bg-rose-100 text-rose-700" },
 };
-function FirmaBadge({ rec, isFirmato }) {
-    if (isFirmato) return <span className="bg-emerald-600 text-white px-1.5 rounded font-medium">✓ Documento firmato</span>;
+function FirmaBadge({ rec, isFirmato, recSigned }) {
+    if (isFirmato) {
+        const prov = (recSigned?.provider === "openapi_esignature") ? "eSignature OpenAPI" : "YouSign";
+        let quando = "";
+        const d = recSigned?.updated_at || recSigned?.created_at;
+        if (d) { try { quando = new Date(d).toLocaleString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); } catch { /* noop */ } }
+        return (
+            <span className="inline-flex items-center gap-1 bg-emerald-600 text-white px-1.5 rounded font-medium"
+                  data-testid={`firma-done-badge-${recSigned?.allegato_firmato_id || ""}`}
+                  title={quando ? `Firmato il ${quando}` : "Firmato"}>
+                🟢 Firmato con {prov}{quando ? ` · ${quando}` : ""}
+            </span>
+        );
+    }
     if (!rec) return null;
     const s = STATO_FIRMA[(rec.stato || "").toUpperCase()] || { label: "In attesa firma", cls: "bg-amber-100 text-amber-700" };
     return <span className={`px-1.5 rounded font-medium ${s.cls}`} data-testid={`firma-badge-${rec.allegato_origine_id}`}>{s.label}</span>;

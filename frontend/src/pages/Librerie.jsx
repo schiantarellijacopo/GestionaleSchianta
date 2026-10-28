@@ -4797,6 +4797,46 @@ function EmailAliasesEditor({ value, onChange, mainEmail }) {
 // ============================================================
 // GESTIONI MODELLI — libreria template editabili
 // ============================================================
+// Catalogo delle Card Documentali del CRM (chiave card = categoria allegato).
+// Il documento generato — e il PDF firmato — verrà archiviato nella card scelta.
+const CARD_TARGET_GROUPS = [
+    { group: "Anagrafica / Cliente", items: [
+        ["carta_identita", "🪪 Carta d'identità"],
+        ["patente", "🚗 Patente di guida"],
+        ["passaporto", "📘 Passaporto"],
+        ["codice_fiscale_doc", "🧾 Tessera codice fiscale"],
+        ["tessera_sanitaria", "❤️ Tessera sanitaria"],
+        ["visura_camerale", "🏢 Visura camerale"],
+        ["mandato_sdd", "🏦 Mandato SDD"],
+        ["autocertificazione_stato_famiglia", "👪 Autocertificazione stato famiglia"],
+        ["privacy_firmata", "✍️ Privacy firmata"],
+    ] },
+    { group: "Polizza", items: [
+        ["polizza", "📄 Polizza"],
+        ["condizioni", "📜 Condizioni"],
+        ["privacy_compagnia", "🔒 Privacy compagnia"],
+        ["appendici", "➕ Appendici"],
+        ["libretto_veicolo", "📕 Libretto veicolo"],
+        ["atto_vendita", "🖊️ Atto di vendita"],
+        ["quietanza", "🧾 Quietanze"],
+        ["mup", "📋 MUP"],
+        ["questionario", "🗒️ Questionario"],
+        ["regolazione", "🧮 Regolazione"],
+        ["preventivo", "📋 Preventivi"],
+        ["appunti", "📝 Appunti"],
+        ["altri", "🖼️ Documenti altri"],
+    ] },
+    { group: "Sinistro", items: [
+        ["cid", "📝 CID"],
+        ["perizia", "🔎 Perizia"],
+        ["foto", "📸 Foto"],
+        ["fattura", "🧾 Fattura"],
+        ["denuncia", "📋 Denuncia"],
+    ] },
+];
+const CARD_TARGET_NONE = "__none__";
+
+
 const MODELLI_TIPI = [
     { v: "email", label: "Email" },
     { v: "whatsapp", label: "WhatsApp" },
@@ -6733,6 +6773,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
         tipo: suggestedTipo || "email", nome: "", oggetto: "", corpo: "", sezioni: [],
         sezioni_visibili: MODELLO_SEZIONI.map((s) => s.key),
         categoria: "", default: false, attivo: true, note: "", richiede_firma: false, logo_url: "",
+        document_target_card: "",
     });
     const [saving, setSaving] = useState(false);
     const isPdf = (f.tipo || "").startsWith("pdf_");
@@ -6756,6 +6797,7 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 note: editing.note || "",
                 richiede_firma: !!editing.richiede_firma,
                 logo_url: editing.logo_url || "",
+                document_target_card: editing.document_target_card || "",
             });
         }
     }, [editing?.id, editing?.updated_at]);
@@ -6811,6 +6853,8 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                 attivo: f.attivo !== false, note: f.note || null,
                 richiede_firma: !!f.richiede_firma,
                 logo_url: f.logo_url || null,
+                document_target_card: (f.document_target_card && f.document_target_card !== CARD_TARGET_NONE)
+                    ? f.document_target_card : null,
             };
             if (editing?.id) {
                 await api.put(`/librerie/modelli/${editing.id}`, payload);
@@ -6878,6 +6922,27 @@ function ModelloFormDialog({ editing, onClose, suggestedTipo }) {
                             <Input value={f.categoria || ""}
                                 placeholder="es. scadenze, marketing, fiscale"
                                 onChange={(e) => set("categoria", e.target.value)} data-testid="modello-cat" />
+                        </div>
+                        <div>
+                            <Label>Card Documentale di Riferimento</Label>
+                            <Select value={f.document_target_card || CARD_TARGET_NONE}
+                                onValueChange={(v) => set("document_target_card", v)}>
+                                <SelectTrigger data-testid="modello-target-card">
+                                    <SelectValue placeholder="Nessuna (scelta alla generazione)" />
+                                </SelectTrigger>
+                                <SelectContent className="max-h-72">
+                                    <SelectItem value={CARD_TARGET_NONE}>Nessuna (scelta alla generazione)</SelectItem>
+                                    {CARD_TARGET_GROUPS.map((g) => (
+                                        <div key={g.group}>
+                                            <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-slate-400 font-semibold">{g.group}</div>
+                                            {g.items.map(([v, label]) => (
+                                                <SelectItem key={v} value={v}>{label}</SelectItem>
+                                            ))}
+                                        </div>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                            <p className="text-[10px] text-slate-400 mt-0.5">Il documento generato (e il PDF firmato) verrà archiviato in questa card della scheda.</p>
                         </div>
                         <div className="flex items-end gap-4">
                             <label className="flex items-center gap-1.5 text-sm">

@@ -1721,3 +1721,7 @@ class TemplateModello(BaseDoc):
     # Logo specifico del modello (data URL base64 o URL http). Se vuoto, nelle
     # stampe viene usato il logo dell'agenzia (azienda_config).
     logo_url: Optional[str] = None
+    # Card documentale di destinazione: dove archiviare il documento (e il PDF
+    # firmato) nella scheda dell'entità (es. "privacy_firmata", "polizza",
+    # "quietanza"). Se vuoto, usa la categoria scelta al momento della generazione.
+    document_target_card: Optional[str] = None

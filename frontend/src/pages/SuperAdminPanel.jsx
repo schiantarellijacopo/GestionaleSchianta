@@ -593,6 +593,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
         max_utenti: agenzia.max_utenti ?? 5,
         note: agenzia.note || "",
         yousign_workspace_id: agenzia.yousign_workspace_id || "",
+        firma_provider: agenzia.firma_provider || "yousign",
     });
     const [saving, setSaving] = useState(false);
 
@@ -606,6 +607,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
             body.prezzo_mensile_eur = parseFloat(body.prezzo_mensile_eur) || 0;
             body.max_utenti = parseInt(body.max_utenti) || 1;
             body.yousign_workspace_id = (f.yousign_workspace_id || "").trim();
+            body.firma_provider = f.firma_provider || "yousign";
             await api.patch(`/super-admin/agenzie/${agenzia.id}`, body);
             toast.success("Agenzia aggiornata");
             onSaved();
@@ -674,9 +676,21 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md" />
                     </div>
 
-                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-4">Firma digitale (YouSign)</div>
-                    <div>
-                        <label className="text-xs font-semibold text-slate-600 block mb-1">Workspace ID</label>
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-4">Firma digitale</div>
+                    <div className="mb-3">
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Provider di firma</label>
+                        <select value={f.firma_provider} onChange={(e) => set("firma_provider", e.target.value)}
+                            data-testid="ea-firma-provider"
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
+                            <option value="yousign">YouSign</option>
+                            <option value="openapi">eSignature OpenAPI</option>
+                        </select>
+                        <p className="text-[11px] text-slate-500 mt-1">
+                            Servizio usato da questa agenzia per inviare i documenti a firma (OTP via SMS in entrambi i casi).
+                        </p>
+                    </div>
+                    <div className={f.firma_provider === "yousign" ? "" : "opacity-50"}>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Workspace ID (YouSign)</label>
                         <input value={f.yousign_workspace_id} onChange={(e) => set("yousign_workspace_id", e.target.value)}
                             data-testid="ea-yousign-workspace"
                             placeholder="es. d748b4bc-5cc8-4a32-805f-9661ae5f51f0"

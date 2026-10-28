@@ -105,6 +105,12 @@ def _ys_cfg() -> tuple[str, str, str]:
     return cfg["api_key"], cfg["base"], cfg["env"]
 
 
+async def _firma_provider() -> str:
+    """Provider di firma scelto per l'agenzia corrente: 'yousign' | 'openapi'."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "firma_provider": 1}) or {}
+    return (az.get("firma_provider") or "yousign").strip().lower()
+
+
 def _firma_fields_from_pdf(pdf_bytes: bytes) -> list[dict]:
     """Posizioni del campo firma (coordinate YouSign: origine in alto a sinistra)
     ricavate dall'àncora 'Firma del Contraente' nel PDF generato. Se assente,
@@ -254,7 +260,11 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
            firmatario?:{name,surname,email,mobile}}
     """
     api_key, _base, _env = _ys_cfg()
-    if not api_key:
+    provider = await _firma_provider()
+    if provider == "openapi":
+        if not esvc.has_credentials():
+            raise HTTPException(400, "eSignature OpenAPI non configurato (credenziali mancanti)")
+    elif not api_key:
         raise HTTPException(400, f"YouSign non configurato ({_env})")
     allegato_id = body.get("allegato_id")
     if not allegato_id:
@@ -288,27 +298,48 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         raise HTTPException(400, "Cellulare del firmatario mancante o non valido (necessario per OTP via SMS)")
 
     display = al.get("nome_file") or "documento.pdf"
-    from routes.firma_modelli import _yousign_workspace_id
-    workspace_id = await _yousign_workspace_id(db)
-    res = await _yousign_send(
-        pdf_bytes=pdf_bytes, signer=signer, display=display, auth_mode=auth_mode,
-        workspace_id=workspace_id,
-    )
-    if not res.get("ok"):
-        raise HTTPException(400, res.get("error") or "Errore creazione firma")
+    if provider == "openapi":
+        fp = al.get("firma_pos") or {}
+        res = await esvc.create_signature(
+            pdf_bytes=pdf_bytes, signer=signer, message=body.get("message") or "",
+            page=int(fp.get("page", 1) or 1),
+            x=str(fp.get("x", 331)), y=str(fp.get("y", 45)),
+        )
+        if not res.get("ok"):
+            raise HTTPException(400, res.get("error") or "Errore creazione firma")
+        prov_name = "openapi_esignature"
+        signature_id = res.get("id")
+        ys_doc_id = None
+        ys_signer_id = (res.get("signers") or [{}])[0].get("id") if res.get("signers") else None
+        stato0 = res.get("state") or "ongoing"
+    else:
+        from routes.firma_modelli import _yousign_workspace_id
+        workspace_id = await _yousign_workspace_id(db)
+        res = await _yousign_send(
+            pdf_bytes=pdf_bytes, signer=signer, display=display, auth_mode=auth_mode,
+            workspace_id=workspace_id,
+        )
+        if not res.get("ok"):
+            raise HTTPException(400, res.get("error") or "Errore creazione firma")
+        prov_name = "yousign"
+        signature_id = res.get("request_id")
+        ys_doc_id = res.get("document_id")
+        ys_signer_id = res.get("signer_id")
+        stato0 = res.get("status") or "ongoing"
 
     signing_url = res.get("signing_url")
     rec = {
         "id": str(uuid.uuid4()),
-        "provider": "yousign",
-        "signature_id": res.get("request_id"),
-        "yousign_document_id": res.get("document_id"),
-        "yousign_signer_id": res.get("signer_id"),
-        "stato": (res.get("status") or "ongoing"),
+        "provider": prov_name,
+        "signature_id": signature_id,
+        "yousign_document_id": ys_doc_id,
+        "yousign_signer_id": ys_signer_id,
+        "stato": stato0,
         "allegato_origine_id": allegato_id,
         "entita_tipo": al["entita_tipo"],
         "entita_id": al["entita_id"],
         "categoria": al.get("categoria"),
+        "agenzia_tenant_id": al.get("agenzia_tenant_id"),
         "nome_file": display,
         "firmatario_id": resolved.get("anagrafica_id"),
         "firmatario_nome": f"{signer['surname']} {signer['name']}".strip(),
@@ -423,6 +454,17 @@ async def _finalizza(rec: dict) -> Optional[str]:
     )
     doc = al.model_dump()
     doc["firma_request_id"] = rec["id"]
+    # Propaga il tenant: poller e webhook girano SENZA contesto utente, quindi
+    # l'allegato firmato va legato esplicitamente al tenant del documento
+    # originale, altrimenti non comparirebbe nella scheda dell'agenzia.
+    tenant_id = rec.get("agenzia_tenant_id")
+    if not tenant_id and rec.get("allegato_origine_id"):
+        from database import raw_db
+        orig = await raw_db.allegati.find_one(
+            {"id": rec["allegato_origine_id"]}, {"_id": 0, "agenzia_tenant_id": 1})
+        tenant_id = (orig or {}).get("agenzia_tenant_id")
+    if tenant_id:
+        doc["agenzia_tenant_id"] = tenant_id
     await db.allegati.insert_one(doc)
     await db.firma_requests.update_one(
         {"id": rec["id"]},
@@ -448,6 +490,44 @@ async def _finalizza(rec: dict) -> Optional[str]:
             }, "updated_at": _now_iso()}},
         )
     return al.id
+
+
+@router.post("/webhook/yousign")
+async def webhook_yousign(payload: dict) -> dict:
+    """Webhook YouSign — all'evento `signature_request.done`/`signer.done` scarica
+    e archivia immediatamente il PDF firmato nella card corretta. Il poller ogni
+    2 minuti resta come rete di sicurezza. Endpoint pubblico, senza verifica
+    firma (scelta dell'agenzia).
+
+    URL da registrare su YouSign: {BACKEND_URL}/api/esignature/webhook/yousign
+    """
+    try:
+        data = payload.get("data") or {}
+        sr = data.get("signature_request") or {}
+        sig_id = (sr.get("id") or data.get("signature_request_id")
+                  or payload.get("signature_request_id"))
+        event = payload.get("event_name") or payload.get("event") or ""
+        logger.info("[Webhook YouSign] event=%s signature_request=%s", event, sig_id)
+        if not sig_id:
+            return {"ok": True, "ignored": "nessun signature_request id"}
+        from database import raw_db
+        rec = await raw_db.firma_requests.find_one({"signature_id": sig_id}, {"_id": 0})
+        if not rec:
+            return {"ok": True, "ignored": "richiesta non trovata"}
+        if rec.get("allegato_firmato_id"):
+            return {"ok": True, "gia_finalizzato": True,
+                    "allegato_firmato_id": rec["allegato_firmato_id"]}
+        # Conferma lo stato presso YouSign prima di scaricare (evita eventi spuri)
+        stato = await _yousign_status(sig_id)
+        if (stato or "").lower() != "done":
+            await raw_db.firma_requests.update_one(
+                {"id": rec["id"]}, {"$set": {"stato": stato or rec.get("stato"), "updated_at": _now_iso()}})
+            return {"ok": True, "stato": stato, "finalizzato": False}
+        alleg_id = await _finalizza(rec)
+        return {"ok": True, "finalizzato": bool(alleg_id), "allegato_firmato_id": alleg_id}
+    except Exception as e:
+        logger.warning("Webhook YouSign errore: %s", e)
+        return {"ok": False, "error": str(e)[:200]}
 
 
 @router.get("/stato/{req_id}")
