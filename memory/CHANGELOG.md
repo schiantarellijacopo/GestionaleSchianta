@@ -1,6 +1,15 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Import Carichi: tutto in "in attesa" + dashboard esclude i non validati
+- **Richiesta utente**: importando ~500 righe comparivano solo 3 "in attesa". Timore che l'import sovrascrivesse i Titoli ufficiali senza validazione.
+- **Diagnosi**: nessuna sovrascrittura dei titoli ufficiali (impossibile nel codice). Le righe venivano SALTATE come duplicati perché esisteva già un titolo "validato" con stessa polizza+decorrenza. Il tenant ha ~56.199 titoli "validato", di cui ~56.085 da una migrazione iniziale (11/09/2026) marcati validati direttamente (non via validazione manuale).
+- **Decisione utente**: l'import deve portare SEMPRE tutte le righe in "in attesa" (sovrascrivendo l'eventuale carico in attesa esistente, senza duplicare). La promozione a Titolo ufficiale avviene solo in validazione.
+- **Fix backend** (`routes/carichi_mensili.py` → `_insert_or_replace_carico`): rimosso lo skip `skipped_duplicate` quando esiste un titolo validato. Ora: carico in attesa esistente → sovrascritto; altrimenti → creato nuovo in attesa. Mai tocca i titoli validati. La validazione (`valida_carichi`) resta invariata: sovrascrive il titolo `da_incassare` libero / crea nuovo, protegge incassati/coperti/in Prima Nota (`_carico_overwritable`).
+- **Fix dashboard** (`server.py` → `statistiche_incassi_situazione`, `base_flt`): esclude `stato_carico ∈ {in_attesa, annullato_carico}` dai KPI (arretrati/sospesi/incassi), coerente con le liste titoli ufficiali. Necessario perché ora i carichi in attesa crescono molto.
+- **Verifica** (curl, tenant reale): 1° import file Nov → creati 3, sovrascritti 493, duplicati 0; 2° import stesso file → creati 0, sovrascritti 496, duplicati 0 (nessun doppione). Dashboard: arretrati_scaduto 16.443,66 (non più gonfiato dagli in_attesa). Dati di test ripuliti (0 Nov in_attesa).
+
+
 ## 2026-06 — Fix: dati non visibili dopo import Carichi Mensili
 - **Problema**: dopo un import CSV/Excel ("ho importato il file ma non ci sono i dati"), i titoli venivano creati correttamente (es. 493) ma NON apparivano in griglia: il filtro di default ("Preset mese attivo") mostra i titoli per scadenza del mese corrente, mentre i titoli importati hanno effetto/scadenza nel periodo importato → risultavano nascosti.
 - **Fix backend** (`routes/carichi_mensili.py` → `import_apply`): la risposta include ora `effetto_min` / `effetto_max` calcolati sui titoli effettivamente caricati/sovrascritti.

@@ -87,16 +87,17 @@ def _carico_overwritable(t: dict) -> bool:
 
 
 async def _insert_or_replace_carico(t: "Titolo") -> str:
-    """Evita i DOPPIONI in Carichi mensili: se esiste già un carico per la stessa
-    polizza + decorrenza (effetto), lo SOVRASCRIVE con i nuovi importi (provvigioni
-    comprese) riportandolo 'in_attesa'; altrimenti inserisce un nuovo carico.
-    La chiave è ``polizza_id + effetto`` perché la decorrenza arriva identica dal
-    file importato, mentre la scadenza può differire (colonna 'Scad. copertura'
-    vs scadenza calcolata) e causava falsi doppioni.
-    I titoli PROTETTI (incassato/coperto/stornato/sospeso/in Prima Nota) non
-    vengono mai toccati; inoltre, se per la stessa polizza+decorrenza esiste già
-    un titolo VALIDATO, il nuovo carico NON viene creato (ritorna
-    ``skipped_duplicate``) per impedire doppioni ufficiali dopo la validazione.
+    """Porta OGNI riga nei Carichi mensili come carico 'in_attesa' (da validare).
+    Chiave di dedup ``polizza_id + effetto``:
+      - se esiste già un CARICO 'in_attesa' per la stessa polizza+decorrenza lo
+        SOVRASCRIVE con i nuovi importi (niente doppioni in attesa);
+      - altrimenti INSERISCE un nuovo carico 'in_attesa', ANCHE se per la stessa
+        polizza+decorrenza esiste già un titolo ufficiale ('validato'): quel
+        titolo NON viene toccato dall'import. Sarà la VALIDAZIONE a decidere se
+        sovrascrivere il titolo esistente (con i dati validati) o crearne uno
+        nuovo, proteggendo comunque gli incassati/coperti/in Prima Nota.
+    La chiave usa l'effetto perché la decorrenza arriva identica dal file, mentre
+    la scadenza può differire (colonna 'Scad. copertura' vs scadenza calcolata).
     """
     # Match sulla decorrenza; fallback sulla scadenza per i titoli senza effetto.
     key_field = "effetto" if t.effetto else "scadenza"
@@ -116,13 +117,10 @@ async def _insert_or_replace_carico(t: "Titolo") -> str:
         if dup_ids:
             await db.titoli.delete_many({"id": {"$in": dup_ids}})
         return "replaced"
-    # 2) esiste già un titolo VALIDATO (coperto/da incassare/incassato) per la stessa
-    #    polizza+decorrenza → è un doppione di un'annualità già processata: NON creare
-    #    un secondo carico (altrimenti dopo la validazione comparirebbe un doppione
-    #    ufficiale). Si salta e si segnala all'operatore.
-    gia_validato = any(e.get("stato_carico") == "validato" for e in existing)
-    if gia_validato:
-        return "skipped_duplicate"
+    # 2) nessun carico in attesa → inserisci sempre un nuovo carico 'in_attesa'.
+    #    Anche se esiste già un titolo 'validato' per la stessa polizza+decorrenza
+    #    NON lo tocchiamo: la riga entra comunque in vaglio e sarà la validazione a
+    #    sovrascrivere il titolo esistente (o crearne uno nuovo).
     await db.titoli.insert_one(t.model_dump())
     return "created"
 

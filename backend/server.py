@@ -4691,7 +4691,10 @@ async def statistiche_incassi_situazione(
     scoped = user.get("role") != "admin"
     eff_op = user.get("id") if scoped else None
 
-    base_flt: dict = {"stato": {"$ne": "stornato"}}
+    # Esclude i carichi non ancora validati (in_attesa) e gli annullati: non sono
+    # titoli ufficiali e non devono entrare nei KPI (arretrati/sospesi/incassi).
+    base_flt: dict = {"stato": {"$ne": "stornato"},
+                      "stato_carico": {"$nin": ["in_attesa", "annullato_carico"]}}
     if eff_op:
         base_flt["$or"] = [{"collaboratore_id": eff_op}, {"provvigioni_operatori.operatore_id": eff_op}]
 
