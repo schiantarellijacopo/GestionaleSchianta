@@ -233,3 +233,10 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - **Frontend** `Librerie.jsx UsaModelloDialog`: fetch tabelle checklist del modello all'apertura, UI flag (checkbox per colonna), `tabelle_override` inviato in genera() e inviaFirma(). Dialog reso scrollabile.
 - **Verificato**: tabelle-compilabili ritorna le 2 checklist; genera con override rende esattamente le X scelte (2/2). Modello di prova rimosso.
 - NOTA: `genera-fedele` (word_fedele/overlay) non usa `{tabella}`, quindi nessun flag lì (atteso).
+
+## [2026-06] YouSign workspace per-agenzia + OTP SMS + WhatsApp
+- **Workspace per agenzia**: ogni agenzia salva le richieste firma nel proprio workspace YouSign. `yousign_workspace_id` salvato in `azienda_config` (tenant-scoped). Passato come `workspace_id` alla POST `/signature_requests` in entrambi i flussi: `_yousign_send` (esignature_it.py, flusso Genera Documento) e `_invia_yousign` (firma_modelli.py, usato anche da modelli.py Librerie). Helper `_yousign_workspace_id(db)`.
+- **Nuovi endpoint** `GET/PUT /api/esignature/workspace` per leggere/impostare il workspace dell'agenzia corrente.
+- **Impostato**: tenant-principale-schiantarelli → workspace `d748b4bc-5cc8-4a32-805f-9661ae5f51f0` ("jacopo schiantarelli"). Altra agenzia (c5ae2d0e → "Bs Broker" b076fbfb) da impostare via PUT /esignature/workspace quando serve.
+- **OTP via SMS di default** (il workspace sandbox è configurato con Security code by SMS): selettore Email/SMS nel popup firma di GeneraDocumentoButton, default SMS. `_to_e164` normalizza il cellulare. WhatsApp con link già attivo.
+- **Verificato end-to-end**: GET /esignature/workspace → d748b4bc; invia (otp_sms + mobile) → richiesta creata nel workspace corretto (confermato via API YouSign), stato ongoing, signing_url presente.

@@ -130,7 +130,7 @@ def _firma_fields_from_pdf(pdf_bytes: bytes) -> list[dict]:
 
 
 async def _yousign_send(pdf_bytes: bytes, signer: dict, display: str,
-                        auth_mode: str = "otp_email") -> dict:
+                        auth_mode: str = "otp_email", workspace_id: str = "") -> dict:
     """Crea e attiva una richiesta di firma YouSign per un singolo firmatario.
     Ritorna {ok, request_id, document_id, signer_id, status, signing_url}."""
     api_key, base, env = _ys_cfg()
@@ -151,7 +151,10 @@ async def _yousign_send(pdf_bytes: bytes, signer: dict, display: str,
         info["phone_number"] = phone
     try:
         async with httpx.AsyncClient(base_url=base, headers=headers, timeout=40) as c:
-            r = await c.post("/signature_requests", json={"name": display, "delivery_mode": "none"})
+            req_body = {"name": display, "delivery_mode": "none"}
+            if workspace_id:
+                req_body["workspace_id"] = workspace_id
+            r = await c.post("/signature_requests", json=req_body)
             if r.is_error:
                 return {"ok": False, "error": r.text[:300]}
             rid = r.json()["id"]
@@ -285,8 +288,11 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         raise HTTPException(400, "Cellulare del firmatario mancante o non valido (necessario per OTP via SMS)")
 
     display = al.get("nome_file") or "documento.pdf"
+    from routes.firma_modelli import _yousign_workspace_id
+    workspace_id = await _yousign_workspace_id(db)
     res = await _yousign_send(
         pdf_bytes=pdf_bytes, signer=signer, display=display, auth_mode=auth_mode,
+        workspace_id=workspace_id,
     )
     if not res.get("ok"):
         raise HTTPException(400, res.get("error") or "Errore creazione firma")
@@ -349,6 +355,23 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
 
     asyncio.create_task(_deliver())
     return {**rec, "canali": "in_invio"}
+
+
+@router.get("/workspace")
+async def get_workspace(user=Depends(current_user)) -> dict:
+    """Workspace Yousign configurato per l'agenzia corrente."""
+    az = await db.azienda_config.find_one({}, {"_id": 0, "yousign_workspace_id": 1}) or {}
+    return {"workspace_id": az.get("yousign_workspace_id") or ""}
+
+
+@router.put("/workspace")
+async def set_workspace(body: dict, user=Depends(current_user)) -> dict:
+    """Imposta il workspace Yousign dell'agenzia corrente (le richieste firma vi
+    verranno salvate). Ogni agenzia ha il proprio workspace."""
+    wid = (body.get("workspace_id") or "").strip()
+    await db.azienda_config.update_one({}, {"$set": {"yousign_workspace_id": wid}}, upsert=True)
+    return {"ok": True, "workspace_id": wid}
+
 
 
 @router.get("/richieste")

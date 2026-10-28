@@ -24,6 +24,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
     const [busy, setBusy] = useState(false);
     const [firmaAlleg, setFirmaAlleg] = useState(null); // {allegato_id, nome_file}
     const [canali, setCanali] = useState({ wa: true, email: true });
+    const [otpMode, setOtpMode] = useState("otp_sms"); // otp_email | otp_sms
     const [tabelle, setTabelle] = useState([]); // tabelle checklist compilabili
     const [spunte, setSpunte] = useState({});   // {slug: [[bool,...], ...]}
     const spunteRef = useRef({});
@@ -132,6 +133,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                 allegato_id: firmaAlleg.allegato_id,
                 invia_whatsapp: canali.wa,
                 invia_email: canali.email,
+                auth_mode: otpMode,
             });
             toast.success("Richiesta di firma inviata al cliente (link via " +
                 [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") + ")");
@@ -232,7 +234,20 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                     <div className="space-y-3 text-sm">
                         <div className="text-xs text-slate-500 bg-slate-50 rounded p-2">
                             Documento: <b>{firmaAlleg?.nome_file}</b><br />
-                            Firma elettronica avanzata YouSign · il cliente riceverà il link via WhatsApp/Email e un codice OTP via SMS per completare la firma.
+                            Firma elettronica avanzata YouSign · il cliente riceverà il link via WhatsApp/Email e un codice OTP per completare la firma.
+                        </div>
+                        <div>
+                            <Label className="text-xs uppercase tracking-wide text-slate-600 mb-1.5 block">Codice OTP via</Label>
+                            <div className="flex gap-2">
+                                <label className={`flex-1 flex items-center justify-center gap-2 cursor-pointer p-2 border rounded ${otpMode === "otp_email" ? "border-violet-500 bg-violet-50" : ""}`}>
+                                    <input type="radio" name="otp-mode" checked={otpMode === "otp_email"} onChange={() => setOtpMode("otp_email")} data-testid="firma-otp-email" />
+                                    <span>Email</span>
+                                </label>
+                                <label className={`flex-1 flex items-center justify-center gap-2 cursor-pointer p-2 border rounded ${otpMode === "otp_sms" ? "border-violet-500 bg-violet-50" : ""}`}>
+                                    <input type="radio" name="otp-mode" checked={otpMode === "otp_sms"} onChange={() => setOtpMode("otp_sms")} data-testid="firma-otp-sms" />
+                                    <span>SMS</span>
+                                </label>
+                            </div>
                         </div>
                         <div>
                             <Label className="text-xs uppercase tracking-wide text-slate-600 mb-1.5 block">Invia il link di firma via</Label>

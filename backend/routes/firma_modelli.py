@@ -477,6 +477,16 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
     return out
 
 
+async def _yousign_workspace_id(db) -> str:
+    """Workspace Yousign dell'agenzia corrente (tenant-scoped), o '' se non impostato."""
+    try:
+        az = await db.azienda_config.find_one({}, {"_id": 0, "yousign_workspace_id": 1})
+        return (az or {}).get("yousign_workspace_id") or ""
+    except Exception:
+        return ""
+
+
+
 def _yousign_cfg() -> dict:
     """Config Yousign: sandbox (default) o produzione, con chiave unica condivisa.
 
@@ -520,8 +530,11 @@ async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body, dat
                             break
             if not email:
                 return {"firma": {"ok": False, "error": "Email firmatario mancante"}}
-            req = await cli.post("/signature_requests",
-                                 json={"name": f"{modello['nome']} - {nome}", "delivery_mode": "none"})
+            req_body = {"name": f"{modello['nome']} - {nome}", "delivery_mode": "none"}
+            _wid = await _yousign_workspace_id(db)
+            if _wid:
+                req_body["workspace_id"] = _wid
+            req = await cli.post("/signature_requests", json=req_body)
             if req.is_error:
                 return {"firma": {"ok": False, "error": req.text[:200]}}
             rid = req.json()["id"]
