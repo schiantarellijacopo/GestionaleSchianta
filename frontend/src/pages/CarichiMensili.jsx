@@ -463,7 +463,12 @@ export default function CarichiMensili({ storico = false }) {
             )}
             {/* Dialog: import Excel/CSV con auto-mapping */}
             {importOpen && (
-                <ImportExcelDialog onClose={() => { setImportOpen(false); load(); }} />
+                <ImportExcelDialog
+                    onClose={() => { setImportOpen(false); load(); }}
+                    onImported={(mn, mx) => {
+                        if (mn && mx) { setRange("tutti"); setDal(mn); setAl(mx); }
+                    }}
+                />
             )}
             {/* Dialog: confronto anno precedente (in base alle date selezionate) */}
             {confrontoOpen && (
@@ -941,7 +946,7 @@ function fmtIt(iso) {
     return `${d}/${m}/${y}`;
 }
 
-function ImportExcelDialog({ onClose }) {
+function ImportExcelDialog({ onClose, onImported }) {
     const [file, setFile] = useState(null);
     const [preview, setPreview] = useState(null);   // {headers, sample_rows, suggested_mapping, total_rows}
     const [mapping, setMapping] = useState({});
@@ -980,6 +985,9 @@ function ImportExcelDialog({ onClose }) {
                 headers: { "Content-Type": "multipart/form-data" },
             });
             setResult(r.data);
+            // Allinea la griglia al periodo appena importato così i titoli caricati
+            // sono subito visibili (altrimenti il preset "mese corrente" li nasconde).
+            onImported?.(r.data.effetto_min, r.data.effetto_max);
             // Se ci sono righe orfane vai allo step 2.5 (match manuale), altrimenti step 3 finale
             if ((r.data.unmatched || []).length > 0) {
                 setStep(2.5);

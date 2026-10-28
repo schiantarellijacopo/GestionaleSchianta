@@ -1267,6 +1267,8 @@ async def import_apply(
     errori: list[dict] = []
     unmatched: list[dict] = []  # righe con polizza non trovata → step manuale
     totali = {"lordo": 0.0, "netto": 0.0, "imposte": 0.0, "ssn": 0.0, "provvigioni": 0.0}
+    eff_min: Optional[str] = None  # range decorrenza dei titoli effettivamente caricati
+    eff_max: Optional[str] = None
     header_pol = mapping.get("polizza_numero", "")
     header_cliente = mapping.get("cliente_nome", "")
 
@@ -1372,6 +1374,14 @@ async def import_apply(
                 sovrascritti += 1
             else:
                 creati += 1
+            # Traccia il range di decorrenza dei titoli caricati, così il frontend
+            # può filtrare la griglia sul periodo appena importato.
+            _eff = t.effetto or scad
+            if _eff:
+                if eff_min is None or _eff < eff_min:
+                    eff_min = _eff
+                if eff_max is None or _eff > eff_max:
+                    eff_max = _eff
             totali["lordo"] += t.importo_lordo or 0
             totali["netto"] += t.importo_netto or 0
             totali["imposte"] += t.imposte or 0
@@ -1387,6 +1397,7 @@ async def import_apply(
             "duplicati": duplicati,
             "saltati": saltati, "unmatched": unmatched, "errori": errori,
             "totali": {k: round(v, 2) for k, v in totali.items()},
+            "effetto_min": eff_min, "effetto_max": eff_max,
             "totale_letti": len(rows)}
 
 

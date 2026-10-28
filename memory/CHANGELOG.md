@@ -1,6 +1,13 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Fix: dati non visibili dopo import Carichi Mensili
+- **Problema**: dopo un import CSV/Excel ("ho importato il file ma non ci sono i dati"), i titoli venivano creati correttamente (es. 493) ma NON apparivano in griglia: il filtro di default ("Preset mese attivo") mostra i titoli per scadenza del mese corrente, mentre i titoli importati hanno effetto/scadenza nel periodo importato → risultavano nascosti.
+- **Fix backend** (`routes/carichi_mensili.py` → `import_apply`): la risposta include ora `effetto_min` / `effetto_max` calcolati sui titoli effettivamente caricati/sovrascritti.
+- **Fix frontend** (`pages/CarichiMensili.jsx`): al termine dell'import il callback `onImported` imposta automaticamente il range date decorrenza (`dal`/`al`) sul periodo importato, così i titoli appena caricati sono subito visibili.
+- **Verifica**: riprodotto in UI reale sul tenant con dati reali — dopo import la griglia passa automaticamente a 01/11/2026–30/11/2026 e mostra i 493 titoli. Dati di test ripuliti.
+
+
 ## 2026-06 — Ciclo di vita documento firmato + Provider di firma per agenzia
 ### Modelli: "Card Documentale di Riferimento"
 - `TemplateModello.document_target_card` (db_models.py) + `ModelloBody.document_target_card` (routes/modelli.py).
