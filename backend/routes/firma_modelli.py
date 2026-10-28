@@ -490,19 +490,31 @@ async def _yousign_workspace_id(db) -> str:
 def _yousign_cfg() -> dict:
     """Config Yousign: sandbox (default) o produzione, con chiave unica condivisa.
 
-    Env:
-      YOUSIGN_ENVIRONMENT        = "sandbox" | "production"  (default sandbox)
-      YOUSIGN_SANDBOX_API_KEY    = chiave ambiente di test
-      YOUSIGN_PRODUCTION_API_KEY = chiave ambiente di produzione
+    Variabili lette (con ALIAS per compatibilità):
+      Ambiente : YOUSIGN_ENVIRONMENT  → alias YOUSIGN_ENV            (default "sandbox")
+      Chiave   : YOUSIGN_SANDBOX_API_KEY / YOUSIGN_PRODUCTION_API_KEY
+                 → alias generico YOUSIGN_API_KEY (vale per l'ambiente attivo)
+      Base URL : derivata dall'ambiente, override opzionale con YOUSIGN_BASE_URL
     """
-    env = (os.environ.get("YOUSIGN_ENVIRONMENT") or "sandbox").strip().lower()
+    env = (os.environ.get("YOUSIGN_ENVIRONMENT")
+           or os.environ.get("YOUSIGN_ENV")
+           or "sandbox").strip().lower()
+    # Override base URL solo se è un URL "pulito" (evita valori incollati come
+    # link Markdown, es. "Https://...](https://...)" → verrebbe ignorato).
+    base_override = (os.environ.get("YOUSIGN_BASE_URL") or "").strip()
+    _valid_override = (
+        base_override.lower().startswith("http")
+        and all(c not in base_override for c in (" ", "]", "[", "(", ")"))
+    )
+    base_override = base_override.rstrip("/") if _valid_override else ""
+    generic_key = (os.environ.get("YOUSIGN_API_KEY") or "").strip()
     if env == "production":
         return {"env": "production",
-                "api_key": (os.environ.get("YOUSIGN_PRODUCTION_API_KEY") or "").strip(),
-                "base": "https://api.yousign.app/v3"}
+                "api_key": (os.environ.get("YOUSIGN_PRODUCTION_API_KEY") or "").strip() or generic_key,
+                "base": base_override or "https://api.yousign.app/v3"}
     return {"env": "sandbox",
-            "api_key": (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip(),
-            "base": "https://api-sandbox.yousign.app/v3"}
+            "api_key": (os.environ.get("YOUSIGN_SANDBOX_API_KEY") or "").strip() or generic_key,
+            "base": base_override or "https://api-sandbox.yousign.app/v3"}
 
 
 async def _invia_yousign(db, modello, pdf_bytes, firma_fields, valori, body, data_fields=None) -> dict:
