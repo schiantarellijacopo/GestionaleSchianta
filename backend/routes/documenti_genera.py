@@ -138,6 +138,23 @@ async def _context(entita_tipo: str, entita_id: str) -> dict:
         "azienda_indirizzo": ", ".join([x for x in [az.get("indirizzo"), az.get("cap"), az.get("comune")] if x]),
         "data_oggi": datetime.now().strftime("%d/%m/%Y"),
     }
+    # Via/indirizzo cliente (alias) + operatore/intermediario (collaboratore collegato)
+    ctx["cliente_via"] = ana.get("indirizzo") or ""
+    ctx["cliente_citta"] = ana.get("comune") or ana.get("citta") or ""
+    cid = pol.get("collaboratore_id") or ana.get("collaboratore_id")
+    u = (await db.users.find_one({"id": cid}, {"_id": 0}) if cid else None) or {}
+    op_sez = u.get("rui_sezione") or az.get("rui_sezione") or ""
+    ctx.update({
+        "operatore_nome": u.get("name") or u.get("nome") or "",
+        "operatore_cognome": u.get("cognome_ragione_sociale") or u.get("cognome") or "",
+        "operatore_codice_fiscale": u.get("codice_fiscale") or "",
+        "operatore_email": u.get("email") or "",
+        "operatore_telefono": u.get("telefono") or "",
+        "operatore_rui": u.get("rui") or u.get("rui_numero_iscrizione") or az.get("rui") or "",
+        "operatore_sezione": op_sez, "operatore_rui_sezione": op_sez,
+        "agenzia_rui": az.get("rui") or "", "agenzia_rui_sezione": az.get("rui_sezione") or "",
+    })
+    ctx["_firma_operatore_url"] = u.get("firma_digitale_url")
     if entita_tipo == "contraente":
         ctx["stato_famiglia"] = await _stato_famiglia(ana)
 
@@ -164,15 +181,20 @@ def _sub(text: str, ctx: dict) -> str:
     return re.sub(r"\{([a-z_]+)\}", lambda m: str(ctx.get(m.group(1), m.group(0))), text or "")
 
 
-def _build_pdf(titolo: str, corpo: str, ctx: dict, logo: bytes | None) -> bytes:
+def _build_pdf(titolo: str, corpo: str, ctx: dict, logo: bytes | None,
+               tabelle_map: dict | None = None, firma_op_bytes: bytes | None = None) -> bytes:
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.units import cm
+    from reportlab.lib.units import cm, mm
     from reportlab.lib.enums import TA_LEFT
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import (
         SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, HRFlowable,
     )
+    from routes.modelli import (
+        _TABELLA_RE, _tabella_righe_render, _pdf_build_tabella,
+    )
+    tabelle_map = tabelle_map or {}
 
     navy = colors.HexColor("#0f2f4a")
     grey_line = colors.HexColor("#d7dee6")
@@ -267,6 +289,50 @@ def _build_pdf(titolo: str, corpo: str, ctx: dict, logo: bytes | None) -> bytes:
             flush_fields()
             story.append(Spacer(1, 4))
             continue
+        # Segnaposto tabella {tabella:slug} → tabella visiva compilata
+        mt = _TABELLA_RE.fullmatch(s)
+        if mt:
+            flush_fields()
+            tab = tabelle_map.get(mt.group(1))
+            if tab:
+                headers, rows, sezioni = _tabella_righe_render(tab, ctx)
+                tbl = _pdf_build_tabella(tab, headers, rows, ss, mm, Paragraph,
+                                         Table, TableStyle, colors, sezioni)
+                if tbl is not None:
+                    story.append(tbl)
+                    story.append(Spacer(1, 8))
+            continue
+        # Logo: già presente in intestazione → rimuoviamo il token
+        if s == "{logo}":
+            flush_fields()
+            continue
+        # Blocchi firma / data firma
+        if s == "{firma_operatore}":
+            flush_fields()
+            if firma_op_bytes:
+                try:
+                    fimg = Image(BytesIO(firma_op_bytes))
+                    ratio = fimg.imageWidth / max(fimg.imageHeight, 1)
+                    fimg.drawHeight = 1.4 * cm
+                    fimg.drawWidth = min(6 * cm, 1.4 * cm * ratio)
+                    story.append(Spacer(1, 6))
+                    story.append(fimg)
+                except Exception:
+                    story.append(Spacer(1, 10))
+            story.append(Paragraph("Firma dell'Intermediario _______________________________", body_st))
+            story.append(Spacer(1, 6))
+            continue
+        if s == "{firma}":
+            flush_fields()
+            story.append(Spacer(1, 16))
+            story.append(Paragraph("Firma del Contraente _______________________________", body_st))
+            story.append(Spacer(1, 6))
+            continue
+        if s == "{data_firma}":
+            flush_fields()
+            story.append(Paragraph("Data: _______ / _______ / ____________", body_st))
+            story.append(Spacer(1, 4))
+            continue
         if is_section(s):
             flush_fields()
             section_bar(s)
@@ -329,7 +395,12 @@ async def genera_documento(body: dict, user=Depends(current_user)):
 
     ctx, ana, pol, comp, sin = await _context(entita_tipo, entita_id)
     logo = await _logo_bytes()
-    pdf = _build_pdf(titolo, corpo, ctx, logo)
+    # Tabelle riutilizzabili {tabella:slug} + firma operatore (immagine)
+    from routes.modelli import _TABELLA_RE, _load_tabelle_map, _load_image_from_url
+    slugs = _TABELLA_RE.findall(corpo or "")
+    tabelle_map = await _load_tabelle_map(slugs) if slugs else {}
+    firma_op_bytes = await _load_image_from_url(ctx.get("_firma_operatore_url"))
+    pdf = _build_pdf(titolo, corpo, ctx, logo, tabelle_map=tabelle_map, firma_op_bytes=firma_op_bytes)
 
     if not body.get("salva"):
         return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
