@@ -19102,6 +19102,24 @@ async def startup():
     except Exception as _e:
         logger.warning("Impossibile caricare le chiavi AI dal vault: %s", _e)
 
+    # Diagnostica YouSign all'avvio: stampa l'ambiente, la base URL e se la chiave
+    # risulta valorizzata (senza mai stampare il valore della chiave).
+    try:
+        from routes.firma_modelli import _yousign_cfg as _ys_startup_cfg
+        _yc = _ys_startup_cfg()
+        _env = _yc.get("env")
+        _has_key = bool(_yc.get("api_key"))
+        _key_var = "YOUSIGN_SANDBOX_API_KEY" if _env == "sandbox" else "YOUSIGN_PRODUCTION_API_KEY"
+        if _has_key:
+            logger.info("Yousign Service: %s Initialized | base=%s | %s present (len=%d)",
+                        _env.capitalize(), _yc.get("base"), _key_var, len(_yc.get("api_key") or ""))
+        else:
+            logger.warning("Yousign Service: %s NOT configured | base=%s | %s is EMPTY/None "
+                           "(impostala come env var su Railway oppure in Super Admin → Chiavi API → card YouSign)",
+                           _env.capitalize(), _yc.get("base"), _key_var)
+    except Exception as _e:
+        logger.warning("Yousign Service: impossibile verificare la configurazione: %s", _e)
+
     # admin seed (admin agenzia principale — NON super_admin)
     admin_email = os.environ.get("ADMIN_EMAIL", "admin@assicura.it").lower()
     admin_password = os.environ.get("ADMIN_PASSWORD", "Admin123!")

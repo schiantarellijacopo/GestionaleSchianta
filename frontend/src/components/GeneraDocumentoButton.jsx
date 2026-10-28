@@ -24,6 +24,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
     const [busy, setBusy] = useState(false);
     const [firmaAlleg, setFirmaAlleg] = useState(null); // {allegato_id, nome_file}
     const [canali, setCanali] = useState({ wa: true, email: true });
+    const [firmaUrl, setFirmaUrl] = useState("");
     const [tabelle, setTabelle] = useState([]); // tabelle checklist compilabili
     const [spunte, setSpunte] = useState({});   // {slug: [[bool,...], ...]}
     const spunteRef = useRef({});
@@ -116,6 +117,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
             const r = await api.post("/documenti/genera", payload(true));
             setFirmaAlleg({ allegato_id: r.data.allegato_id, nome_file: r.data.nome_file });
             setCanali({ wa: true, email: true });
+            setFirmaUrl("");
             toast.success("Documento generato — scegli come inviarlo per la firma");
             onSaved?.();
         } catch (e) {
@@ -128,16 +130,30 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
         if (!canali.wa && !canali.email) { toast.error("Seleziona almeno un canale di invio"); return; }
         setBusy(true);
         try {
-            await api.post("/esignature/invia", {
+            const r = await api.post("/esignature/invia", {
                 allegato_id: firmaAlleg.allegato_id,
                 invia_whatsapp: canali.wa,
                 invia_email: canali.email,
                 auth_mode: "otp_sms",
             });
-            toast.success("Richiesta di firma inviata al cliente (link via " +
-                [canali.wa && "WhatsApp", canali.email && "Email"].filter(Boolean).join(" + ") + ")");
-            setFirmaAlleg(null);
-            setOpen(false);
+            const rec = r.data?.recapito || {};
+            const okCh = [];
+            const koCh = [];
+            if (canali.wa) (rec.whatsapp?.ok ? okCh : koCh).push("WhatsApp");
+            if (canali.email) (rec.email?.ok ? okCh : koCh).push("Email");
+            const url = r.data?.signing_url || "";
+            if (okCh.length) {
+                toast.success(`Link di firma inviato via ${okCh.join(" + ")}. Il cliente riceverà il codice OTP via SMS.`);
+            }
+            if (koCh.length) {
+                const motivi = koCh.map((c) => {
+                    const e = c === "WhatsApp" ? rec.whatsapp?.error : rec.email?.error;
+                    return `${c}${e ? ` (${e})` : ""}`;
+                }).join(", ");
+                toast.error(`Invio non riuscito su: ${motivi}. Copia e inoltra il link manualmente.`, { duration: 9000 });
+            }
+            setFirmaUrl(url);
+            if (!koCh.length) { setFirmaAlleg(null); setOpen(false); }
         } catch (e) {
             const detail = e.response?.data?.detail;
             const msg = (typeof detail === "string" && !detail.trim().startsWith("<")) ? detail : "Invio firma non riuscito, riprova più tardi";
@@ -225,7 +241,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
             </Dialog>
 
             {/* Popup scelta canale invio firma (OpenAPI eSignature) */}
-            <Dialog open={!!firmaAlleg} onOpenChange={(o) => !o && setFirmaAlleg(null)}>
+            <Dialog open={!!firmaAlleg} onOpenChange={(o) => { if (!o) { setFirmaAlleg(null); setFirmaUrl(""); } }}>
                 <DialogContent className="max-w-md" data-testid="genera-doc-firma-invio-dialog">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2"><PenTool size={16} className="text-violet-600" /> Invia per firma</DialogTitle>
@@ -248,9 +264,23 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                                 </label>
                             </div>
                         </div>
+                        {firmaUrl && (
+                            <div className="rounded border border-amber-200 bg-amber-50 p-2 space-y-1.5" data-testid="firma-link-manuale">
+                                <div className="text-xs font-semibold text-amber-800">Link di firma (inoltralo manualmente se un canale non ha funzionato)</div>
+                                <div className="flex items-center gap-2">
+                                    <input readOnly value={firmaUrl} onFocus={(e) => e.target.select()}
+                                        className="flex-1 text-xs px-2 py-1 border border-amber-300 rounded bg-white font-mono truncate"
+                                        data-testid="firma-link-input" />
+                                    <Button size="sm" variant="outline" data-testid="firma-link-copy"
+                                        onClick={() => { navigator.clipboard?.writeText(firmaUrl); toast.success("Link copiato"); }}>
+                                        Copia
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setFirmaAlleg(null)}>Annulla</Button>
+                        <Button variant="outline" onClick={() => { setFirmaAlleg(null); setFirmaUrl(""); }}>{firmaUrl ? "Chiudi" : "Annulla"}</Button>
                         <Button onClick={inviaFirma} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="genera-doc-firma-invia">
                             {busy ? "Invio…" : "Invia richiesta firma"}
                         </Button>

@@ -333,28 +333,33 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
             }},
         )
 
-    # Consegna link via WhatsApp + Email IN BACKGROUND (non blocca la risposta:
-    # SMTP è sincrono/bloccante e Evolution può essere lento → eviterebbe timeout/502).
-    async def _deliver():
-        if not signing_url:
-            return
+    # Consegna link via WhatsApp + Email e riporta l'ESITO REALE di ogni canale
+    # (prima avveniva in background e gli errori venivano ingoiati → l'operatore
+    # vedeva "inviato" anche quando il link non partiva). Il signing_url viene
+    # sempre restituito così l'operatore può inoltrarlo a mano se un canale fallisce.
+    recapito = {}
+    if signing_url:
         testo = (
             f"Gentile {signer['name']} {signer['surname']},\n"
             f"le è stato inviato un documento da firmare digitalmente ({display}).\n\n"
             f"🔗 Firma qui: {signing_url}\n\n"
             f"Riceverà un codice OTP via SMS per completare la firma. Il link è personale."
         )
-        try:
-            from notification_helpers import send_email, send_whatsapp_message
-            if body.get("invia_whatsapp", True) and signer["mobile"]:
-                await send_whatsapp_message(signer["mobile"], testo)
-            if body.get("invia_email", True) and signer["email"]:
-                await send_email(signer["email"], f"Documento da firmare — {display}", testo)
-        except Exception as e:
-            logger.warning("Consegna link firma fallita: %s", e)
+        from notification_helpers import send_email, send_whatsapp_message
+        if body.get("invia_whatsapp", True) and signer["mobile"]:
+            try:
+                recapito["whatsapp"] = await asyncio.wait_for(
+                    send_whatsapp_message(signer["mobile"], testo), timeout=25)
+            except Exception as e:
+                recapito["whatsapp"] = {"ok": False, "error": str(e)[:200]}
+        if body.get("invia_email", True) and signer["email"]:
+            try:
+                recapito["email"] = await asyncio.wait_for(
+                    send_email(signer["email"], f"Documento da firmare — {display}", testo), timeout=25)
+            except Exception as e:
+                recapito["email"] = {"ok": False, "error": str(e)[:200]}
 
-    asyncio.create_task(_deliver())
-    return {**rec, "canali": "in_invio"}
+    return {**rec, "recapito": recapito}
 
 
 @router.get("/workspace")
