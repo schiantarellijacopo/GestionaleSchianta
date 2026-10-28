@@ -1845,7 +1845,25 @@ function ChiaviApiTab() {
                 </div>
             </div>
 
-            {/* AI STUDIO — Google Gemini */}
+            {/* FIRMA YOUSIGN */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-yousign">
+                <div className="font-semibold text-slate-800 text-sm">🖊️ Firma Elettronica — YouSign</div>
+                <div className="text-[11px] text-slate-500">Usata dal flusso “Genera documento → Firma” e “Firma moduli”. Il canale del codice OTP (SMS/Email) è deciso dal workspace YouSign; qui inserisci solo la API Key. Lascia “Sandbox” per i test.</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Ambiente</label>
+                        <select value={f.yousign_environment || "sandbox"} onChange={(e) => set("yousign_environment", e.target.value)}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none bg-white"
+                            data-testid="sa-yousign-env">
+                            <option value="sandbox">Sandbox (demo)</option>
+                            <option value="production">Produzione</option>
+                        </select>
+                    </div>
+                    <div className="hidden md:block" />
+                    <FormField label="API Key Sandbox" type="password" value={f.yousign_sandbox_api_key || ""} onChange={(v) => set("yousign_sandbox_api_key", v)} testid="sa-yousign-sandbox-key" />
+                    <FormField label="API Key Produzione" type="password" value={f.yousign_production_api_key || ""} onChange={(v) => set("yousign_production_api_key", v)} testid="sa-yousign-prod-key" />
+                </div>
+            </div>
             <div className="bg-white border border-slate-200 rounded-lg p-4" data-testid="sa-chiavi-aistudio">
                 <div className="font-semibold text-slate-800 text-sm">🤖 AI Studio — Google Gemini
                     {aiStatus && <span className="ml-2 align-middle"><AiBadge attiva={aiStatus.gemini?.attiva} /></span>}

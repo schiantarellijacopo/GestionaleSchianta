@@ -62,6 +62,7 @@ def _ensure_super_admin(user):
 _CHIAVI_AZIENDA = [
     "firma_provider", "firma_environment", "firma_base_url",
     "firma_api_token", "firma_webhook_secret",
+    "yousign_environment", "yousign_sandbox_api_key", "yousign_production_api_key",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
     "spoki_api_key", "spoki_sender_name", "whatsapp_provider",
     "ai_studio_api_key", "openai_api_key",
@@ -78,6 +79,9 @@ _CHIAVI_AI_ENV = {
 # Altre chiavi provider del vault → variabile d'ambiente sincronizzata.
 _CHIAVI_EXTRA_ENV = {
     "openapi_it_bearer_token": "OPENAPI_IT_BEARER_TOKEN",
+    "yousign_environment": "YOUSIGN_ENVIRONMENT",
+    "yousign_sandbox_api_key": "YOUSIGN_SANDBOX_API_KEY",
+    "yousign_production_api_key": "YOUSIGN_PRODUCTION_API_KEY",
 }
 
 
