@@ -248,40 +248,77 @@ async def _valori_dato(db, anagrafica_id, polizza_id, collaboratore_id=None, use
     # agenzia (singleton config)
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     from datetime import date
+    nome_cliente = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip()
+    indirizzo = ana.get("indirizzo") or ""
+    comune = ana.get("comune") or ana.get("citta") or ""
+    cap = ana.get("cap") or ""
+    provincia = ana.get("provincia") or ""
+    codice_fiscale = ana.get("codice_fiscale") or ""
+    partita_iva = ana.get("partita_iva") or ""
+    email = ana.get("email") or ""
+    telefono = ana.get("cellulare") or ana.get("telefono") or ""
+    data_nascita = ana.get("data_nascita") or ""
+    luogo_nascita = ana.get("comune_nascita") or ana.get("luogo_nascita") or ""
+    collab_nome = collab.get("name") or collab.get("nome") or collab.get("collaboratore_nome") or ""
+    collab_cf = collab.get("codice_fiscale") or ""
+    collab_email = collab.get("email") or ""
+    collab_rui = collab.get("rui") or collab.get("rui_numero_iscrizione") or az.get("rui") or ""
+    collab_rui_sez = collab.get("rui_sezione") or az.get("rui_sezione") or ""
     return {
-        "nome_cliente": ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
-        "codice_fiscale": ana.get("codice_fiscale") or "",
-        "partita_iva": ana.get("partita_iva") or "",
-        "indirizzo": ana.get("indirizzo") or "",
-        "cap": ana.get("cap") or "",
-        "comune": ana.get("comune") or "",
-        "provincia": ana.get("provincia") or "",
-        "email": ana.get("email") or "",
-        "telefono": ana.get("cellulare") or ana.get("telefono") or "",
-        "data_nascita": ana.get("data_nascita") or "",
-        "luogo_nascita": ana.get("comune_nascita") or ana.get("luogo_nascita") or "",
+        # --- Vocabolario Firma Moduli (CAMPI_DATO) ---
+        "nome_cliente": nome_cliente,
+        "codice_fiscale": codice_fiscale,
+        "partita_iva": partita_iva,
+        "indirizzo": indirizzo,
+        "cap": cap,
+        "comune": comune,
+        "provincia": provincia,
+        "email": email,
+        "telefono": telefono,
+        "data_nascita": data_nascita,
+        "luogo_nascita": luogo_nascita,
         "numero_polizza": pol.get("numero_polizza") or "",
         "compagnia": comp_nome,
-        "collab_nome": collab.get("nome") or collab.get("collaboratore_nome") or "",
-        "collab_codice_fiscale": collab.get("codice_fiscale") or "",
-        "collab_email": collab.get("email") or "",
-        "collab_rui": collab.get("rui") or "",
-        "collab_rui_sezione": collab.get("rui_sezione") or "",
+        "collab_nome": collab_nome,
+        "collab_codice_fiscale": collab_cf,
+        "collab_email": collab_email,
+        "collab_rui": collab_rui,
+        "collab_rui_sezione": collab_rui_sez,
         "agenzia_nome": az.get("ragione_sociale") or "",
         "agenzia_piva": az.get("partita_iva") or "",
         "agenzia_rui": az.get("rui") or "",
         "agenzia_rui_sezione": az.get("rui_sezione") or "",
         "data_oggi": date.today().strftime("%d/%m/%Y"),
         "x": "X",
+        # --- Alias vocabolario "Modelli" (cliente_* / operatore_*) ---
+        "cliente": nome_cliente, "cliente_nome": nome_cliente,
+        "cliente_cognome": ana.get("cognome") or "",
+        "cliente_ragione_sociale": ana.get("ragione_sociale") or nome_cliente,
+        "cliente_via": indirizzo, "cliente_indirizzo": indirizzo,
+        "cliente_comune": comune, "cliente_citta": comune,
+        "cliente_cap": cap, "cliente_provincia": provincia,
+        "cliente_cf": codice_fiscale, "cliente_codice_fiscale": codice_fiscale,
+        "cliente_partita_iva": partita_iva,
+        "cliente_email": email, "cliente_pec": ana.get("pec") or "",
+        "cliente_telefono": telefono, "cliente_cellulare": telefono,
+        "cliente_data_nascita": data_nascita, "cliente_luogo_nascita": luogo_nascita,
+        # Operatore / intermediario (= collaboratore)
+        "operatore_nome": collab_nome,
+        "operatore_codice_fiscale": collab_cf,
+        "operatore_email": collab_email,
+        "operatore_rui": collab_rui,
+        "operatore_sezione": collab_rui_sez, "operatore_rui_sezione": collab_rui_sez,
     }
 
 
-def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict]]:
+def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict], list[dict]]:
     """Sostituisce i segnaposto {chiave} nel PDF con i valori reali (ricerca testo).
-    Ritorna (pdf_compilato, firma_fields) dove firma_fields sono i rettangoli (in punti,
-    page 0-based) dove compare {firma}, da usare per il campo firma Yousign."""
+    Ritorna (pdf_compilato, firma_fields, data_fields) dove firma_fields/data_fields
+    sono i rettangoli (in punti, page 0-based) dove compaiono {firma} e {data_firma},
+    usati per i campi firma/data Yousign."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     firma_fields = []
+    data_fields = []
     for page in doc:
         # campi dato: sostituzione testo in-place (redaction)
         for chiave, val in valori.items():
@@ -291,6 +328,19 @@ def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict]]:
                 fs = max(7, min(12, r.height * 0.9))
                 page.add_redact_annot(r, text=str(val or ""), fontsize=fs,
                                       fontname="helv", align=0, fill=(1, 1, 1))
+        # segnaposto immagine/strutturali senza valore testuale: li rimuoviamo
+        # (il logo è già nell'intestazione del documento caricato).
+        for tok in ("{logo}", "{firma_operatore}"):
+            for r in page.search_for(tok):
+                page.add_redact_annot(r, text="", fill=(1, 1, 1))
+        # segnaposto data firma: rimosso e posizione salvata per Yousign
+        for r in page.search_for("{data_firma}"):
+            page.add_redact_annot(r, text="", fill=(1, 1, 1))
+            data_fields.append({
+                "page": page.number,
+                "x": round(r.x0), "y": round(r.y0),
+                "width": max(120, round(r.width)), "height": max(20, round(r.height * 1.4)),
+            })
         # segnaposto firma: lo rimuoviamo e salviamo la posizione
         for r in page.search_for("{firma}"):
             page.add_redact_annot(r, text="", fill=(1, 1, 1))
@@ -302,7 +352,7 @@ def _compila_pdf(pdf_bytes: bytes, valori: dict) -> tuple[bytes, list[dict]]:
         page.apply_redactions()
     out = doc.tobytes()
     doc.close()
-    return out, firma_fields
+    return out, firma_fields, data_fields
 
 
 def _stamp_campi(doc, campi, valori, pages_meta):
@@ -393,8 +443,9 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
         firma_fields = _stamp_campi(fdoc, campi, valori, doc.get("pages") or [])
         filled = fdoc.tobytes()
         fdoc.close()
+        data_fields = []
     else:
-        filled, firma_fields = _compila_pdf(pdf_bytes, valori)
+        filled, firma_fields, data_fields = _compila_pdf(pdf_bytes, valori)
 
     # salva come allegato
     aid_alleg = str(uuid.uuid4())
@@ -415,7 +466,7 @@ async def compila_modello(mid: str, body: dict, user=Depends(require_user("admin
            "firma_presente": bool(firma_fields)}
 
     if firma_fields and body.get("invia_firma"):
-        signing = await _invia_yousign(db, doc, filled, firma_fields, valori, body)
+        signing = await _invia_yousign(db, doc, filled, firma_fields, valori, body, data_fields=data_fields)
         out.update(signing)
         canali = body.get("canali") or {}
         if signing.get("firma", {}).get("ok") and (canali.get("wa") or canali.get("email")):
