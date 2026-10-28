@@ -208,3 +208,14 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - **Limite sandbox YouSign**: il firmatario deve avere email appartenente all'org YouSign → in test usare `schiantarelli.jacopo@gmail.com`.
 - **Verificato end-to-end**: genera doc (salva) → `/esignature/invia` ritorna provider=yousign, stato "ongoing", signing_url valido. Dati di test rimossi. NOTA: finalizzazione/download firmato implementata per API ma testabile solo dopo firma reale del cliente.
 - Pannello Super Admin "Namirial eSignAnyWhere" è un provider separato NON collegato a YouSign.
+
+## [2026-06] Firma YouSign: OTP via SMS + consegna WhatsApp; produzione in attesa
+- **OTP via SMS** (`routes/esignature_it.py`): `invia_per_firma` ora usa `auth_mode="otp_sms"` di default; nuovo `_to_e164()` normalizza il cellulare del firmatario (+39…) e lo passa a YouSign come `info.phone_number`. Cellulare obbligatorio per otp_sms. Testato end-to-end in sandbox (signer+activate 201, signing_url ottenuto).
+- **WhatsApp con link**: già attivo (frontend `canali={wa:true,email:true}`); messaggio con signing_url inviato via Evolution API (`send_whatsapp_message`, reale). Testi dialog aggiornati (OTP via SMS, link via WhatsApp/Email).
+- **PRODUZIONE — BLOCCATA**: `YOUSIGN_PRODUCTION_API_KEY` attuale rifiutata da YouSign (`403 You cannot consume this service`) → account senza piano produzione attivo. `_yousign_cfg` usa la chiave prod + `api.yousign.app` quando `YOUSIGN_ENVIRONMENT=production`. Richiesto al user una chiave prod valida via secure card → **SKIPPED**. `YOUSIGN_ENVIRONMENT` resta `sandbox`. Per attivare: inserire chiave prod valida + impostare `YOUSIGN_ENVIRONMENT` live=production (preview resta sandbox via slot test).
+- Chiavi gestite via secrets (slot test/live): YOUSIGN_SANDBOX_API_KEY (valida), YOUSIGN_PRODUCTION_API_KEY (invalida), YOUSIGN_ENVIRONMENT.
+
+## [2026-06] Modalità di test scelta: SANDBOX
+- Decisione utente: fare le prove in sandbox (YOUSIGN_ENVIRONMENT=sandbox). In sandbox YouSign NON invia SMS/email reali: il firmatario completa via signing_link (auth simulata).
+- Procedura test: contraente con email = schiantarelli.jacopo@gmail.com (org YouSign obbligatoria) + cellulare → Genera Documento (modello con {firma}) → Firma → canali WhatsApp/Email → aprire signing_link.
+- Vincolo sandbox: email firmatario fuori org → YouSign 400 (atteso).

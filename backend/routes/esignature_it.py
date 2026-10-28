@@ -81,6 +81,24 @@ import httpx  # noqa: E402
 _FIRMA_ANCHOR = "Firma del Contraente"
 
 
+def _to_e164(mobile: str, default_cc: str = "39") -> str:
+    """Normalizza un numero in formato E.164 (+39...). Ritorna '' se non valido."""
+    raw = (mobile or "").strip()
+    if not raw:
+        return ""
+    plus = raw.startswith("+")
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ""
+    if plus:
+        return "+" + digits
+    if digits.startswith("00"):
+        return "+" + digits[2:]
+    if digits.startswith(default_cc) and len(digits) > 10:
+        return "+" + digits
+    return "+" + default_cc + digits
+
+
 def _ys_cfg() -> tuple[str, str, str]:
     from routes.firma_modelli import _yousign_cfg
     cfg = _yousign_cfg()
@@ -121,10 +139,16 @@ async def _yousign_send(pdf_bytes: bytes, signer: dict, display: str,
     email = (signer.get("email") or "").strip()
     if not email:
         return {"ok": False, "error": "Email firmatario mancante"}
+    phone = _to_e164(signer.get("mobile"))
+    if auth_mode == "otp_sms" and not phone:
+        return {"ok": False, "error": "Cellulare del firmatario mancante o non valido (necessario per OTP via SMS)"}
     first = signer.get("name") or "Cliente"
     last = signer.get("surname") or signer.get("ragione_sociale") or "Cliente"
     headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
     fields = _firma_fields_from_pdf(pdf_bytes)
+    info = {"first_name": first, "last_name": last, "email": email, "locale": "it"}
+    if phone:
+        info["phone_number"] = phone
     try:
         async with httpx.AsyncClient(base_url=base, headers=headers, timeout=40) as c:
             r = await c.post("/signature_requests", json={"name": display, "delivery_mode": "none"})
@@ -142,7 +166,7 @@ async def _yousign_send(pdf_bytes: bytes, signer: dict, display: str,
                         "width": max(85, f["width"]), "height": max(37, f["height"])}
                        for f in fields]
             signer_body = {
-                "info": {"first_name": first, "last_name": last, "email": email, "locale": "it"},
+                "info": info,
                 "signature_level": "electronic_signature",
                 "signature_authentication_mode": auth_mode,
                 "fields": yfields,
@@ -256,10 +280,13 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     if not signer["email"]:
         raise HTTPException(400, "Email del firmatario mancante (obbligatoria per la firma YouSign)")
 
+    auth_mode = body.get("auth_mode") or "otp_sms"
+    if auth_mode == "otp_sms" and not _to_e164(signer["mobile"]):
+        raise HTTPException(400, "Cellulare del firmatario mancante o non valido (necessario per OTP via SMS)")
+
     display = al.get("nome_file") or "documento.pdf"
     res = await _yousign_send(
-        pdf_bytes=pdf_bytes, signer=signer, display=display,
-        auth_mode=body.get("auth_mode") or "otp_email",
+        pdf_bytes=pdf_bytes, signer=signer, display=display, auth_mode=auth_mode,
     )
     if not res.get("ok"):
         raise HTTPException(400, res.get("error") or "Errore creazione firma")
@@ -309,7 +336,7 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
             f"Gentile {signer['name']} {signer['surname']},\n"
             f"le è stato inviato un documento da firmare digitalmente ({display}).\n\n"
             f"🔗 Firma qui: {signing_url}\n\n"
-            f"Riceverà un codice OTP via email per completare la firma. Il link è personale."
+            f"Riceverà un codice OTP via SMS per completare la firma. Il link è personale."
         )
         try:
             from notification_helpers import send_email, send_whatsapp_message
