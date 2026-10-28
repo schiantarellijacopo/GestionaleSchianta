@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { FileText, PenTool } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,6 +24,10 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
     const [busy, setBusy] = useState(false);
     const [firmaAlleg, setFirmaAlleg] = useState(null); // {allegato_id, nome_file}
     const [canali, setCanali] = useState({ wa: true, email: true });
+    const [tabelle, setTabelle] = useState([]); // tabelle checklist compilabili
+    const [spunte, setSpunte] = useState({});   // {slug: [[bool,...], ...]}
+    const spunteRef = useRef({});
+    const applySpunte = (next) => { spunteRef.current = next; setSpunte(next); };
 
     const apri = async () => {
         setOpen(true);
@@ -40,6 +44,34 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
         setCorpo(m?.corpo || ""); setTitolo(m?.nome || "Documento");
     };
 
+    // Carica le tabelle checklist referenziate nel corpo (con debounce) e inizializza le spunte
+    useEffect(() => {
+        if (!open || !corpo || !corpo.includes("{tabella:")) { setTabelle([]); applySpunte({}); return; }
+        const h = setTimeout(async () => {
+            try {
+                const r = await api.post("/documenti/tabelle-compilabili", { corpo });
+                const tabs = r.data || [];
+                setTabelle(tabs);
+                const prev = spunteRef.current;
+                const next = {};
+                for (const t of tabs) {
+                    const cur = prev[t.slug];
+                    if (cur && cur.length === t.voci.length) { next[t.slug] = cur; continue; }
+                    next[t.slug] = t.voci.map((v) => (t.colonne || []).map((_, ci) => !!(v.spunte || [])[ci]));
+                }
+                applySpunte(next);
+            } catch { setTabelle([]); }
+        }, 400);
+        return () => clearTimeout(h);
+    }, [corpo, open]);
+
+    const toggleSpunta = (slug, vi, ci, val) => {
+        const cur = spunteRef.current;
+        const rows = (cur[slug] || []).map((r) => [...r]);
+        if (rows[vi]) rows[vi][ci] = val;
+        applySpunte({ ...cur, [slug]: rows });
+    };
+
     // Mappa il documento generato alla card dedicata dell'anagrafica (se pertinente)
     const cardCategoria = () => {
         const t = `${titolo || ""}`.toLowerCase();
@@ -50,6 +82,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
         const p = { entita_tipo: sezione, entita_id: entitaId, template_id: sel, titolo, corpo, salva };
         const cat = cardCategoria();
         if (cat) p.categoria = cat;
+        if (Object.keys(spunte).length) p.tabelle_override = spunte;
         return p;
     };
 
@@ -146,6 +179,35 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                                     <Textarea rows={12} value={corpo} onChange={(e) => setCorpo(e.target.value)}
                                         className="text-xs font-mono" data-testid="genera-doc-corpo" />
                                 </div>
+                                {tabelle.map((t) => (
+                                    <div key={t.slug} className="border border-slate-200 rounded-md p-3" data-testid={`tabella-compilabile-${t.slug}`}>
+                                        <div className="text-xs font-semibold text-slate-700 mb-2">{t.nome}</div>
+                                        {(t.colonne || []).length > 1 && (
+                                            <div className="flex justify-end gap-2 mb-1">
+                                                {(t.colonne || []).map((c, ci) => (
+                                                    <span key={ci} className="w-20 text-center text-[10px] uppercase tracking-wide text-slate-500">{c}</span>
+                                                ))}
+                                            </div>
+                                        )}
+                                        <div className="space-y-1.5">
+                                            {(t.voci || []).map((v, vi) => (
+                                                <div key={vi} className="flex items-start gap-3 text-xs">
+                                                    <div className="flex-1 text-slate-700 leading-snug">{v.testo}</div>
+                                                    <div className="flex gap-2 shrink-0">
+                                                        {(t.colonne || []).map((c, ci) => (
+                                                            <div key={ci} className="w-20 flex justify-center pt-0.5">
+                                                                <Checkbox
+                                                                    checked={!!(spunte[t.slug]?.[vi]?.[ci])}
+                                                                    onCheckedChange={(val) => toggleSpunta(t.slug, vi, ci, !!val)}
+                                                                    data-testid={`spunta-${t.slug}-${vi}-${ci}`} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
                             </>
                         )}
                     </div>

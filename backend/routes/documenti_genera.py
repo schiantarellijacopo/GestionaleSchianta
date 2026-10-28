@@ -389,6 +389,46 @@ def _find_firma_pos(pdf_bytes: bytes) -> dict | None:
     return None
 
 
+def _applica_override_spunte(tabelle_map: dict, override: dict) -> None:
+    """Applica le spunte scelte in anteprima alle tabelle checklist.
+    override = {slug: [[bool,...], ...]} (una lista di bool per ogni voce)."""
+    if not override:
+        return
+    for slug, righe_sp in override.items():
+        tab = tabelle_map.get(slug)
+        if not tab or (tab.get("tipo") or "griglia") != "checklist":
+            continue
+        voci = tab.get("voci") or []
+        for i, voce in enumerate(voci):
+            if i < len(righe_sp) and isinstance(righe_sp[i], list):
+                voce["spunte"] = [bool(x) for x in righe_sp[i]]
+
+
+@router.post("/documenti/tabelle-compilabili")
+async def tabelle_compilabili(body: dict, user=Depends(current_user)):
+    """Ritorna le tabelle di tipo checklist referenziate nel corpo, con le voci e le
+    spunte attuali, così l'anteprima può mostrare i flag selezionabili."""
+    from routes.modelli import _TABELLA_RE, _load_tabelle_map
+    corpo = body.get("corpo") or ""
+    slugs = _TABELLA_RE.findall(corpo)
+    tabelle_map = await _load_tabelle_map(slugs) if slugs else {}
+    out = []
+    for slug in dict.fromkeys(slugs):  # preserva l'ordine di comparsa
+        tab = tabelle_map.get(slug)
+        if not tab or (tab.get("tipo") or "griglia") != "checklist":
+            continue
+        out.append({
+            "slug": slug,
+            "nome": tab.get("nome") or slug,
+            "colonne": tab.get("colonne") or [],
+            "prima_colonna": tab.get("prima_colonna") or "",
+            "voci": [{"testo": v.get("testo") or "", "spunte": list(v.get("spunte") or [])}
+                     for v in (tab.get("voci") or [])],
+        })
+    return out
+
+
+
 
 @router.get("/documenti/modelli-sezione")
 async def modelli_sezione(sezione: str, user=Depends(current_user)):
@@ -429,6 +469,8 @@ async def genera_documento(body: dict, user=Depends(current_user)):
     from routes.modelli import _TABELLA_RE, _load_tabelle_map, _load_image_from_url
     slugs = _TABELLA_RE.findall(corpo or "")
     tabelle_map = await _load_tabelle_map(slugs) if slugs else {}
+    # Override spunte flag per questa generazione (checklist compilate in anteprima)
+    _applica_override_spunte(tabelle_map, body.get("tabelle_override") or {})
     firma_op_bytes = await _load_image_from_url(ctx.get("_firma_operatore_url"))
     pdf = _build_pdf(titolo, corpo, ctx, logo, tabelle_map=tabelle_map, firma_op_bytes=firma_op_bytes)
 

@@ -219,3 +219,9 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - Decisione utente: fare le prove in sandbox (YOUSIGN_ENVIRONMENT=sandbox). In sandbox YouSign NON invia SMS/email reali: il firmatario completa via signing_link (auth simulata).
 - Procedura test: contraente con email = schiantarelli.jacopo@gmail.com (org YouSign obbligatoria) + cellulare → Genera Documento (modello con {firma}) → Firma → canali WhatsApp/Email → aprire signing_link.
 - Vincolo sandbox: email firmatario fuori org → YouSign 400 (atteso).
+
+## [2026-06] Flag tabelle compilabili in Genera Documento + firma "come compilato"
+- **Backend** `routes/documenti_genera.py`: nuovo `POST /documenti/tabelle-compilabili` (ritorna le tabelle checklist referenziate nel corpo con voci+spunte+colonne). `genera_documento` accetta `tabelle_override={slug:[[bool,...],...]}` e lo applica via `_applica_override_spunte` prima del render → il PDF riflette le spunte scelte. Vale per anteprima, genera/archivia e firma (stesso payload).
+- **Frontend** `GeneraDocumentoButton.jsx`: quando il corpo contiene `{tabella:slug}` checklist, mostra sotto il testo i flag selezionabili (checkbox per colonna, es. ✔ oppure Richiesta/Proposta/Confermata). Lo stato `spunte` viene inviato come `tabelle_override` in Anteprima/Genera/Firma.
+- **Verificato**: `/documenti/genera` con override rende esattamente le X scelte (conferma visiva PDF); l'allegato archiviato inviato a firma YouSign OTP contiene le stesse spunte.
+- **NON incluso** (richiede modulo dedicato, più grande): la pagina stile screenshot con toggle "Dichiarazione di coerenza", radio Autorizzo/Non autorizzo e "aree di tutela". Le tabelle Autorizzo/Non autorizzo oggi si rappresentano come checklist a 2 colonne (checkbox, non radio mutuamente esclusivi).
