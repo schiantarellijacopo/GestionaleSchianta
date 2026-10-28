@@ -6504,6 +6504,31 @@ function UsaModelloDialog({ modello, mode, onClose }) {
     const genEndpoint = modello.word_fedele
         ? `/librerie/modelli/${modello.id}/genera-fedele`
         : `/librerie/modelli/${modello.id}/genera`;
+    const [tabelle, setTabelle] = useState([]);
+    const [spunte, setSpunte] = useState({});
+    const spunteRef = useRef({});
+    const applySpunte = (n) => { spunteRef.current = n; setSpunte(n); };
+
+    // Tabelle checklist compilabili del modello (flag di spunta)
+    useEffect(() => {
+        if (mode === "wa" || modello.word_fedele) { setTabelle([]); applySpunte({}); return; }
+        api.get(`/librerie/modelli/${modello.id}/tabelle-compilabili`)
+            .then((r) => {
+                const tabs = r.data || [];
+                setTabelle(tabs);
+                const next = {};
+                for (const t of tabs) next[t.slug] = t.voci.map((v) => (t.colonne || []).map((_, ci) => !!(v.spunte || [])[ci]));
+                applySpunte(next);
+            })
+            .catch(() => setTabelle([]));
+    }, [modello.id, mode, modello.word_fedele]);
+
+    const toggleSpunta = (slug, vi, ci, val) => {
+        const cur = spunteRef.current;
+        const rows = (cur[slug] || []).map((r) => [...r]);
+        if (rows[vi]) rows[vi][ci] = val;
+        applySpunte({ ...cur, [slug]: rows });
+    };
 
     useEffect(() => {
         api.get("/auth/users")
@@ -6531,7 +6556,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
         setBusy(true);
         try {
             const r = await api.post(genEndpoint,
-                { cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null, formato },
+                { cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null, formato, tabelle_override: spunteRef.current },
                 { responseType: "blob" });
             const url = URL.createObjectURL(r.data);
             if (formato === "docx") {
@@ -6554,7 +6579,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
         try {
             const r = await api.post(genEndpoint, {
                 cliente_id: cliente?.id, polizza_id: polizzaId || null, operatore_id: operatoreId || null,
-                formato: "pdf", invia_firma: true, email_firmatario: email,
+                formato: "pdf", invia_firma: true, email_firmatario: email, tabelle_override: spunteRef.current,
             });
             toast.success("Documento inviato a firma digitale ✓");
             setFirmaLink(r.data?.signing_url || r.data?.url || null);
@@ -6580,7 +6605,7 @@ function UsaModelloDialog({ modello, mode, onClose }) {
 
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
-            <DialogContent className="max-w-lg" data-testid="usa-modello-dialog">
+            <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto" data-testid="usa-modello-dialog">
                 <DialogHeader>
                     <DialogTitle>{mode === "wa" ? "📲 Invia WhatsApp" : "📄 Genera documento"} — {modello.nome}</DialogTitle>
                 </DialogHeader>
@@ -6650,6 +6675,35 @@ function UsaModelloDialog({ modello, mode, onClose }) {
                             )}
                         </div>
                     )}
+                    {mode !== "wa" && tabelle.map((t) => (
+                        <div key={t.slug} className="border border-slate-200 rounded-md p-3" data-testid={`usa-modello-tabella-${t.slug}`}>
+                            <div className="text-xs font-semibold text-slate-700 mb-2">{t.nome}</div>
+                            {(t.colonne || []).length > 1 && (
+                                <div className="flex justify-end gap-2 mb-1">
+                                    {(t.colonne || []).map((c, ci) => (
+                                        <span key={ci} className="w-16 text-center text-[10px] uppercase tracking-wide text-slate-500">{c}</span>
+                                    ))}
+                                </div>
+                            )}
+                            <div className="space-y-1.5">
+                                {(t.voci || []).map((v, vi) => (
+                                    <div key={vi} className="flex items-start gap-2 text-xs">
+                                        <div className="flex-1 text-slate-700 leading-snug">{v.testo}</div>
+                                        <div className="flex gap-2 shrink-0">
+                                            {(t.colonne || []).map((c, ci) => (
+                                                <div key={ci} className="w-16 flex justify-center pt-0.5">
+                                                    <input type="checkbox"
+                                                        checked={!!(spunte[t.slug]?.[vi]?.[ci])}
+                                                        onChange={(e) => toggleSpunta(t.slug, vi, ci, e.target.checked)}
+                                                        data-testid={`usa-modello-spunta-${t.slug}-${vi}-${ci}`} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    ))}
                     <div className="flex justify-end gap-2 pt-2">
                         <Button variant="outline" onClick={onClose}>Annulla</Button>
                         {mode === "wa" ? (

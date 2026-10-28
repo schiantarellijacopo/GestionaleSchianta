@@ -225,3 +225,11 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - **Frontend** `GeneraDocumentoButton.jsx`: quando il corpo contiene `{tabella:slug}` checklist, mostra sotto il testo i flag selezionabili (checkbox per colonna, es. ✔ oppure Richiesta/Proposta/Confermata). Lo stato `spunte` viene inviato come `tabelle_override` in Anteprima/Genera/Firma.
 - **Verificato**: `/documenti/genera` con override rende esattamente le X scelte (conferma visiva PDF); l'allegato archiviato inviato a firma YouSign OTP contiene le stesse spunte.
 - **NON incluso** (richiede modulo dedicato, più grande): la pagina stile screenshot con toggle "Dichiarazione di coerenza", radio Autorizzo/Non autorizzo e "aree di tutela". Le tabelle Autorizzo/Non autorizzo oggi si rappresentano come checklist a 2 colonne (checkbox, non radio mutuamente esclusivi).
+
+## [2026-06] Flag tabelle estesi a TUTTI i generatori documenti
+- Richiesta: la compilazione dei flag deve valere per tutti i documenti con tabelle compilabili.
+- **Generatore 1** `/documenti/genera` (GeneraDocumentoButton — contraente/polizza/sinistro): già con flag (componente condiviso, quindi tutte e 3 le sezioni).
+- **Generatore 2** `/librerie/modelli/{mid}/genera` (modelli.py, usato da Librerie.jsx → UsaModelloDialog): ESTESO ora. Aggiunto `tabelle_override` a `GeneraDocBody` + helper `_applica_override_spunte` + `_tabelle_compilabili_payload` + nuovo endpoint `GET /librerie/modelli/{mid}/tabelle-compilabili` (estrae slug da corpo+sezioni). Override applicato prima del render (vale anche per invio a firma).
+- **Frontend** `Librerie.jsx UsaModelloDialog`: fetch tabelle checklist del modello all'apertura, UI flag (checkbox per colonna), `tabelle_override` inviato in genera() e inviaFirma(). Dialog reso scrollabile.
+- **Verificato**: tabelle-compilabili ritorna le 2 checklist; genera con override rende esattamente le X scelte (2/2). Modello di prova rimosso.
+- NOTA: `genera-fedele` (word_fedele/overlay) non usa `{tabella}`, quindi nessun flag lì (atteso).

@@ -1187,6 +1187,52 @@ async def _load_tabelle_map(slugs) -> dict:
     return out
 
 
+def _applica_override_spunte(tabelle_map: dict, override: dict) -> None:
+    """Applica le spunte scelte in anteprima alle tabelle checklist.
+    override = {slug: [[bool,...], ...]} (una lista di bool per ogni voce)."""
+    if not override:
+        return
+    for slug, righe_sp in override.items():
+        tab = tabelle_map.get(slug)
+        if not tab or (tab.get("tipo") or "griglia") != "checklist":
+            continue
+        for i, voce in enumerate(tab.get("voci") or []):
+            if i < len(righe_sp) and isinstance(righe_sp[i], list):
+                voce["spunte"] = [bool(x) for x in righe_sp[i]]
+
+
+def _tabelle_compilabili_payload(tabelle_map: dict, slugs) -> list:
+    """Costruisce l'elenco delle tabelle checklist compilabili (voci+spunte+colonne)."""
+    out = []
+    for slug in dict.fromkeys(slugs):
+        tab = tabelle_map.get(slug)
+        if not tab or (tab.get("tipo") or "griglia") != "checklist":
+            continue
+        out.append({
+            "slug": slug,
+            "nome": tab.get("nome") or slug,
+            "colonne": tab.get("colonne") or [],
+            "prima_colonna": tab.get("prima_colonna") or "",
+            "voci": [{"testo": v.get("testo") or "", "spunte": list(v.get("spunte") or [])}
+                     for v in (tab.get("voci") or [])],
+        })
+    return out
+
+
+@router.get("/librerie/modelli/{mid}/tabelle-compilabili")
+async def tabelle_compilabili_modello(mid: str,
+                                      user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Tabelle checklist referenziate nel modello (corpo + sezioni), con le spunte attuali."""
+    m = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Modello non trovato")
+    testo = (m.get("corpo") or "") + "\n" + "\n".join(
+        str(s.get("contenuto") or "") for s in (m.get("sezioni") or []) if s.get("attiva", True))
+    slugs = _TABELLA_RE.findall(testo)
+    tabelle_map = await _load_tabelle_map(slugs) if slugs else {}
+    return _tabelle_compilabili_payload(tabelle_map, slugs)
+
+
 def _isolate_tabelle(text: str) -> str:
     """Mette ogni segnaposto tabella su un paragrafo isolato."""
     return _TABELLA_RE.sub(lambda m: "\n\n" + m.group(0) + "\n\n", text or "")
@@ -1624,6 +1670,7 @@ class GeneraDocBody(BaseModel):
     invia_firma: bool = False               # invia a firma digitale Yousign
     email_firmatario: Optional[str] = None  # email del firmatario (override cliente)
     auth_mode: Optional[str] = None         # otp_email | otp_sms | no_otp
+    tabelle_override: dict = {}             # {slug: [[bool,...], ...]} spunte compilate
 
 
 class PreviewBody(BaseModel):
@@ -1740,6 +1787,7 @@ async def genera_documento(mid: str, body: GeneraDocBody,
         sl for s in sezioni for sl in _TABELLA_RE.findall(s["contenuto"])
     ]
     tabelle_map = await _load_tabelle_map(_tab_slugs)
+    _applica_override_spunte(tabelle_map, body.tabelle_override or {})
     corpo = _isolate_tabelle(corpo)
     for s in sezioni:
         s["contenuto"] = _isolate_tabelle(s["contenuto"])
