@@ -7,6 +7,14 @@ Multi-tenancy: scoping automatico via `agenzia_tenant_id` (ContextVar in `databa
 ## Credenziali test
 Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 
+## YouSign — Workspace per agenzia (Super Admin) — 28/10/2026
+- Campo **Workspace ID** in Super Admin → Modifica Agenzia (sezione "Firma digitale (YouSign)", testid `ea-yousign-workspace`).
+- Tenant-scoped: salvato in `azienda_config.yousign_workspace_id` per ogni tenant (non nel doc `tenants`).
+- `super_admin.py`: `AgenziaUpdateBody.yousign_workspace_id`; PATCH `/agenzie/{tid}` fa upsert in `azienda_config` per `agenzia_tenant_id`; `list_agenzie`/`get_agenzia` restituiscono `yousign_workspace_id`.
+- Flussi firma (`firma_modelli.py`, `esignature_it.py`) leggono il workspace del tenant corrente via `_yousign_workspace_id(db)`.
+- Verificato: set/get/clear per tenant via API OK; campo visibile nel dialog UI.
+
+
 ## Modulo Carichi Mensili
 - Backend: `/app/backend/routes/carichi_mensili.py` (`GET /api/carichi-mensili`).
 - Frontend: `/app/frontend/src/pages/CarichiMensili.jsx`.

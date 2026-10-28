@@ -592,6 +592,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
         prezzo_mensile_eur: agenzia.prezzo_mensile_eur ?? 99,
         max_utenti: agenzia.max_utenti ?? 5,
         note: agenzia.note || "",
+        yousign_workspace_id: agenzia.yousign_workspace_id || "",
     });
     const [saving, setSaving] = useState(false);
 
@@ -604,6 +605,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
             const body = { ...f };
             body.prezzo_mensile_eur = parseFloat(body.prezzo_mensile_eur) || 0;
             body.max_utenti = parseInt(body.max_utenti) || 1;
+            body.yousign_workspace_id = (f.yousign_workspace_id || "").trim();
             await api.patch(`/super-admin/agenzie/${agenzia.id}`, body);
             toast.success("Agenzia aggiornata");
             onSaved();
@@ -670,6 +672,18 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                             data-testid="ea-note"
                             rows={2}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md" />
+                    </div>
+
+                    <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-4">Firma digitale (YouSign)</div>
+                    <div>
+                        <label className="text-xs font-semibold text-slate-600 block mb-1">Workspace ID</label>
+                        <input value={f.yousign_workspace_id} onChange={(e) => set("yousign_workspace_id", e.target.value)}
+                            data-testid="ea-yousign-workspace"
+                            placeholder="es. d748b4bc-5cc8-4a32-805f-9661ae5f51f0"
+                            className="w-full px-3 py-1.5 text-sm font-mono border border-slate-300 rounded-md" />
+                        <p className="text-[11px] text-slate-500 mt-1">
+                            Ogni agenzia ha il proprio workspace: le richieste di firma di questo tenant verranno salvate qui. Lascia vuoto per usare il workspace predefinito dell'account YouSign.
+                        </p>
                     </div>
 
                     <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-slate-200">

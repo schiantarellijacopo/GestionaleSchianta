@@ -556,6 +556,7 @@ class AgenziaUpdateBody(BaseModel):
     prezzo_mensile_eur: Optional[float] = None
     max_utenti: Optional[int] = None
     note: Optional[str] = None
+    yousign_workspace_id: Optional[str] = None
 
 
 async def _tenant_stats(tid: str) -> dict:
@@ -572,9 +573,15 @@ async def _tenant_stats(tid: str) -> dict:
 async def list_agenzie(user=Depends(require_user("admin"))) -> list[dict]:
     _ensure_super_admin(user)
     items = await raw_db.tenants.find({}, {"_id": 0}).sort("ragione_sociale", 1).to_list(500)
+    # Mappa workspace Yousign per tenant (vive in azienda_config, non in tenants)
+    ws_map = {}
+    async for cfg in raw_db.azienda_config.find(
+            {}, {"_id": 0, "agenzia_tenant_id": 1, "yousign_workspace_id": 1}):
+        ws_map[cfg.get("agenzia_tenant_id")] = cfg.get("yousign_workspace_id") or ""
     # Per ogni tenant, aggiungi il conteggio utenti/clienti/polizze (SOLO cifre)
     for t in items:
         t["stats"] = await _tenant_stats(t["id"])
+        t["yousign_workspace_id"] = ws_map.get(t["id"], "")
     return items
 
 
@@ -585,6 +592,9 @@ async def get_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
     if not t:
         raise HTTPException(status_code=404, detail="Tenant non trovato")
     t["stats"] = await _tenant_stats(tid)
+    cfg = await raw_db.azienda_config.find_one(
+        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1}) or {}
+    t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
     return t
 
 
@@ -734,15 +744,28 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
                          user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
+    # Il workspace Yousign è tenant-scoped e vive in azienda_config, non nel tenant
+    workspace_id = payload.pop("yousign_workspace_id", None)
+    if workspace_id is not None:
+        await raw_db.azienda_config.update_one(
+            {"agenzia_tenant_id": tid},
+            {"$set": {"yousign_workspace_id": workspace_id.strip(),
+                      "agenzia_tenant_id": tid, "updated_at": _now_iso()}},
+            upsert=True,
+        )
     payload["updated_at"] = _now_iso()
     res = await raw_db.tenants.update_one({"id": tid}, {"$set": payload})
     if not res.matched_count:
         raise HTTPException(status_code=404, detail="Tenant non trovato")
     await log_action(user=user, action_type="AGENCY_UPDATED",
                      target_agency_id=tid, target_agency_name=await get_agency_name(tid),
-                     details=f"Campi aggiornati: {', '.join(payload.keys())}",
+                     details=f"Campi aggiornati: {', '.join(list(payload.keys()) + (['yousign_workspace_id'] if workspace_id is not None else []))}",
                      request=request)
-    return await raw_db.tenants.find_one({"id": tid}, {"_id": 0})
+    t = await raw_db.tenants.find_one({"id": tid}, {"_id": 0})
+    cfg = await raw_db.azienda_config.find_one(
+        {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1}) or {}
+    t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
+    return t
 
 
 @router.post("/agenzie/{tid}/attiva")
