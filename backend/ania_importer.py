@@ -534,10 +534,12 @@ async def _processa_anagrafiche(db, files_data: Dict[str, str], log: ImportLog,
             existing = await db.anagrafiche.find_one({"$or": query})
 
             if existing:
-                # Import OMNIA: NON sovrascrivere contatti e collaboratore già presenti
-                # (email, PEC, telefono, cellulare, collaboratore). Vengono inseriti solo se mancanti.
+                # Import OMNIA: NON sovrascrivere i dati già presenti nel gestionale.
+                # - ragione_sociale (nome/cognome o denominazione): MAI sovrascritta.
+                # - contatti e collaboratore: inseriti solo se mancanti.
+                # Se l'anagrafica non esiste viene creata (ramo else).
                 upd = dict(data)
-                for _k in ("email", "pec", "telefono", "cellulare", "telefono2", "collaboratore_id"):
+                for _k in ("ragione_sociale", "email", "pec", "telefono", "cellulare", "telefono2", "collaboratore_id"):
                     _ev = existing.get(_k)
                     if (_ev.strip() if isinstance(_ev, str) else _ev):
                         upd.pop(_k, None)

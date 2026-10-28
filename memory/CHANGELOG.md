@@ -1,6 +1,12 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Import OMNIA: anagrafica esistente, nome mai sovrascritto
+- **Richiesta**: in import OMNIA non sovrascrivere mai nome/cognome o denominazione sociale (`ragione_sociale`) di un'anagrafica già presente nel gestionale; se l'anagrafica non esiste, crearla.
+- **Fix** (`ania_importer.py` → `_processa_anagrafiche`, riga ~539): aggiunto `ragione_sociale` ai campi preservati per le anagrafiche esistenti (insieme a email/pec/telefono/cellulare/collaboratore). Le anagrafiche nuove vengono create normalmente (ramo else). Nessun altro update anagrafiche tocca i nomi (riga 956 aggiorna solo `collaboratore_id` se mancante).
+- **Verifica**: test logico — esistente `ragione_sociale='MARIO ROSSI'` + import `'ROSSI SPA'` → nome preservato; campi vuoti (telefono/indirizzo) comunque valorizzati. Modulo importa senza errori.
+
+
 ## 2026-06 — Import Carichi: tutto in "in attesa" + dashboard esclude i non validati
 - **Richiesta utente**: importando ~500 righe comparivano solo 3 "in attesa". Timore che l'import sovrascrivesse i Titoli ufficiali senza validazione.
 - **Diagnosi**: nessuna sovrascrittura dei titoli ufficiali (impossibile nel codice). Le righe venivano SALTATE come duplicati perché esisteva già un titolo "validato" con stessa polizza+decorrenza. Il tenant ha ~56.199 titoli "validato", di cui ~56.085 da una migrazione iniziale (11/09/2026) marcati validati direttamente (non via validazione manuale).
