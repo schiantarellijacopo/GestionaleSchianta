@@ -60,7 +60,7 @@ def _ensure_super_admin(user):
 # senza mai vedere token/chiavi.
 # ---------------------------------------------------------------------------
 _CHIAVI_AZIENDA = [
-    "firma_provider", "firma_environment", "firma_base_url",
+    "firma_environment", "firma_base_url",
     "firma_api_token", "firma_webhook_secret",
     "yousign_environment", "yousign_sandbox_api_key", "yousign_production_api_key",
     "twilio_account_sid", "twilio_auth_token", "twilio_sms_from", "twilio_whatsapp_from",
@@ -68,6 +68,15 @@ _CHIAVI_AZIENDA = [
     "ai_studio_api_key", "openai_api_key",
     "openapi_it_bearer_token",
 ]
+
+
+def _norm_firma_provider(v) -> str:
+    """Normalizza il provider di firma per-agenzia: solo 'yousign' o 'openapi'
+    (valori legacy come 'namirial' ricadono su yousign)."""
+    v = (v or "yousign").strip().lower()
+    return v if v in ("yousign", "openapi") else "yousign"
+
+
 
 # Chiavi AI del vault → variabile d'ambiente sincronizzata nel processo.
 # La chiave del pannello ha SEMPRE priorità sulla chiave gestita Emergent.
@@ -584,12 +593,12 @@ async def list_agenzie(user=Depends(require_user("admin"))) -> list[dict]:
     async for cfg in raw_db.azienda_config.find(
             {}, {"_id": 0, "agenzia_tenant_id": 1, "yousign_workspace_id": 1, "firma_provider": 1}):
         ws_map[cfg.get("agenzia_tenant_id")] = cfg.get("yousign_workspace_id") or ""
-        prov_map[cfg.get("agenzia_tenant_id")] = cfg.get("firma_provider") or "yousign"
+        prov_map[cfg.get("agenzia_tenant_id")] = _norm_firma_provider(cfg.get("firma_provider"))
     # Per ogni tenant, aggiungi il conteggio utenti/clienti/polizze (SOLO cifre)
     for t in items:
         t["stats"] = await _tenant_stats(t["id"])
         t["yousign_workspace_id"] = ws_map.get(t["id"], "")
-        t["firma_provider"] = prov_map.get(t["id"], "yousign")
+        t["firma_provider"] = _norm_firma_provider(prov_map.get(t["id"]))
     return items
 
 
@@ -603,7 +612,7 @@ async def get_agenzia(tid: str, user=Depends(require_user("admin"))) -> dict:
     cfg = await raw_db.azienda_config.find_one(
         {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1, "firma_provider": 1}) or {}
     t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
-    t["firma_provider"] = cfg.get("firma_provider") or "yousign"
+    t["firma_provider"] = _norm_firma_provider(cfg.get("firma_provider"))
     return t
 
 
@@ -752,6 +761,9 @@ async def create_agenzia(body: AgenziaNuovaBody, request: Request,
 async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
                          user=Depends(require_user("admin"))) -> dict:
     _ensure_super_admin(user)
+    # Verifica esistenza tenant PRIMA di qualsiasi upsert (evita config orfane)
+    if not await raw_db.tenants.find_one({"id": tid}, {"_id": 1}):
+        raise HTTPException(status_code=404, detail="Tenant non trovato")
     payload = {k: v for k, v in body.model_dump(exclude_unset=True).items() if v is not None}
     # Il workspace Yousign è tenant-scoped e vive in azienda_config, non nel tenant
     workspace_id = payload.pop("yousign_workspace_id", None)
@@ -770,9 +782,7 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
             {"agenzia_tenant_id": tid}, {"$set": cfg_set}, upsert=True,
         )
     payload["updated_at"] = _now_iso()
-    res = await raw_db.tenants.update_one({"id": tid}, {"$set": payload})
-    if not res.matched_count:
-        raise HTTPException(status_code=404, detail="Tenant non trovato")
+    await raw_db.tenants.update_one({"id": tid}, {"$set": payload})
     await log_action(user=user, action_type="AGENCY_UPDATED",
                      target_agency_id=tid, target_agency_name=await get_agency_name(tid),
                      details=f"Campi aggiornati: {', '.join(list(payload.keys()) + (['yousign_workspace_id'] if workspace_id is not None else []))}",
@@ -781,7 +791,7 @@ async def update_agenzia(tid: str, body: AgenziaUpdateBody, request: Request,
     cfg = await raw_db.azienda_config.find_one(
         {"agenzia_tenant_id": tid}, {"_id": 0, "yousign_workspace_id": 1, "firma_provider": 1}) or {}
     t["yousign_workspace_id"] = cfg.get("yousign_workspace_id") or ""
-    t["firma_provider"] = cfg.get("firma_provider") or "yousign"
+    t["firma_provider"] = _norm_firma_provider(cfg.get("firma_provider"))
     return t
 
 

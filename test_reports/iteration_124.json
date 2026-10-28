@@ -1,0 +1,45 @@
+{
+  "summary": "Tested the signed-document lifecycle features on backend and frontend. IMPORTANT: the sandbox tenant c942fe2a-8919-48ea-9dc6-a2bf0e51b6ed and the user test@sandbox.it do NOT exist in this preview DB (login returns 'Credenziali non valide' and GET /super-admin/agenzie/c942... returns 404). I used the TEST tenant 3b056fe9 (TEST_RESET_TENANT) for the firma_provider writes and admin@assicura.it with TEST_-prefixed models (all cleaned up) for the templates. Backend: 14 of 16 pytest checks pass. firma_provider is listed, read, PATCHed to openapi/yousign and persists; it is case-normalised; an invalid value returns 400; non-superadmin gets 403; the workspace id is kept. document_target_card persists on create, list, get and PUT, and can be cleared to null. The public YouSign webhook returns 200 + ignored for an unknown id, an empty body, the alt key signature_request_id and non-dict data; an array body returns 422. Frontend: the Super Admin 'Provider di firma' select (ea-firma-provider) has the options YouSign and eSignature OpenAPI, saving shows the 'Agenzia aggiornata' toast, and the value persists after reopening. In Librerie the 'Card Documentale di Riferimento' dropdown (modello-target-card) renders with the grouped options. Create (201, quietanza), edit preload, change to privacy_firmata (PUT 200) and reset to 'Nessuna' (null) all work with no JS errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/librerie/modelli (and PUT)", "issue": "tipo='documento' (wording from the review request) returns HTTP 500. ModelloBody.tipo is a plain str, but TemplateModello.tipo is a Literal (email|whatsapp|sms|word|pdf_*), so the pydantic ValidationError is raised inside the handler. It should be a 422/400: make ModelloBody.tipo use ModelloTipo, or catch ValidationError."},
+      {"endpoint": "PATCH /api/super-admin/agenzie/{tid}", "issue": "The azienda_config upsert (firma_provider / yousign_workspace_id) runs BEFORE the tenant-existence check. A PATCH on an unknown tid returns 404 but still creates an orphan azienda_config doc (reproduced with a fake id). An orphan already exists for c942fe2a-... Move the tenants lookup/404 check before the upsert."},
+      {"endpoint": "GET /api/super-admin/agenzie", "issue": "Legacy firma_provider='namirial' is stored for tenant-principale-schiantarelli and c5ae2d0e (Importazione Axicura), and the API returns it as is. _firma_provider() treats it as yousign by falling through to the else branch. Normalise it (map unknown values to 'yousign') in the list/get responses or with a migration."},
+      {"endpoint": "PUT /api/super-admin/chiavi-api", "issue": "firma_provider is still in _CHIAVI_AZIENDA, and this endpoint writes to raw_db.azienda_config.find_one({}), which is an ARBITRARY tenant's config. Saving the global API keys can therefore overwrite one agency's per-tenant firma_provider. Remove firma_provider from _CHIAVI_AZIENDA now that it is per-agency."},
+      {"endpoint": "POST /api/esignature/webhook/yousign", "issue": "Internal exceptions return 200 {ok:false}, so YouSign will not retry. This is acceptable because the 2-minute poller is the backup, but it is worth noting."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "SuperAdminPanel EditAgenzia", "issue": "For a tenant whose stored firma_provider is 'namirial' (Schiantarelli), the select shows 'YouSign'. Saving any other field then silently overwrites the provider to yousign.", "selector": "[data-testid='ea-firma-provider']", "priority": "LOW"},
+      {"component": "Librerie ModelloFormDialog", "issue": "The dialog title reads 'Modifica modello' even when creating a new model (modelli-new).", "selector": "[data-testid='modelli-new']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Super Admin > Modifica Agenzia", "issues": ["Provider di firma uses a native <select> (like Piano/Stato) rather than the shadcn Select used elsewhere. This is consistent within the modal and only cosmetic."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter124_firma_provider_target_card.py", "/app/test_reports/pytest/pytest_iter124.xml"],
+  "action_items": [
+    "Recreate or seed the sandbox agency (tenant c942fe2a-..., test@sandbox.it / Test1234!) in this environment, or update /app/memory/test_credentials.md. It is missing from the preview DB.",
+    "Return 422 instead of 500 for an invalid tipo in POST/PUT /api/librerie/modelli (use ModelloTipo in ModelloBody).",
+    "In update_agenzia, check that the tenant exists before upserting azienda_config, and delete the orphan azienda_config for c942fe2a-... if the tenant really does not exist.",
+    "Remove firma_provider from _CHIAVI_AZIENDA (global chiavi-api PUT writes to an arbitrary tenant's config).",
+    "Normalise legacy 'namirial' firma_provider values to yousign/openapi."
+  ],
+  "critical_code_review_comments": [
+    "super_admin.update_agenzia: the upsert happens before the 404 check, which creates orphan config docs.",
+    "super_admin._CHIAVI_AZIENDA still contains firma_provider, which conflicts with the new per-agency setting (global find_one({}) on a tenant-scoped collection).",
+    "modelli.ModelloBody.tipo is a str while TemplateModello.tipo is a Literal, so a bad tipo produces a 500.",
+    "documenti_genera.py reads document_target_card correctly (line ~500), but the end-to-end archive of the signed PDF into the card could not be exercised without real provider signing."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter124_firma_provider_target_card.py"],
+  "success_rate": {"backend": "88% (14/16; the 2 failures are the minor bugs above)", "frontend": "100% of requested flows"},
+  "test_credentials": "superadmin@assicura.it / superadmin123! and admin@assicura.it / Admin123! work. test@sandbox.it / Test1234! is INVALID here (the user and tenant c942fe2a do not exist).",
+  "seed_data_creation": "None persisted. TEST_ models were deleted. TEST tenant 3b056fe9 firma_provider was restored to yousign.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The sandbox tenant is missing in this preview DB; use TEST tenant 3b056fe9-9766-4c70-8e13-202eaf964b6f for super-admin writes and admin@assicura.it with TEST_ names for templates. UI selectors: sa-edit-{tid} -> ea-firma-provider (native select), and the save button is the form's submit button. In Librerie: lib-tab-modelli -> modelli-tab-pdf -> modelli-new -> modello-nome, modello-target-card (shadcn Select, options by role=option with emoji labels), modello-save. Edit a model with modello-card-{id}. The webhook is POST /api/esignature/webhook/yousign with no auth.",
+  "rca of the issue": "500 on tipo='documento': ModelloBody(tipo:str) passes validation, then TemplateModello(tipo=Literal) raises a pydantic ValidationError inside the handler, which surfaces as an unhandled 500. Orphan config: update_agenzia calls azienda_config.update_one(upsert=True) before tenants.update_one matched_count check."
+}

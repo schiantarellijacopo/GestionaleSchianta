@@ -1,6 +1,26 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Ciclo di vita documento firmato + Provider di firma per agenzia
+### Modelli: "Card Documentale di Riferimento"
+- `TemplateModello.document_target_card` (db_models.py) + `ModelloBody.document_target_card` (routes/modelli.py).
+- Librerie.jsx: dropdown "Card Documentale di Riferimento" (data-testid `modello-target-card`) raggruppato per Anagrafica/Polizza/Sinistro (costante `CARD_TARGET_GROUPS`). Salvato sul modello.
+- documenti_genera.py: la categoria dell'allegato generato eredita `document_target_card` del modello (fallback su categoria esplicita → `documento_generato`). Così il PDF firmato finisce nella card giusta.
+
+### Webhook YouSign + archiviazione automatica
+- `POST /api/esignature/webhook/yousign` (pubblico, SENZA verifica firma, scelta utente). All'evento `signature_request.done`/`signer.done` conferma lo stato via YouSign, scarica il PDF firmato e chiama `_finalizza`. Poller ogni 2 min resta come backup.
+- `_finalizza` ora propaga `agenzia_tenant_id` (dal rec o dall'allegato originale) all'allegato firmato: fondamentale perché poller/webhook girano SENZA contesto utente.
+- DocumentiSezioneSplit.jsx `FirmaBadge`: badge "🟢 Firmato con YouSign/eSignature OpenAPI · data/ora" (data-testid `firma-done-badge-*`), mappa `firmeBySigned`.
+
+### Provider di firma per agenzia (Super Admin)
+- `firma_provider` ('yousign' | 'openapi') per-tenant in `azienda_config`. Esposto in GET/PATCH `/super-admin/agenzie` e `/super-admin/agenzie/{tid}`; normalizzato (`_norm_firma_provider`, valori legacy tipo 'namirial' → yousign); rimosso da `_CHIAVI_AZIENDA` globale.
+- SuperAdminPanel.jsx EditAgenzia: selettore "Provider di firma" (data-testid `ea-firma-provider`).
+- esignature_it.py `invia_per_firma`: dispatch per provider (`_firma_provider()`); OpenAPI → `esvc.create_signature` (provider rec `openapi_esignature`), altrimenti YouSign.
+- Fix: in `update_agenzia` il check 404 tenant avviene PRIMA dell'upsert azienda_config (niente config orfane).
+- Testato (iteration_124 + curl): persistenza firma_provider/document_target_card, webhook robusto, selettori UI. NON testabile e2e il signing reale (sandbox YouSign limita i destinatari; OpenAPI richiede credenziali live).
+
+
+
 ## 2026-06 — Richiesta documento PER CARD + Notifica "Nuovo Accesso"
 ### Caricamento documenti direttamente nella card corretta (ogni entità)
 - `backend/routes/upload_link.py` generalizzato: il link pubblico ora è legato a
