@@ -170,7 +170,7 @@ export const GeneraDocumentoButton = ({ sezione, entitaId, firmatarioId, onSaved
                     <div className="space-y-3 text-sm">
                         <div className="text-xs text-slate-500 bg-slate-50 rounded p-2">
                             Documento: <b>{firmaAlleg?.nome_file}</b><br />
-                            Firma elettronica avanzata OpenAPI · il cliente riceverà un codice OTP via SMS per completare la firma.
+                            Firma elettronica avanzata YouSign · il cliente riceverà un codice OTP via email per completare la firma.
                         </div>
                         <div>
                             <Label className="text-xs uppercase tracking-wide text-slate-600 mb-1.5 block">Invia il link di firma via</Label>

@@ -75,6 +75,129 @@ def _email_valida(e: str) -> bool:
     return "@" in e and "." in e.split("@")[-1]
 
 
+# ─────────────────────────── Provider YouSign (v3) ───────────────────────────
+import httpx  # noqa: E402
+
+_FIRMA_ANCHOR = "Firma del Contraente"
+
+
+def _ys_cfg() -> tuple[str, str, str]:
+    from routes.firma_modelli import _yousign_cfg
+    cfg = _yousign_cfg()
+    return cfg["api_key"], cfg["base"], cfg["env"]
+
+
+def _firma_fields_from_pdf(pdf_bytes: bytes) -> list[dict]:
+    """Posizioni del campo firma (coordinate YouSign: origine in alto a sinistra)
+    ricavate dall'àncora 'Firma del Contraente' nel PDF generato. Se assente,
+    posiziona il campo in basso a destra dell'ultima pagina."""
+    try:
+        import pymupdf as fitz
+    except Exception:  # pragma: no cover
+        import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        fields = []
+        for page in doc:
+            for r in page.search_for(_FIRMA_ANCHOR):
+                fields.append({"page": page.number + 1, "x": round(r.x1 + 10),
+                               "y": round(max(0, r.y0 - 6)), "width": 130, "height": 40})
+        if not fields:
+            last = doc[len(doc) - 1]
+            fields.append({"page": len(doc), "x": round(last.rect.width - 190),
+                           "y": round(last.rect.height - 110), "width": 130, "height": 40})
+        return fields
+    finally:
+        doc.close()
+
+
+async def _yousign_send(pdf_bytes: bytes, signer: dict, display: str,
+                        auth_mode: str = "otp_email") -> dict:
+    """Crea e attiva una richiesta di firma YouSign per un singolo firmatario.
+    Ritorna {ok, request_id, document_id, signer_id, status, signing_url}."""
+    api_key, base, env = _ys_cfg()
+    if not api_key:
+        return {"ok": False, "error": f"YouSign non configurato ({env})"}
+    email = (signer.get("email") or "").strip()
+    if not email:
+        return {"ok": False, "error": "Email firmatario mancante"}
+    first = signer.get("name") or "Cliente"
+    last = signer.get("surname") or signer.get("ragione_sociale") or "Cliente"
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    fields = _firma_fields_from_pdf(pdf_bytes)
+    try:
+        async with httpx.AsyncClient(base_url=base, headers=headers, timeout=40) as c:
+            r = await c.post("/signature_requests", json={"name": display, "delivery_mode": "none"})
+            if r.is_error:
+                return {"ok": False, "error": r.text[:300]}
+            rid = r.json()["id"]
+            up = await c.post(f"/signature_requests/{rid}/documents",
+                              files={"file": (display or "doc.pdf", pdf_bytes, "application/pdf")},
+                              data={"nature": "signable_document"})
+            if up.is_error:
+                return {"ok": False, "error": up.text[:300]}
+            did = up.json()["id"]
+            yfields = [{"type": "signature", "document_id": did, "page": f["page"],
+                        "x": f["x"], "y": f["y"],
+                        "width": max(85, f["width"]), "height": max(37, f["height"])}
+                       for f in fields]
+            signer_body = {
+                "info": {"first_name": first, "last_name": last, "email": email, "locale": "it"},
+                "signature_level": "electronic_signature",
+                "signature_authentication_mode": auth_mode,
+                "fields": yfields,
+            }
+            sg = await c.post(f"/signature_requests/{rid}/signers", json=signer_body)
+            if sg.is_error:
+                return {"ok": False, "error": sg.text[:400]}
+            sid = sg.json()["id"]
+            act = await c.post(f"/signature_requests/{rid}/activate", json={})
+            if act.is_error:
+                return {"ok": False, "error": act.text[:400]}
+            link = None
+            det = await c.get(f"/signature_requests/{rid}/signers/{sid}")
+            if det.status_code == 200:
+                link = det.json().get("signature_link")
+        return {"ok": True, "request_id": rid, "document_id": did, "signer_id": sid,
+                "status": act.json().get("status"), "signing_url": link}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:200]}
+
+
+async def _yousign_status(request_id: str) -> str:
+    api_key, base, _ = _ys_cfg()
+    if not (api_key and request_id):
+        return ""
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
+    try:
+        async with httpx.AsyncClient(base_url=base, headers=headers, timeout=20) as c:
+            r = await c.get(f"/signature_requests/{request_id}")
+            if r.status_code == 200:
+                return (r.json().get("status") or "")
+    except Exception as e:
+        logger.warning("YouSign status err: %s", e)
+    return ""
+
+
+async def _yousign_download(request_id: str) -> Optional[bytes]:
+    api_key, base, _ = _ys_cfg()
+    if not (api_key and request_id):
+        return None
+    headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/pdf"}
+    try:
+        async with httpx.AsyncClient(base_url=base, headers=headers, timeout=40) as c:
+            r = await c.get(f"/signature_requests/{request_id}/documents/download",
+                            params={"version": "completed"})
+            if r.status_code == 200 and r.content:
+                return r.content
+            logger.warning("YouSign download HTTP %s: %s", r.status_code, r.text[:200])
+    except Exception as e:
+        logger.warning("YouSign download err: %s", e)
+    return None
+
+
+
+
 @router.get("/firmatario")
 async def firmatario_check(entita_tipo: str, entita_id: str, user=Depends(current_user)) -> dict:
     """Restituisce i contatti del firmatario (contraente) e la validità di
@@ -103,8 +226,9 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     Body: {allegato_id, message?, invia_whatsapp?=true, invia_email?=true,
            firmatario?:{name,surname,email,mobile}}
     """
-    if not esvc.has_credentials():
-        raise HTTPException(400, "Credenziali OpenAPI eSignature non configurate")
+    api_key, _base, _env = _ys_cfg()
+    if not api_key:
+        raise HTTPException(400, f"YouSign non configurato ({_env})")
     allegato_id = body.get("allegato_id")
     if not allegato_id:
         raise HTTPException(400, "allegato_id obbligatorio")
@@ -129,20 +253,13 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         "email": signer.get("email") or resolved.get("email") or "",
         "mobile": signer.get("mobile") or resolved.get("mobile") or "",
     }
-    if not signer["mobile"]:
-        raise HTTPException(400, "Cellulare del firmatario mancante (necessario per OTP SMS)")
     if not signer["email"]:
-        raise HTTPException(400, "Email del firmatario mancante (obbligatoria per la firma OpenAPI)")
+        raise HTTPException(400, "Email del firmatario mancante (obbligatoria per la firma YouSign)")
 
     display = al.get("nome_file") or "documento.pdf"
-    fpos = al.get("firma_pos") or {}
-    sig_kwargs = {}
-    if fpos.get("page") and fpos.get("x") is not None and fpos.get("y") is not None:
-        sig_kwargs = {"page": int(fpos["page"]), "x": str(fpos["x"]), "y": str(fpos["y"])}
-    res = await esvc.create_signature(
-        pdf_bytes=pdf_bytes, signer=signer,
-        message=body.get("message") or f"Firma il documento: {display}",
-        **sig_kwargs,
+    res = await _yousign_send(
+        pdf_bytes=pdf_bytes, signer=signer, display=display,
+        auth_mode=body.get("auth_mode") or "otp_email",
     )
     if not res.get("ok"):
         raise HTTPException(400, res.get("error") or "Errore creazione firma")
@@ -150,9 +267,11 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
     signing_url = res.get("signing_url")
     rec = {
         "id": str(uuid.uuid4()),
-        "provider": "openapi_esignature",
-        "signature_id": res.get("id"),
-        "stato": (res.get("state") or "WAIT_VALIDATION"),
+        "provider": "yousign",
+        "signature_id": res.get("request_id"),
+        "yousign_document_id": res.get("document_id"),
+        "yousign_signer_id": res.get("signer_id"),
+        "stato": (res.get("status") or "ongoing"),
         "allegato_origine_id": allegato_id,
         "entita_tipo": al["entita_tipo"],
         "entita_id": al["entita_id"],
@@ -190,7 +309,7 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
             f"Gentile {signer['name']} {signer['surname']},\n"
             f"le è stato inviato un documento da firmare digitalmente ({display}).\n\n"
             f"🔗 Firma qui: {signing_url}\n\n"
-            f"Riceverà un codice OTP via SMS per completare la firma. Il link è personale."
+            f"Riceverà un codice OTP via email per completare la firma. Il link è personale."
         )
         try:
             from notification_helpers import send_email, send_whatsapp_message
@@ -208,7 +327,8 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
 @router.get("/richieste")
 async def lista_richieste(entita_tipo: str, entita_id: str, user=Depends(current_user)) -> dict:
     items = await db.firma_requests.find(
-        {"provider": "openapi_esignature", "entita_tipo": entita_tipo, "entita_id": entita_id},
+        {"provider": {"$in": ["yousign", "openapi_esignature"]},
+         "entita_tipo": entita_tipo, "entita_id": entita_id},
         {"_id": 0},
     ).sort("created_at", -1).to_list(100)
     return {"items": items}
@@ -220,10 +340,17 @@ async def _finalizza(rec: dict) -> Optional[str]:
     sig_id = rec.get("signature_id")
     if not sig_id or rec.get("allegato_firmato_id"):
         return rec.get("allegato_firmato_id")
-    dl = await esvc.download_signed(sig_id)
-    if not dl.get("ok"):
-        return None
-    content = dl["content"]
+    if rec.get("provider") == "yousign":
+        content = await _yousign_download(sig_id)
+        if not content:
+            return None
+        descrizione = "Documento firmato (YouSign)"
+    else:
+        dl = await esvc.download_signed(sig_id)
+        if not dl.get("ok"):
+            return None
+        content = dl["content"]
+        descrizione = "Documento firmato (OpenAPI eSignature)"
     base_name = (rec.get("nome_file") or "documento.pdf").rsplit(".", 1)[0]
     fname = f"{base_name}_firmato.pdf"
     file_id = str(uuid.uuid4())
@@ -237,8 +364,7 @@ async def _finalizza(rec: dict) -> Optional[str]:
         entita_tipo=rec["entita_tipo"], entita_id=rec["entita_id"],
         nome_file=fname, storage_path=up["path"],
         content_type="application/pdf", size=up.get("size", len(content)),
-        descrizione="Documento firmato (OpenAPI eSignature)",
-        categoria=rec.get("categoria"), visibile_cliente=True,
+        descrizione=descrizione, categoria=rec.get("categoria"), visibile_cliente=True,
     )
     doc = al.model_dump()
     doc["firma_request_id"] = rec["id"]
@@ -276,6 +402,15 @@ async def stato_richiesta(req_id: str, user=Depends(current_user)) -> dict:
         raise HTTPException(404, "Richiesta non trovata")
     if rec.get("allegato_firmato_id"):
         return {"stato": "DONE", "allegato_firmato_id": rec["allegato_firmato_id"]}
+    if rec.get("provider") == "yousign":
+        stato = await _yousign_status(rec.get("signature_id")) or rec.get("stato")
+        allegato_firmato_id = None
+        if (stato or "").lower() == "done":
+            allegato_firmato_id = await _finalizza(rec)
+            stato = "DONE"
+        else:
+            await db.firma_requests.update_one({"id": req_id}, {"$set": {"stato": stato, "updated_at": _now_iso()}})
+        return {"stato": stato, "allegato_firmato_id": allegato_firmato_id}
     det = await esvc.get_detail(rec.get("signature_id"))
     stato = det.get("state") or rec.get("stato")
     allegato_firmato_id = None
@@ -296,22 +431,30 @@ async def finalizza_pending() -> int:
         from database import raw_db
         from notification_helpers import send_whatsapp_message
         cur = raw_db.firma_requests.find(
-            {"provider": "openapi_esignature", "allegato_firmato_id": None,
+            {"provider": {"$in": ["yousign", "openapi_esignature"]}, "allegato_firmato_id": None,
              "stato": {"$nin": ["ERROR"]}},
             {"_id": 0},
         )
         async for rec in cur:
             if not rec.get("signature_id"):
                 continue
-            det = await esvc.get_detail(rec["signature_id"])
-            state = (det.get("state") or "").upper()
-            if esvc.is_done(det.get("state")):
+            if rec.get("provider") == "yousign":
+                ys = await _yousign_status(rec["signature_id"])
+                state = (ys or "").upper()
+                is_done = (ys or "").lower() == "done"
+                cur_state = ys or rec.get("stato")
+            else:
+                det = await esvc.get_detail(rec["signature_id"])
+                state = (det.get("state") or "").upper()
+                is_done = esvc.is_done(det.get("state"))
+                cur_state = det.get("state") or rec.get("stato")
+            if is_done:
                 if await _finalizza(rec):
                     n += 1
                 continue
-            if state == "ERROR":
+            if state in ("ERROR", "EXPIRED", "CANCELED", "DECLINED"):
                 await raw_db.firma_requests.update_one(
-                    {"id": rec["id"]}, {"$set": {"stato": "ERROR", "updated_at": _now_iso()}})
+                    {"id": rec["id"]}, {"$set": {"stato": state, "updated_at": _now_iso()}})
                 continue
             # Sollecito WhatsApp dopo 48h se non ancora firmato e non già sollecitato
             if not rec.get("reminder_sent") and rec.get("firmatario_mobile") and rec.get("signing_url"):
@@ -325,13 +468,13 @@ async def finalizza_pending() -> int:
                     testo = (
                         f"Promemoria: il documento \"{rec.get('nome_file')}\" è ancora in attesa della sua firma.\n"
                         f"🔗 Firma qui: {rec['signing_url']}\n"
-                        f"Riceverà un codice OTP via SMS per completare."
+                        f"Riceverà un codice OTP per completare."
                     )
                     await send_whatsapp_message(rec["firmatario_mobile"], testo)
                     await raw_db.firma_requests.update_one(
                         {"id": rec["id"]}, {"$set": {"reminder_sent": True, "reminder_at": _now_iso()}})
             await raw_db.firma_requests.update_one(
-                {"id": rec["id"]}, {"$set": {"stato": det.get("state") or rec.get("stato"), "updated_at": _now_iso()}})
+                {"id": rec["id"]}, {"$set": {"stato": cur_state, "updated_at": _now_iso()}})
     except Exception as e:
         logger.warning("finalizza_pending errore: %s", e)
     return n

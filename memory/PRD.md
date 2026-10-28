@@ -199,3 +199,12 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - `routes/documenti_genera.py`: nuovo `_find_firma_pos(pdf_bytes)` che cerca l'àncora "Firma del Contraente" nel PDF generato e la converte in coordinate OpenAPI (punti, origine bottom-left: `y = page_height - rect.y1`). In `genera_documento` (salva=true) la posizione viene salvata sull'allegato come `firma_pos: {page,x,y}` e ritornata nella risposta.
 - `routes/esignature_it.py` (`invia_per_firma`): se l'allegato ha `firma_pos`, passa page/x/y a `esvc.create_signature` invece dei default fissi (x=331, y=45).
 - Verificato: `/documenti/genera` ritorna `firma_pos` corretto (es. page1,x162,y674); allegato aggiornato.
+
+## [2026-06] "Genera Documento" firma → YouSign (sandbox)
+- **Decisione utente**: collegare il flusso "Genera Documento" (pulsante Firma → `/esignature/invia`) a YouSign invece di OpenAPI. Firma Moduli già usava YouSign.
+- **`routes/esignature_it.py`**: aggiunti helper YouSign v3 (`_ys_cfg` da `firma_modelli._yousign_cfg`, `_firma_fields_from_pdf` àncora "Firma del Contraente" in coord top-left, `_yousign_send`, `_yousign_status`, `_yousign_download` via `GET /signature_requests/{id}/documents/download?version=completed`). `invia_per_firma` ora crea richiesta YouSign (provider="yousign", auth `otp_email`, delivery_mode none) e consegna `signing_url` via WhatsApp/Email; email obbligatoria, cellulare opzionale. `/richieste`, `/stato/{id}`, `_finalizza`, `finalizza_pending` resi provider-aware (yousign + openapi_esignature).
+- **Frontend** `GeneraDocumentoButton.jsx`: testo dialog aggiornato a "Firma elettronica avanzata YouSign · OTP via email".
+- **Config**: `YOUSIGN_SANDBOX_API_KEY` già valida e collegata all'account `schiantarelli.jacopo@gmail.com`; `YOUSIGN_ENVIRONMENT=sandbox`.
+- **Limite sandbox YouSign**: il firmatario deve avere email appartenente all'org YouSign → in test usare `schiantarelli.jacopo@gmail.com`.
+- **Verificato end-to-end**: genera doc (salva) → `/esignature/invia` ritorna provider=yousign, stato "ongoing", signing_url valido. Dati di test rimossi. NOTA: finalizzazione/download firmato implementata per API ma testabile solo dopo firma reale del cliente.
+- Pannello Super Admin "Namirial eSignAnyWhere" è un provider separato NON collegato a YouSign.
