@@ -1418,7 +1418,8 @@ async def build_context(cliente_id: Optional[str] = None,
                          extra: Optional[dict] = None,
                          operatore_id: Optional[str] = None,
                          titolo_id: Optional[str] = None,
-                         sinistro_id: Optional[str] = None) -> dict:
+                         sinistro_id: Optional[str] = None,
+                         user: Optional[dict] = None) -> dict:
     """Contesto placeholder standard: agenzia + cliente + polizza + titolo +
     sinistro + compagnia + collaboratore. Risolve a cascata le entità mancanti
     (es. da titolo/sinistro ricava polizza e cliente)."""
@@ -1574,8 +1575,12 @@ async def build_context(cliente_id: Optional[str] = None,
                 "cliente_iban": a.get("iban") or "-",
                 "cliente_amministratore": a.get("amministratore") or "-",
             })
-    # Operatore/intermediario: se non scelto esplicitamente, si usa il
-    # collaboratore collegato alla polizza, altrimenti quello dell'anagrafica.
+    # Operatore/intermediario: è SEMPRE l'utente loggato che esegue l'operazione
+    # (iscrizione RUI/IVASS, firma, dati collaboratore). Se è stato scelto un
+    # operatore esplicito si rispetta quello; in assenza di contesto utente si
+    # ripiega sul collaboratore collegato a polizza/anagrafica.
+    if not operatore_id:
+        operatore_id = (user or {}).get("id")
     if not operatore_id:
         operatore_id = ((p or {}).get("collaboratore_id")
                         or (a or {}).get("collaboratore_id"))
@@ -1692,7 +1697,7 @@ async def preview_modello(body: PreviewBody, user: dict = Depends(current_user))
     modifica del template. Se ``cliente_id``/``polizza_id`` non sono forniti,
     usa dati di esempio così l'utente vede come apparirà il messaggio finale.
     """
-    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra)
+    ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, user=user)
     # Se non abbiamo cliente reale, popoliamo con dati di esempio realistici
     # per rendere l'anteprima più utile durante la creazione del modello.
     if not body.cliente_id:
@@ -1774,7 +1779,7 @@ async def genera_documento(mid: str, body: GeneraDocBody,
     if not m:
         raise HTTPException(404, "Modello non trovato")
     ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
-                              body.titolo_id, body.sinistro_id)
+                              body.titolo_id, body.sinistro_id, user=user)
     titolo = render_text(m.get("oggetto") or m.get("nome") or "Documento", ctx)
     corpo = render_text(m.get("corpo") or "", ctx)
     sezioni = [
@@ -2578,7 +2583,7 @@ async def genera_word_fedele(
         raise HTTPException(400, "Questo modello non è un Word fedele")
     raw, _ct = obj_storage.get_object(m["word_storage_path"])
     ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
-                              body.titolo_id, body.sinistro_id)
+                              body.titolo_id, body.sinistro_id, user=user)
     richiede_firma = bool(m.get("richiede_firma")) or ("firma" in (m.get("placeholders") or []))
     fai_firma = bool(body.invia_firma and richiede_firma)
     mapping = {k: v for k, v in ctx.items() if not k.startswith("_")}
@@ -2989,7 +2994,7 @@ async def genera_pdf_overlay(
     overlay = m.get("pdf_overlay") or []
     raw, _ct = obj_storage.get_object(path)
     ctx = await build_context(body.cliente_id, body.polizza_id, body.extra, body.operatore_id,
-                              body.titolo_id, body.sinistro_id)
+                              body.titolo_id, body.sinistro_id, user=user)
     # Immagini per i segnaposto immagine (logo agenzia, firma operatore)
     images: dict = {}
     if any((it.get("kind") == "image") for it in overlay):

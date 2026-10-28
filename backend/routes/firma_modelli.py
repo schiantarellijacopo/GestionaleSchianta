@@ -239,10 +239,10 @@ async def _valori_dato(db, anagrafica_id, polizza_id, collaboratore_id=None, use
     if pol.get("compagnia_id"):
         c = await db.compagnie.find_one({"id": pol["compagnia_id"]}, {"_id": 0, "ragione_sociale": 1})
         comp_nome = (c or {}).get("ragione_sociale") or ""
-    # collaboratore: body → polizza → utente corrente (se collaboratore)
-    cid = collaboratore_id or pol.get("collaboratore_id")
-    if not cid and user and user.get("role") == "collaboratore":
-        cid = user.get("id")
+    # collaboratore/operatore: è l'utente loggato che esegue l'operazione
+    # (iscrizione RUI/IVASS, firma). Si rispetta un collaboratore esplicito dal
+    # body; in assenza di contesto utente si ripiega sul collaboratore polizza.
+    cid = collaboratore_id or (user or {}).get("id") or pol.get("collaboratore_id")
     collab = await db.users.find_one({"id": cid}, {"_id": 0}) if cid else {}
     collab = collab or {}
     # agenzia (singleton config)

@@ -7,6 +7,15 @@ Multi-tenancy: scoping automatico via `agenzia_tenant_id` (ContextVar in `databa
 ## Credenziali test
 Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 
+## Segnaposto operatore = utente loggato — 28/10/2026
+- I segnaposto `operatore_*` (nome, cognome, RUI/IVASS, firma, email, ecc.) ora fanno riferimento all'UTENTE LOGGATO che esegue l'operazione, non al collaboratore assegnato al cliente.
+- Es.: se Pozzi Giorgia genera un documento per un cliente il cui collaboratore è Assicurazioni Schiantarelli, i dati collaboratore/iscrizione IVASS/firma riportano Pozzi Giorgia.
+- `modelli.py build_context(..., user=...)`: operatore_id = esplicito → utente loggato → (fallback) collaboratore polizza/anagrafica. Tutti i generatori (preview, genera, genera-fedele, pdf-overlay) passano `user`.
+- `documenti_genera.py _context(..., user=...)`: operatore risolto dall'utente loggato; fallback al collaboratore solo se manca il contesto utente.
+- `firma_modelli.py _valori_dato`: cid = body collaboratore_id → utente loggato → collaboratore polizza.
+- Verificato via API: preview per cliente con collaboratore diverso riporta l'utente loggato come operatore.
+
+
 ## YouSign — Workspace per agenzia (Super Admin) — 28/10/2026
 - Campo **Workspace ID** in Super Admin → Modifica Agenzia (sezione "Firma digitale (YouSign)", testid `ea-yousign-workspace`).
 - Tenant-scoped: salvato in `azienda_config.yousign_workspace_id` per ogni tenant (non nel doc `tenants`).

@@ -79,7 +79,7 @@ async def _stato_famiglia(ana: dict) -> str:
     return "\n".join(righe) if righe else "(nessun familiare collegato)"
 
 
-async def _context(entita_tipo: str, entita_id: str) -> dict:
+async def _context(entita_tipo: str, entita_id: str, user: dict = None) -> dict:
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     ana = pol = comp = sin = None
     if entita_tipo == "contraente":
@@ -138,11 +138,19 @@ async def _context(entita_tipo: str, entita_id: str) -> dict:
         "azienda_indirizzo": ", ".join([x for x in [az.get("indirizzo"), az.get("cap"), az.get("comune")] if x]),
         "data_oggi": datetime.now().strftime("%d/%m/%Y"),
     }
-    # Via/indirizzo cliente (alias) + operatore/intermediario (collaboratore collegato)
+    # Via/indirizzo cliente (alias) + operatore/intermediario.
+    # L'operatore è SEMPRE l'utente loggato che esegue l'operazione (non il
+    # collaboratore assegnato al cliente): iscrizione RUI/IVASS, firma, ecc.
     ctx["cliente_via"] = ana.get("indirizzo") or ""
     ctx["cliente_citta"] = ana.get("comune") or ana.get("citta") or ""
-    cid = pol.get("collaboratore_id") or ana.get("collaboratore_id")
-    u = (await db.users.find_one({"id": cid}, {"_id": 0}) if cid else None) or {}
+    u = {}
+    uid = (user or {}).get("id")
+    if uid:
+        u = await db.users.find_one({"id": uid}, {"_id": 0}) or {}
+    if not u:
+        # fallback: collaboratore collegato a polizza/cliente
+        cid = pol.get("collaboratore_id") or ana.get("collaboratore_id")
+        u = (await db.users.find_one({"id": cid}, {"_id": 0}) if cid else None) or {}
     op_sez = u.get("rui_sezione") or az.get("rui_sezione") or ""
     ctx.update({
         "operatore_nome": u.get("name") or u.get("nome") or "",
@@ -463,7 +471,7 @@ async def genera_documento(body: dict, user=Depends(current_user)):
     if corpo is None:
         raise HTTPException(400, "Nessun modello o testo fornito")
 
-    ctx, ana, pol, comp, sin = await _context(entita_tipo, entita_id)
+    ctx, ana, pol, comp, sin = await _context(entita_tipo, entita_id, user)
     logo = await _logo_bytes()
     # Tabelle riutilizzabili {tabella:slug} + firma operatore (immagine)
     from routes.modelli import _TABELLA_RE, _load_tabelle_map, _load_image_from_url
