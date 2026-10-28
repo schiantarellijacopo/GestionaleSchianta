@@ -194,3 +194,8 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - **Token speciali**: `{logo}` rimosso (logo già in intestazione), `{firma_operatore}` → immagine firma operatore se presente altrimenti riga, `{firma}` → "Firma del Contraente ___", `{data_firma}` → "Data: __/__/__".
 - **Verificato**: curl `POST /documenti/genera` HTTP 200, 0 token residui, tabelle+firma renderizzate; conferma visiva PDF (header, tabella rapporti compagnie con 2 righe, checklist dichiarazioni con 7 X, blocchi firma).
 - Anteprima: il pulsante "Anteprima PDF" esisteva già e ora mostra il documento interamente compilato.
+
+## [2026-06] Posizione firma dinamica (dove compare {firma})
+- `routes/documenti_genera.py`: nuovo `_find_firma_pos(pdf_bytes)` che cerca l'àncora "Firma del Contraente" nel PDF generato e la converte in coordinate OpenAPI (punti, origine bottom-left: `y = page_height - rect.y1`). In `genera_documento` (salva=true) la posizione viene salvata sull'allegato come `firma_pos: {page,x,y}` e ritornata nella risposta.
+- `routes/esignature_it.py` (`invia_per_firma`): se l'allegato ha `firma_pos`, passa page/x/y a `esvc.create_signature` invece dei default fissi (x=331, y=45).
+- Verificato: `/documenti/genera` ritorna `firma_pos` corretto (es. page1,x162,y674); allegato aggiornato.

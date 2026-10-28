@@ -360,6 +360,36 @@ def _build_pdf(titolo: str, corpo: str, ctx: dict, logo: bytes | None,
     return out.getvalue()
 
 
+# Etichetta del blocco firma del contraente (usata come àncora per posizionare
+# il riquadro firma OpenAPI esattamente dove compariva il segnaposto {firma}).
+_FIRMA_ANCHOR = "Firma del Contraente"
+
+
+def _find_firma_pos(pdf_bytes: bytes) -> dict | None:
+    """Trova la posizione dell'àncora firma nel PDF generato e la converte in
+    coordinate OpenAPI (punti, origine in basso a sinistra). Ritorna
+    {page, x, y} oppure None se l'àncora non è presente."""
+    try:
+        import pymupdf as fitz
+    except Exception:  # pragma: no cover
+        import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        for page in doc:
+            rects = page.search_for(_FIRMA_ANCHOR)
+            if rects:
+                r = rects[0]
+                ph = page.rect.height
+                # riquadro firma subito a destra dell'etichetta, allineato alla riga
+                x = round(r.x1 + 10)
+                y = max(10, round(ph - r.y1 - 2))  # origine bottom-left
+                return {"page": page.number + 1, "x": x, "y": y}
+    finally:
+        doc.close()
+    return None
+
+
+
 @router.get("/documenti/modelli-sezione")
 async def modelli_sezione(sezione: str, user=Depends(current_user)):
     """Modelli disponibili per una sezione (contraente/polizza/sinistro)."""
@@ -416,9 +446,13 @@ async def genera_documento(body: dict, user=Depends(current_user)):
                      content_type="application/pdf", size=stored.get("size", len(pdf)),
                      categoria=categoria, descrizione=f"Documento generato: {titolo}")
     await db.allegati.insert_one(alleg.model_dump())
+    # Posizione del riquadro firma (dove compariva {firma}) per OpenAPI eSignature
+    firma_pos = _find_firma_pos(pdf)
+    if firma_pos:
+        await db.allegati.update_one({"id": alleg.id}, {"$set": {"firma_pos": firma_pos}})
     # Mirror nella card dedicata dell'anagrafica (dict documenti) quando pertinente
     await _mirror_anagrafica_card(entita, entita_id, categoria, alleg, user)
-    return {"ok": True, "allegato_id": alleg.id, "nome_file": fname}
+    return {"ok": True, "allegato_id": alleg.id, "nome_file": fname, "firma_pos": firma_pos}
 
 
 # Card documenti dell'anagrafica gestite come dict `anagrafiche.documenti[card]`

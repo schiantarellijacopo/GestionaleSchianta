@@ -135,9 +135,14 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         raise HTTPException(400, "Email del firmatario mancante (obbligatoria per la firma OpenAPI)")
 
     display = al.get("nome_file") or "documento.pdf"
+    fpos = al.get("firma_pos") or {}
+    sig_kwargs = {}
+    if fpos.get("page") and fpos.get("x") is not None and fpos.get("y") is not None:
+        sig_kwargs = {"page": int(fpos["page"]), "x": str(fpos["x"]), "y": str(fpos["y"])}
     res = await esvc.create_signature(
         pdf_bytes=pdf_bytes, signer=signer,
         message=body.get("message") or f"Firma il documento: {display}",
+        **sig_kwargs,
     )
     if not res.get("ok"):
         raise HTTPException(400, res.get("error") or "Errore creazione firma")
