@@ -761,7 +761,7 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
             // PAGAMENTO IN DIREZIONE: il cliente paga il premio direttamente in compagnia.
             // Registrazione DIRETTA come "incasso in direzione" (arretrato → incassato),
             // SENZA passare da copertura/sospeso. Stesso principio dell'incasso singolo.
-            if (inDirezione) {
+            if (doCopertura && inDirezione) {
                 const mezzoDir = (mezzi.find((m) => (m.label || "").toLowerCase().includes("direzione")) || {}).label || "DIREZIONE";
                 let ok = 0, tot = 0;
                 for (const t of (titoli || [])) {
@@ -783,7 +783,9 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                         ok += 1; tot += pag;
                     } catch { /* continua con gli altri */ }
                 }
-                toast.success(`${ok}/${(titoli || []).length} titoli incassati in direzione per ${fmtEur(tot)}`);
+                const n = (titoli || []).length;
+                if (ok < n) toast.error(`${ok}/${n} titoli incassati in direzione — alcuni non riusciti`);
+                else toast.success(`${ok}/${n} titoli incassati in direzione per ${fmtEur(tot)}`);
                 onClose();
                 return;
             }
@@ -895,7 +897,7 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                             <Checkbox
                                 id="bulk-cb-copertura"
                                 checked={doCopertura}
-                                onCheckedChange={(v) => setDoCopertura(v === true)}
+                                onCheckedChange={(v) => { setDoCopertura(v === true); if (v !== true) setInDirezione(false); }}
                                 disabled={allCoperti}
                                 data-testid="bulk-cb-copertura"
                             />

@@ -1,6 +1,14 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Incasso in direzione MULTIPLO: arretrato→direzione diretto (niente copertura/sospesi)
+- **Bug utente**: incassando in direzione più titoli ARRETRATI, il flusso multiplo creava prima una COPERTURA (due righe SOSPESI nel Brogliaccio) e poi le righe DIREZIONE → doppia registrazione. Atteso: comportarsi come l'incasso SINGOLO (arretrato → incasso in direzione in un'unica riga, senza copertura/sospesi).
+- **Causa**: nel bulk dialog la checkbox "Pagamento in direzione" era sotto "Copertura" e chiamava `bulk-copertura` + PUT `pagamento_in_direzione`. Inoltre nell'endpoint singolo, per un incasso in direzione `is_coperto` era forzato a False → l'eventuale copertura NON veniva assorbita.
+- **Fix frontend** (`pages/Titoli.jsx`, `BulkActionDialog.submit`): se "in direzione", per ogni titolo chiama direttamente `POST /titoli/{id}/incassa` con un mezzo 'direzione' + `merge_copertura=true`, SENZA `bulk-copertura`. Gate su `doCopertura && inDirezione`; `inDirezione` resettato quando si deseleziona Copertura; toast d'errore se alcuni falliscono.
+- **Fix backend** (`server.py` → `incassa_titolo`): `_assorbe_copertura = is_coperto or is_direzione` → una copertura dello stesso giorno (o con `merge_copertura` su giornate aperte) viene assorbita/eliminata anche nel caso direzione (snapshot in `coperture_assorbite` per il revert). Resta un solo movimento `incasso_premio_direzione`.
+- **Verifica**: testing agent — backend 5/5 pytest; E2E: 2 arretrati selezionati → "2/2 titoli incassati in direzione", nessuna chiamata `bulk-copertura`, 1 movimento per titolo (`incasso_premio_direzione`, is_direzione, conto=null), Brogliaccio con 1 sola riga direzione per titolo e nessuna riga copertura. Dati di test ripuliti.
+
+
 ## 2026-06 — Import OMNIA: anagrafica esistente, nome mai sovrascritto
 - **Richiesta**: in import OMNIA non sovrascrivere mai nome/cognome o denominazione sociale (`ragione_sociale`) di un'anagrafica già presente nel gestionale; se l'anagrafica non esiste, crearla.
 - **Fix** (`ania_importer.py` → `_processa_anagrafiche`, riga ~539): aggiunto `ragione_sociale` ai campi preservati per le anagrafiche esistenti (insieme a email/pec/telefono/cellulare/collaboratore). Le anagrafiche nuove vengono create normalmente (ramo else). Nessun altro update anagrafiche tocca i nomi (riga 956 aggiorna solo `collaboratore_id` se mancante).

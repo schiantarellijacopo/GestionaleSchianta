@@ -1,0 +1,38 @@
+{
+  "summary": "Fix verified: multiple 'incasso in direzione' of ARRETRATO titoli now creates ONE 'incasso_premio_direzione' movement per titolo and no copertura_titolo / SOSPESI rows. Tested on tenant c5ae2d0e (jacopo@schiantarelli.it) using TEST_ data, which was cleaned up afterwards. Backend: 5/5 pytest passed (single direzione on an arretrato; multiple with merge_copertura; a same-day copertura absorbed with merge, snapshot saved in coperture_assorbite; same-day safety net without the flag; regression check on a normal cash incasso). Frontend E2E: searched 2 new arretrati in /titoli, selected both, opened INCASSO / COPERTURA, Copertura was checked by default, ticked bulk-direzione, clicked Conferma. Toast showed '2/2 titoli incassati in direzione per 540,00 €'. Only 2 POST /titoli/{id}/incassa were sent and no /bulk-copertura call. Both titoli: stato=incassato, pagamento_in_direzione=true, one movement each (incasso_premio_direzione, is_direzione=true, conto_cassa_id=null). Brogliaccio 2026-10-29 has 1 row per titolo with direzione=lordo (210/330), saldo=-provv (-31.5/-49.5) and no copertura row.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/polizze/{pid}", "issue": "Does not delete the polizza's titoli. POST /api/polizze auto-generates a titolo (0 EUR), and that titolo is left orphaned after the polizza is deleted (found 6 orphans from test runs and removed them by hand)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "BulkActionDialog (Titoli.jsx)", "issue": "If the user ticks 'Pagamento in direzione' and then unticks 'Copertura', the direzione checkbox disappears but inDirezione stays true. Clicking Conferma still runs the direzione path (also when 'Incasso' with another mezzo is selected). Fix: reset inDirezione when doCopertura becomes false, or check doCopertura && inDirezione.", "selector": "[data-testid='bulk-direzione']", "priority": "MEDIUM"},
+      {"component": "BulkActionDialog submit (direzione path)", "issue": "Per-titolo errors are swallowed and a success toast is always shown, even '0/2 titoli incassati' when every call fails (for example on a closed giornata). It should show toast.error when ok < N and include the backend detail.", "selector": "[data-testid='bulk-confirm']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Bulk Incasso/Copertura dialog", "issues": ["'Data copertura' / 'Data incasso' use the browser's native <input type=date> (mm/dd/yyyy) instead of the shadcn / DateInputIt component used elsewhere in the app.", "With 'Incasso' unticked, the direzione path sends dataIncasso, which follows dataCopertura only through its onChange. This works, but the incasso date is not visible to the user in the direzione flow."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter_incasso_direzione_multiplo.py", "/app/test_reports/pytest/pytest_incasso_direzione.xml"],
+  "action_items": [
+    "BulkActionDialog: reset inDirezione when 'Copertura' is unticked, or gate the short-circuit on doCopertura && inDirezione.",
+    "BulkActionDialog direzione path: show an error toast with the backend detail when one or more titoli fail.",
+    "Optional: the bulk path takes the FIRST mezzo whose label contains 'direzione'. In this tenant that is 'RID DIREZIONE', which is then written as the titolo, polizza and anagrafica mezzo_pagamento (and as mezzo_pagamento_preferito when empty). Consider a dedicated 'DIREZIONE' mezzo, or letting the user pick.",
+    "Optional: DELETE /api/polizze should also delete the polizza's titoli (or block when titoli exist) to avoid orphans."
+  ],
+  "critical_code_review_comments": [
+    "server.py incassa_titolo: _assorbe_copertura = is_coperto or is_direzione is correct. When a copertura is absorbed in direzione, the titolo keeps titolo_coperto/data_copertura from the earlier bulk-copertura. Check that the Sospesi/Coperti KPIs ignore stato=incassato.",
+    "server.py incassa_titolo: the nota_residuo block is duplicated (lines ~6859-6873); the first block is dead code.",
+    "Titoli.jsx BulkActionDialog: the direzione loop duplicates the incasso loop (about 20 lines). Extract a helper."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter_incasso_direzione_multiplo.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "100% for the requested flow (minor edge-case bugs found by code review)"},
+  "test_credentials": "jacopo@schiantarelli.it / NtdZs5ilxTSP (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "TEST_DIR / TEST_DIRUI anagrafiche, TEST_DIR_* / TESTDIRUI* polizze, their titoli and movimenti were created and then fully removed (API plus a direct mongo cleanup in test_database). Nothing is left in the tenant.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Server date is 2026-10-29. POST /api/polizze auto-creates a 0 EUR titolo. DELETE /anagrafiche archives instead of deleting, so clean it up through mongo (db test_database). The only mezzo with 'direzione' in this tenant is 'RID DIREZIONE' (codice rid_direzione). The regression file test_iter_incasso_direzione_multiplo.py cleans up after itself, except for the archived anagrafica."
+}
