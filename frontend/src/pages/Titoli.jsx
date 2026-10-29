@@ -758,6 +758,35 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
             return;
         }
         try {
+            // PAGAMENTO IN DIREZIONE: il cliente paga il premio direttamente in compagnia.
+            // Registrazione DIRETTA come "incasso in direzione" (arretrato → incassato),
+            // SENZA passare da copertura/sospeso. Stesso principio dell'incasso singolo.
+            if (inDirezione) {
+                const mezzoDir = (mezzi.find((m) => (m.label || "").toLowerCase().includes("direzione")) || {}).label || "DIREZIONE";
+                let ok = 0, tot = 0;
+                for (const t of (titoli || [])) {
+                    const pt = perTit[t.id] || {};
+                    const importo = parseFloat(pt.importo_pagato);
+                    const lordo = parseFloat(t.importo_lordo) || 0;
+                    const pag = (isNaN(importo) || importo < 0) ? lordo : importo;
+                    const residuo = Math.max(0, lordo - pag);
+                    const tipo_ch = residuo > 0 ? (pt.tipo_chiusura || "sconto") : "sconto";
+                    try {
+                        await api.post(`/titoli/${t.id}/incassa`, {
+                            data_incasso: dataIncasso,
+                            mezzo_pagamento: mezzoDir,
+                            conto_cassa_id: null,
+                            importo_pagato: pag,
+                            tipo_chiusura: tipo_ch,
+                            merge_copertura: true,
+                        });
+                        ok += 1; tot += pag;
+                    } catch { /* continua con gli altri */ }
+                }
+                toast.success(`${ok}/${(titoli || []).length} titoli incassati in direzione per ${fmtEur(tot)}`);
+                onClose();
+                return;
+            }
             const messages = [];
             // 1) Copertura via endpoint multipart se file/email, altrimenti diretto
             if (doCopertura) {
@@ -783,11 +812,6 @@ function BulkActionDialog({ action, ids, titoli = [], conti, onClose }) {
                         ids, data_copertura: dataCopertura,
                     });
                     messages.push(`Copertura su ${r.data.aggiornati} titoli`);
-                }
-                if (inDirezione) {
-                    await Promise.all(ids.map((id) =>
-                        api.put(`/titoli/${id}`, { pagamento_in_direzione: true }).catch(() => null),
-                    ));
                 }
             }
             // 2) Incasso per ogni titolo selezionato (importo editabile + sconto/sospeso)

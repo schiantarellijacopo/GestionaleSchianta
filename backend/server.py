@@ -6770,10 +6770,13 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     #    multiplo, incasso rapido, dialog copertura+incasso) può più produrre la doppia riga.
     #  - merge_copertura=True (flussi multipli): unifica anche coperture di ALTRI giorni APERTI.
     #  Le coperture su giornate CHIUSE restano invariate (immutabili → due righe storiche).
-    merge_flag = bool(body.get("merge_copertura")) and is_coperto
+    #  Vale anche per l'incasso IN DIREZIONE: il cliente paga in compagnia → la copertura
+    #  (sospeso anticipato) va assorbita, lasciando la SOLA riga "incasso direzione".
+    _assorbe_copertura = is_coperto or is_direzione
+    merge_flag = bool(body.get("merge_copertura")) and _assorbe_copertura
     cop_movs_merge = []
     cop_docs_merge = []
-    if is_coperto:
+    if _assorbe_copertura:
         async for _cm in db.movimenti.find(
             {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
             {"_id": 0},
