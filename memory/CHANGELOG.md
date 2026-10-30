@@ -1,6 +1,15 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Polizze a frazionamento UNICA: annullata solo alla scadenza
+- **Richiesta utente**: quando il frazionamento è "unica", la polizza deve diventare "annullata" SOLO alla scadenza del contratto, non prima (es. VIAGGI GIRAMONDO M00118537 mostrava stato "annullata" con scadenza 17/11/2026 futura).
+- **Causa**: per le polizze unica OMNIA valorizza la "data annullo" (rec20 col AG) con la SCADENZA naturale del contratto (polizza una tantum). L'import (`_build_polizza_payload`, riga 731) marcava `annullata` appena presente la data annullo, anche se futura.
+- **Fix import** (`ania_importer.py` → `_build_polizza_payload`): se `frazionamento == "unica"` e la scadenza è > oggi → stato resta `attiva`; diventa `annullata` solo quando la scadenza è stata raggiunta (<= oggi). Invariato per gli altri frazionamenti e per le sostituzioni.
+- **Correzione dati** (tenant jacopo@schiantarelli): 4 polizze unica erano `annullata` con scadenza futura (2028/2030/2032, data_annullamento = scadenza) → riportate ad `attiva`. Nota: `_upsert_polizza` aggiorna solo i campi mancanti, quindi lo stato già presente non si corregge da solo al re-import — per questo la correzione è stata applicata direttamente.
+- **Verifica**: test diretto di `_build_polizza_payload` — unica+scad futura→attiva, unica+scad passata→annullata, annuale+annullo→annullata (invariato), unica senza annullo→attiva. Correzione dati verificata (0 residui).
+- **Gap noto**: non c'è un ricalcolo automatico che marca `annullata` una polizza unica quando la scadenza viene superata (il re-import riempie solo i campi mancanti). Se serve, si può aggiungere un controllo schedulato.
+
+
 ## 2026-06 — Incasso in direzione MULTIPLO: arretrato→direzione diretto (niente copertura/sospesi)
 - **Bug utente**: incassando in direzione più titoli ARRETRATI, il flusso multiplo creava prima una COPERTURA (due righe SOSPESI nel Brogliaccio) e poi le righe DIREZIONE → doppia registrazione. Atteso: comportarsi come l'incasso SINGOLO (arretrato → incasso in direzione in un'unica riga, senza copertura/sospesi).
 - **Causa**: nel bulk dialog la checkbox "Pagamento in direzione" era sotto "Copertura" e chiamava `bulk-copertura` + PUT `pagamento_in_direzione`. Inoltre nell'endpoint singolo, per un incasso in direzione `is_coperto` era forzato a False → l'eventuale copertura NON veniva assorbita.

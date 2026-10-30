@@ -724,18 +724,32 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
     # che QUESTA polizza è stata SOSTITUITA da un'altra. Anche cod_stato_share="SO".
     sostituente = (row.get("numero_polizza_sostituente") or _col_at(row, 73) or "").strip() or None
     e_sostituita = bool(sostituente) or (row.get("cod_stato_share") or "").strip().lower() == "so"
+    # rec20 col DK (115ª, index 114) = data emissione
+    data_emissione = _parse_date(row.get("data_emissione") or _col_at(row, 114))
+    effetto = (_parse_date(row.get("effetto", "")) or data_emissione or _now_iso()[:10])
+    frazionamento = _parse_frazionamento(row.get("frazionamento_share", ""))
+    # Scadenza contratto: rec20 col AK = scadenza_effettiva. Se risulta più
+    # vecchia dell'ultimo titolo pagato viene poi allineata da
+    # `_aggiorna_scadenza_da_titoli` (post-pass).
+    scadenza = (_parse_date(row.get("scadenza_effettiva", ""))
+                or _parse_date(row.get("scadenza_originale", ""))
+                or _scadenza_da_effetto(effetto, frazionamento)
+                or _now_iso()[:10])
+    _oggi = _now_iso()[:10]
     # PRIORITÀ STATO: se la polizza è stata sostituita NON si considera la data di
     # annullo (resta "sostituita"); altrimenti annullo → annullata; poi sospensione.
     if e_sostituita:
         stato = "sostituita"
     elif data_annullo:
-        stato = "annullata"
+        # Frazionamento UNICA: la "data annullo" coincide con la SCADENZA naturale
+        # del contratto (polizza una tantum), non è un annullamento anticipato.
+        # La polizza resta ATTIVA e diventa 'annullata' SOLO alla scadenza (<= oggi).
+        if frazionamento == "unica" and scadenza > _oggi:
+            stato = "attiva"
+        else:
+            stato = "annullata"
     elif data_sospensione:
         stato = "sospesa"
-    # rec20 col DK (115ª, index 114) = data emissione
-    data_emissione = _parse_date(row.get("data_emissione") or _col_at(row, 114))
-    effetto = (_parse_date(row.get("effetto", "")) or data_emissione or _now_iso()[:10])
-    frazionamento = _parse_frazionamento(row.get("frazionamento_share", ""))
     payload = {
         "numero_polizza": numero,
         "compagnia_id": comp_id or "",
@@ -748,13 +762,7 @@ def _build_polizza_payload(row: dict, *, numero: str, comp_id: Optional[str],
         "stato": stato,
         "effetto": effetto,
         "data_emissione": data_emissione,
-        # Scadenza contratto: rec20 col AK = scadenza_effettiva. Se risulta più
-        # vecchia dell'ultimo titolo pagato viene poi allineata da
-        # `_aggiorna_scadenza_da_titoli` (post-pass).
-        "scadenza": (_parse_date(row.get("scadenza_effettiva", ""))
-                     or _parse_date(row.get("scadenza_originale", ""))
-                     or _scadenza_da_effetto(effetto, frazionamento)
-                     or _now_iso()[:10]),
+        "scadenza": scadenza,
         # Frazionamento (rec20 col AN — frazionamento_share)
         "frazionamento": frazionamento,
         "premio_lordo": _parse_float(row.get("lordo_totale", "")),
