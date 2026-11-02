@@ -5848,6 +5848,7 @@ async def _total_sospesi_as_of(data_giorno: str) -> float:
     pipeline = [
         {"$match": {
             "titolo_coperto": True,
+            "data_copertura": {"$lte": data_giorno},
             "$or": [
                 {"stato": {"$in": ["da_incassare", "insoluto"]}},
                 {"$and": [

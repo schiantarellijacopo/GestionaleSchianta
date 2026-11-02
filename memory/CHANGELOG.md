@@ -1,6 +1,14 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Brogliaccio: KPI Sospesi fedele alla data della videata (fix riapertura/richiusura)
+- **Bug utente** (produzione, tenant jacopo@schiantarelli): riaprendo e richiudendo una Prima Nota chiusa — anche senza registrare nulla — il KPI "Sospesi" cambiava/era errato (es. al 26/10/2026 atteso 71.046,59, mostrato 99.194,89). I KPI della videata devono riferirsi SEMPRE alla data del brogliaccio visualizzato.
+- **Causa**: il KPI Sospesi (`_total_sospesi_as_of`, usato da `_compute_brogliaccio` → `riepilogo_kpi.crediti`) sommava i titoli coperti ancora da incassare SENZA filtrare `data_copertura <= data_giorno` (pur dichiarandolo nel docstring). Così conteggiava anche le coperture fatte DOPO la data della videata (attività dei giorni/mesi successivi) → valore gonfiato e che "deriva" nel tempo. Le altre voci KPI (entrate/provvigioni/rimesse/sconti/spese/saldo) sono invece ricostruite dai movimenti immutabili `<= data_giorno`, quindi già fedeli alla data.
+- **Fix** (`server.py` → `_total_sospesi_as_of`): aggiunto il filtro `data_copertura <= data_giorno` alla pipeline. Ora il KPI Sospesi riflette esattamente lo stato alla data della videata e non è più influenzato da coperture successive; riapertura+richiusura senza modifiche non altera il valore.
+- **Nota approccio**: valutato e scartato il ricalcolo dei sospesi dai soli movimenti (cum_sospesi) — su questi dati non riconcilia col totale titoli (coperture storiche senza movimento), quindi inaffidabile. Mantenuta la fonte sui titoli, resa fedele alla data.
+- **Verifica**: test diretto — copertura datata 28/10 → "as of 26/10" invariato (delta 0), "as of 28/10" +5.000 (conta dalla sua data). Il fix avrà effetto in produzione dopo il publish/deploy (in preview il dataset è diverso).
+
+
 ## 2026-06 — Polizze a frazionamento UNICA: annullata solo alla scadenza
 - **Richiesta utente**: quando il frazionamento è "unica", la polizza deve diventare "annullata" SOLO alla scadenza del contratto, non prima (es. VIAGGI GIRAMONDO M00118537 mostrava stato "annullata" con scadenza 17/11/2026 futura).
 - **Causa**: per le polizze unica OMNIA valorizza la "data annullo" (rec20 col AG) con la SCADENZA naturale del contratto (polizza una tantum). L'import (`_build_polizza_payload`, riga 731) marcava `annullata` appena presente la data annullo, anche se futura.
