@@ -10870,6 +10870,7 @@ async def _riallinea_calcola(dal: Optional[str], al: Optional[str]):
             "saldo_attuale": round(float(old_sum), 2) if old_sum is not None else None,
             "saldo_corretto": round(float(new_sum), 2) if new_sum is not None else None,
             "differenza": diff,
+            "ricostruire": old_sum is None,
             "_fresh": fresh,
         })
     return out
@@ -10883,10 +10884,14 @@ async def riallinea_snapshot_anteprima(
     """ANTEPRIMA (sola lettura): elenca le giornate chiuse con saldo attuale vs corretto."""
     rows = await _riallinea_calcola(dal, al)
     giorni = [{k: v for k, v in r.items() if k != "_fresh"} for r in rows]
-    con_diff = [g for g in giorni if g.get("differenza") not in (None, 0, 0.0)]
+    con_diff = [g for g in giorni
+                if g.get("differenza") not in (None, 0, 0.0) or g.get("ricostruire")]
+    tot_diff = round(sum(float(g["differenza"]) for g in giorni
+                         if g.get("differenza") not in (None, 0, 0.0)), 2)
     return {
         "totale_giornate": len(giorni),
         "giornate_da_correggere": len(con_diff),
+        "differenza_totale": tot_diff,
         "giornate": giorni,
     }
 
@@ -10909,7 +10914,7 @@ async def riallinea_snapshot_apply(
             "riepilogo.checkpoint": fresh.get("_checkpoint"),
             "updated_at": _now_iso(),
         }
-        if r.get("differenza") not in (None, 0, 0.0):
+        if r.get("differenza") not in (None, 0, 0.0) or r.get("ricostruire"):
             set_fields.update({
                 "riepilogo.totali_giornata": fresh["totali_giornata"],
                 "riepilogo.riepilogo_kpi": fresh["riepilogo_kpi"],

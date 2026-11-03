@@ -723,7 +723,7 @@ function StoricoPrimaNotaTab() {
         setRiallApplying(true);
         try {
             const r = await api.post("/contabilita/riallinea-snapshot", {});
-            toast.success(`Riallineate ${r.data.aggiornate} giornate`);
+            toast.success(`Riallineate ${r.data.aggiornate} ${r.data.aggiornate === 1 ? "giornata" : "giornate"}`);
             setRiallOpen(false); load();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setRiallApplying(false); }
@@ -776,7 +776,7 @@ function StoricoPrimaNotaTab() {
                         Carica
                     </Button>
                     <Button onClick={apriRiallinea} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="btn-riallinea-saldi">
-                        Riallinea saldi
+                        Riconciliazione saldi
                     </Button>
                     <div className="ml-auto flex items-end gap-3">
                         <div>
@@ -852,7 +852,7 @@ function StoricoPrimaNotaTab() {
             <Dialog open={riallOpen} onOpenChange={setRiallOpen}>
                 <DialogContent className="max-w-2xl" data-testid="riallinea-dialog">
                     <DialogHeader>
-                        <DialogTitle>Riallinea saldi giornate chiuse</DialogTitle>
+                        <DialogTitle>Riconciliazione saldi giornate chiuse</DialogTitle>
                     </DialogHeader>
                     <div className="text-sm text-slate-600 mb-1">
                         Anteprima (sola lettura): confronto tra saldo cassa memorizzato alla chiusura e saldo ricalcolato.
@@ -860,9 +860,20 @@ function StoricoPrimaNotaTab() {
                     </div>
                     {riallLoading || !riallData ? <Loading /> : (
                         <>
-                            <div className="text-sm mb-2">
-                                Giornate chiuse: <b>{riallData.totale_giornate}</b> · da correggere:{" "}
-                                <b className="text-amber-700">{riallData.giornate_da_correggere}</b>
+                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm mb-2">
+                                <span>Giornate chiuse: <b>{riallData.totale_giornate}</b></span>
+                                <span>Da riconciliare:{" "}
+                                    <b className={riallData.giornate_da_correggere ? "text-amber-700" : "text-emerald-700"}>
+                                        {riallData.giornate_da_correggere}
+                                    </b>
+                                </span>
+                                {typeof riallData.differenza_totale === "number" && riallData.differenza_totale !== 0 && (
+                                    <span>Scostamento netto:{" "}
+                                        <b className={riallData.differenza_totale > 0 ? "text-emerald-700" : "text-rose-600"} data-testid="riall-diff-totale">
+                                            {riallData.differenza_totale > 0 ? "+" : ""}{fmtEur(riallData.differenza_totale)}
+                                        </b>
+                                    </span>
+                                )}
                             </div>
                             <div className="max-h-80 overflow-auto border rounded">
                                 <table className="tbl w-full text-sm">
@@ -875,13 +886,19 @@ function StoricoPrimaNotaTab() {
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {riallData.giornate.filter((g) => g.differenza).map((g) => (
+                                        {riallData.giornate.filter((g) => g.differenza || g.ricostruire).map((g) => (
                                             <tr key={g.chiusura_id} className="border-t" data-testid={`riall-row-${g.data}`}>
                                                 <td className="px-2 py-1">{fmtDate(g.data)}</td>
-                                                <td className="px-2 py-1 text-right num">{fmtEur(g.saldo_attuale || 0)}</td>
+                                                <td className="px-2 py-1 text-right num">
+                                                    {g.saldo_attuale === null
+                                                        ? <span className="text-amber-600 text-xs">snapshot vecchio</span>
+                                                        : fmtEur(g.saldo_attuale)}
+                                                </td>
                                                 <td className="px-2 py-1 text-right num">{fmtEur(g.saldo_corretto || 0)}</td>
-                                                <td className={`px-2 py-1 text-right num ${g.differenza > 0 ? "text-emerald-700" : "text-rose-600"}`}>
-                                                    {g.differenza > 0 ? "+" : ""}{fmtEur(g.differenza)}
+                                                <td className={`px-2 py-1 text-right num ${g.ricostruire ? "text-amber-600" : g.differenza > 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                                                    {g.ricostruire
+                                                        ? "da ricostruire"
+                                                        : `${g.differenza > 0 ? "+" : ""}${fmtEur(g.differenza)}`}
                                                 </td>
                                             </tr>
                                         ))}
@@ -895,7 +912,7 @@ function StoricoPrimaNotaTab() {
                                 <Button variant="outline" onClick={() => setRiallOpen(false)} data-testid="riallinea-annulla">Chiudi</Button>
                                 <Button onClick={applicaRiallinea} disabled={riallApplying || riallData.giornate_da_correggere === 0}
                                     className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="riallinea-applica">
-                                    {riallApplying ? "Applico…" : `Applica a ${riallData.giornate_da_correggere} giornate`}
+                                    {riallApplying ? "Applico…" : `Applica a ${riallData.giornate_da_correggere} ${riallData.giornate_da_correggere === 1 ? "giornata" : "giornate"}`}
                                 </Button>
                             </div>
                         </>

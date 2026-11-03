@@ -401,3 +401,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - 3 indici compound creati e verificati.
 
 **Nota:** `_compute_saldi_compagnie` resta ricalcolo completo (non checkpointato) — possibile ottimizzazione futura se diventa collo di bottiglia.
+
+### 2026-06 — Pannello Riconciliazione saldi (Storico Prima Nota)
+- Il dialog "Riallinea saldi" → ribattezzato "Riconciliazione saldi": mostra, in sola lettura, le giornate chiuse che divergono dal ricalcolo live (saldo attuale vs corretto vs differenza) prima di applicare.
+- Anteprima backend ora espone `differenza_totale` (scostamento netto) e flag `ricostruire=True` per gli snapshot vecchi/incompleti (saldo_attuale null), prima silenziosamente nascosti e mai riconciliati. Ora sono conteggiati in `giornate_da_correggere` e corretti dall'apply.
+- UI: badge "snapshot vecchio"/"da ricostruire", scostamento netto in testata, plurale corretto. Verificato via curl + screenshot (giornata 2026-09-09 ora visibile come da ricostruire).
