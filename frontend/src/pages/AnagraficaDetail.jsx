@@ -1333,7 +1333,7 @@ function AlberoGenealogico({ ana, canEdit, onReload }) {
 
 function NetworkPositionCard({ network }) {
     const { root, collegati, totali } = network;
-    const fmt = (n) => (n || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+    const fmt = (n) => (n || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" });
     return (
         <Card className="p-6 border-slate-200 mt-4" data-testid="network-position-card">
             <div className="flex items-center justify-between mb-3">

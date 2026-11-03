@@ -37,6 +37,7 @@ export const fmtEur = (n) =>
         style: "currency",
         currency: "EUR",
         minimumFractionDigits: 2,
+        useGrouping: "always",
     }).format(Number(n || 0));
 
 export const fmtDate = (s) => {
@@ -50,7 +51,16 @@ export const fmtDate = (s) => {
 };
 
 export const fmtNum = (n) =>
-    new Intl.NumberFormat("it-IT").format(Number(n || 0));
+    new Intl.NumberFormat("it-IT", { useGrouping: "always" }).format(Number(n || 0));
+
+// Importo numerico con separatore delle migliaia e 2 decimali, senza simbolo €
+// (es. 6811.3 -> "6.811,30"). Usare per celle/valori mostrati senza €.
+export const fmtImporto = (n) =>
+    new Intl.NumberFormat("it-IT", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+        useGrouping: "always",
+    }).format(Number(n || 0));
 
 // Prompt per una data in formato italiano GG/MM/AAAA. Restituisce la data in
 // formato ISO (YYYY-MM-DD) pronta per il backend, oppure null se annullato/vuoto.

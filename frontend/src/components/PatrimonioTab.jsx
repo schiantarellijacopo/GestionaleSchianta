@@ -49,7 +49,7 @@ const TIPO_COLORS = {
 };
 
 const fmtEur = (v) => v == null ? "—"
-    : new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(Number(v) || 0);
+    : new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" }).format(Number(v) || 0);
 
 
 export default function PatrimonioTab({ ana, canEdit }) {

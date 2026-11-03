@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, fmtImporto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -411,7 +411,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                                 data-testid="titolo-provvigioni" />
                             <Button type="button" variant="outline" size="sm" onClick={recalcProvvigione} disabled={incassato} data-testid="titolo-provv-auto">Auto</Button>
                         </div>
-                        {operatori.length > 0 && <p className="text-[10px] text-slate-400 mt-0.5">Ripartito fra {operatori.length} collab. · totale {totOperatori.toFixed(2)}€ (modificabile)</p>}
+                        {operatori.length > 0 && <p className="text-[10px] text-slate-400 mt-0.5">Ripartito fra {operatori.length} collab. · totale {fmtImporto(totOperatori)}€ (modificabile)</p>}
                     </div>
                     <div className="col-span-2">
                         <Label>Descrizione (nota libera)</Label>
@@ -479,7 +479,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
                                         ))}
                                     </tbody>
                                 </table>
-                                <div className="text-right text-xs text-slate-600 mt-2">Totale ripartito: <b className="text-slate-900">{totOperatori.toFixed(2)} €</b></div>
+                                <div className="text-right text-xs text-slate-600 mt-2">Totale ripartito: <b className="text-slate-900">{fmtImporto(totOperatori)} €</b></div>
                             </div>
                         )}
                     </div>

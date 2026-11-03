@@ -11,7 +11,7 @@ import {
 import { Award, RefreshCw, Save } from "lucide-react";
 
 const fmtEur = (n) =>
-    (Number(n) || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+    (Number(n) || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" });
 
 // default: trimestre corrente
 const quarter = () => {

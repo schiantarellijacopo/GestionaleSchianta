@@ -132,7 +132,7 @@ export function fmtEur(v) {
     if (v == null || v === "" || Number.isNaN(Number(v))) return "";
     const n = Math.round(Number(v));
     if (n === 0) return "";
-    return `${n.toLocaleString("it-IT")} €`;
+    return `${n.toLocaleString("it-IT", { useGrouping: "always" })} €`;
 }
 
 function resolveLogo(logo) {

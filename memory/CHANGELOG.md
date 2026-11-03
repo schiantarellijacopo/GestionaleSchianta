@@ -406,3 +406,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Il dialog "Riallinea saldi" → ribattezzato "Riconciliazione saldi": mostra, in sola lettura, le giornate chiuse che divergono dal ricalcolo live (saldo attuale vs corretto vs differenza) prima di applicare.
 - Anteprima backend ora espone `differenza_totale` (scostamento netto) e flag `ricostruire=True` per gli snapshot vecchi/incompleti (saldo_attuale null), prima silenziosamente nascosti e mai riconciliati. Ora sono conteggiati in `giornate_da_correggere` e corretti dall'apply.
 - UI: badge "snapshot vecchio"/"da ricostruire", scostamento netto in testata, plurale corretto. Verificato via curl + screenshot (giornata 2026-09-09 ora visibile come da ricostruire).
+
+### 2026-06 — Separatore migliaia su tutti i numeri (sempre, anche 4 cifre)
+- Causa: per la lingua italiana il browser (regola CLDR `minimumGroupingDigits=2`) NON raggruppa i numeri a 4 cifre → "1078,50" senza punto, mentre "2.675.241,89" sì. Incoerenza percepita dall'utente.
+- Fix: aggiunto `useGrouping: "always"` ai formatter centrali in `lib/api.js` (`fmtEur`, `fmtNum`, nuovo `fmtImporto`) e agli helper di valuta locali (MiniBilancioTab, PatrimonioTab, PiramidePrivati, Incentivazioni, EstrattoContoContraente, AnagraficaDetail, SaluteFiscaleTab, AzioniPolizzaTab, PortaleCliente). Ora ogni importo mostra sempre il separatore (es. 1.078,50 €).
+- Nuovo helper `fmtImporto(n)` = separatore + 2 decimali senza simbolo €; usato per sostituire i `toFixed(2)` manuali di visualizzazione in Librerie, Provvigioni (input disabilitati + voci), FattureAgenziaPartner, TitoloDialog. Lasciati intatti: campi input editabili, percentuali, dimensioni file e le stringhe di ricerca importo.
+- Solo visualizzazione (dati DB invariati). Verificato in preview: Contabilità → "1.078,50 €", "1.441,27 €". Richiede deploy per vederlo su Railway.

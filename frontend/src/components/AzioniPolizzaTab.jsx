@@ -42,7 +42,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             const r = await api.get(`/polizze/${polizza.id}/titoli-arretrati`);
             const n = r.data?.totale || 0;
             if (!n) return false;
-            const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+            const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" });
             return window.confirm(
                 `Questa polizza ha ${n} titol${n === 1 ? "o" : "i"} in arretrato per ${imp}.\n\n`
                 + `Vuoi stornarli (annullarli) contestualmente ${contesto}?\n\n`
@@ -118,7 +118,7 @@ export default function AzioniPolizzaTab({ polizza, onChanged, canEdit = true })
             const r = await api.get(`/polizze/${polizza.id}/titoli-stornati-annullamento`);
             const n = r.data?.totale || 0;
             if (n) {
-                const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR" });
+                const imp = (r.data?.importo || 0).toLocaleString("it-IT", { style: "currency", currency: "EUR", useGrouping: "always" });
                 ripristina_titoli = window.confirm(
                     `All'annullamento erano stati stornati ${n} titol${n === 1 ? "o" : "i"} per ${imp}.\n\n`
                     + "Vuoi ripristinarli a 'da incassare'?\n\n"

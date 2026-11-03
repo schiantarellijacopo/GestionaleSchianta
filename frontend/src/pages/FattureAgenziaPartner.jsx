@@ -4,7 +4,7 @@
  * (provvigioni maturate vs già fatturate) e permette di registrare i pagamenti.
  */
 import { useEffect, useMemo, useState } from "react";
-import { api, fmtEur, fmtDate } from "@/lib/api";
+import { api, fmtEur, fmtImporto, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -313,7 +313,7 @@ function FatturaDialog({ compagnie, agenzie, precompila, onClose }) {
                         </div>
                         {ritenuta > 0 && (
                             <div className="text-xs text-slate-600 font-mono">
-                                Importo lordo: {importoNum.toFixed(2)} − Ritenuta {percRit}%: {ritenuta.toFixed(2)} = <strong>Netto: {netto.toFixed(2)} €</strong>
+                                Importo lordo: {fmtImporto(importoNum)} − Ritenuta {percRit}%: {fmtImporto(ritenuta)} = <strong>Netto: {fmtImporto(netto)} €</strong>
                             </div>
                         )}
                     </div>

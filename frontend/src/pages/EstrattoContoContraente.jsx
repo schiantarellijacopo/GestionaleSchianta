@@ -11,7 +11,7 @@ import SortHeader, { useTableSort } from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
 
-const eur = (v) => (Number(v || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur = (v) => (Number(v || 0)).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" });
 
 export default function EstrattoContoContraente() {
     const [contraenteId, setContraenteId] = useState(null);

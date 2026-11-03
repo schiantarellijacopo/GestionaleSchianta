@@ -31,7 +31,7 @@ clientApi.interceptors.request.use((cfg) => {
 
 // Formato importi in Euro con separatore delle migliaia (it-IT): 1.234,56 €
 const fmtEur = (n) =>
-    new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2 })
+    new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR", minimumFractionDigits: 2, useGrouping: "always" })
         .format(Number(n || 0));
 
 const SEZIONI = [

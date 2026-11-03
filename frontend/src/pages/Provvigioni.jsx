@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { api, fmtDate, fmtEur, fmtImporto, API_BASE } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -583,7 +583,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                     <div className="grid grid-cols-4 gap-3">
                         <div>
                             <Label>Provvigioni lorde €</Label>
-                            <Input value={lordo.toFixed(2)} disabled className="bg-slate-50 num font-medium" />
+                            <Input value={fmtImporto(lordo)} disabled className="bg-slate-50 num font-medium" />
                         </div>
                         <div>
                             <Label>Ritenuta %</Label>
@@ -592,7 +592,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                         </div>
                         <div>
                             <Label>Ritenuta € (calc.)</Label>
-                            <Input value={rit.toFixed(2)} disabled className="bg-rose-50 num font-semibold text-rose-700" />
+                            <Input value={fmtImporto(rit)} disabled className="bg-rose-50 num font-semibold text-rose-700" />
                         </div>
                         <div>
                             <Label>Contributi €</Label>
@@ -603,10 +603,10 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                         <div className="grid grid-cols-2 gap-3 bg-amber-50 border border-amber-200 rounded p-3">
                             <div>
                                 <Label className="text-amber-900">Voci manuali € (somma)</Label>
-                                <Input value={totVoci.toFixed(2)} disabled className="bg-white num font-medium" />
+                                <Input value={fmtImporto(totVoci)} disabled className="bg-white num font-medium" />
                             </div>
                             <div className="text-xs text-amber-800 self-end pb-2">
-                                {voci_sel.map((v) => `${v.importo >= 0 ? "+" : ""}${v.importo.toFixed(2)} ${v.causale}`).join(" · ")}
+                                {voci_sel.map((v) => `${v.importo >= 0 ? "+" : ""}${fmtImporto(v.importo)} ${v.causale}`).join(" · ")}
                             </div>
                         </div>
                     )}

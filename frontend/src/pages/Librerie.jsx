@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { api, API_BASE } from "@/lib/api";
+import { api, API_BASE, fmtImporto } from "@/lib/api";
 import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -1164,7 +1164,7 @@ function ListaSezione({ section, list, onEdit, onDelete, onQuickUpdate, onUnmerg
                             <td className="font-medium">{c.nome}</td>
                             <td><span className="badge badge-neutral">{c.tipo}</span></td>
                             <td className="num text-xs">{c.iban || "-"}</td>
-                            <td className="num text-right">{Number(c.saldo_iniziale || 0).toFixed(2)}</td>
+                            <td className="num text-right">{fmtImporto(c.saldo_iniziale || 0)}</td>
                             <td>{c.attivo ? <span className="badge badge-success">sì</span> : <span className="badge badge-neutral">archiviato</span>}</td>
                             <td>{c.nascondi_prima_nota ? <span className="badge badge-warning">nascosto</span> : <span className="text-slate-400 text-xs">—</span>}</td>
                             <td>{c.escludi_da_liquidita ? <span className="badge badge-warning">escluso</span> : <span className="text-slate-400 text-xs">—</span>}</td>
@@ -4494,7 +4494,7 @@ function VociRicorsiveSezione() {
                                     {r.data_inizio} → {r.data_fine || "—"}
                                 </td>
                                 <td className={`num text-right font-semibold ${r.importo >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
-                                    {r.importo >= 0 ? "+" : ""}{r.importo.toFixed(2)}
+                                    {r.importo >= 0 ? "+" : ""}{fmtImporto(r.importo)}
                                 </td>
                                 <td>
                                     {r.attiva

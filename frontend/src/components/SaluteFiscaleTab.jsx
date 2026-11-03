@@ -315,7 +315,7 @@ const IndItem = ({ label, value, unit, good, bad }) => {
 };
 
 const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
-const eur0 = (v) => (v == null ? "—" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0 }) + " €");
+const eur0 = (v) => (v == null ? "—" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0, useGrouping: "always" }) + " €");
 
 // ── Margine di Contribuzione + Metriche di impatto (fermo attività) ──
 function MargineContribuzione({ bil, anagrafica_id, saved, onReload }) {
