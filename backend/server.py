@@ -10156,7 +10156,9 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
 
     # 5b) Liquidità cumulative (fino al giorno corrente compreso)
     saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_compagnie), 2)
-    conti_attivi = await db.conti_cassa.find({"attivo": True}, {"_id": 0}).to_list(200)
+    # Includi TUTTI i conti, anche quelli disattivati: disattivare un conto NON deve
+    # cambiare i saldi storici già chiusi (un conto azzerato contribuisce comunque 0).
+    conti_attivi = await db.conti_cassa.find({}, {"_id": 0}).to_list(500)
     sum_conti = 0.0
     for c in conti_attivi:
         agg = await db.movimenti.aggregate([
@@ -10550,10 +10552,11 @@ async def statistiche_contabilita(
     saldi_comp = await _compute_saldi_compagnie(today)
     saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_comp), 2)
 
-    # Saldo per conto cassa cumulativo (saldo iniziale + entrate − uscite, TUTTO il tempo)
+    # Saldo per conto cassa cumulativo (saldo iniziale + entrate − uscite, TUTTO il tempo).
+    # Include anche i conti disattivati con saldo residuo (storici): non vanno persi.
     conti = await db.conti_cassa.find(
-        {"attivo": True}, {"_id": 0}
-    ).sort([("ordine", 1), ("nome", 1)]).to_list(200)
+        {}, {"_id": 0}
+    ).sort([("ordine", 1), ("nome", 1)]).to_list(500)
     saldi_conti = []
     sum_conti = 0.0
     for c in conti:
@@ -10567,6 +10570,8 @@ async def statistiche_contabilita(
         out_tot = agg[0]["out"] if agg else 0
         saldo = float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
         sum_conti += saldo
+        if not c.get("attivo") and abs(saldo) < 0.005:
+            continue  # conto disattivato e azzerato → non mostrarlo nell'elenco
         saldi_conti.append({
             "id": c["id"], "nome": c["nome"],
             "saldo_iniziale": float(c.get("saldo_iniziale", 0)),

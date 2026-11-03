@@ -1,6 +1,15 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Saldo cassa storico: non cambia più alla riapertura (conti disattivati inclusi)
+- **Bug utente** (produzione): riaprendo una giornata chiusa SENZA modifiche, il "saldo cassa" cambiava di un importo COSTANTE di 131,95 su più giorni (23, 26, 27, 28, 29, 30 ottobre). Es. 26/10 corretto 101.345,70 → mostrato 101.213,75.
+- **Meccanica**: giornata CHIUSA → mostra lo snapshot congelato (corretto); RIAPERTA → ricalcolo live. Lo scarto COSTANTE su tutti i giorni indicava un unico elemento escluso dal live.
+- **Causa** (`server.py`, calcolo `sum_conti` in `_compute_brogliaccio` ~10159 e nell'endpoint situazione cassa ~10554): la somma dei conti usava solo i conti `attivo:True`. Un conto cassa DISATTIVATO dopo la chiusura (ma con saldo residuo, es. 131,95) veniva escluso dal ricalcolo live, mentre lo snapshot lo includeva → saldo più basso di 131,95 su tutti i giorni successivi. Disattivare un conto cambiava retroattivamente i saldi storici.
+- **Fix**: entrambi i calcoli ora includono TUTTI i conti (anche disattivati). Un conto azzerato contribuisce 0; un conto disattivato con saldo residuo viene correttamente conteggiato. Nell'elenco conti dell'endpoint situazione cassa i conti disattivati e azzerati restano nascosti.
+- **Verifica**: impostando saldo 131,95 su un conto DISATTIVATO, `sum_conti` passa da 283.739,21 a 283.871,16 (prima lo ignorava). In preview (conti disattivati vuoti) il valore resta invariato → nessuna regressione.
+- **Effetto**: fix di solo CODICE, nessuna riparazione dati necessaria. Dopo il publish/deploy, riaprendo i giorni 23 e 26–30/10 il saldo cassa tornerà corretto (col conto disattivato incluso). Se dopo il deploy lo scarto persistesse, la causa sarebbe un movimento datato ≤23/10 rimosso/spostato → in tal caso serve una diagnostica mirata.
+
+
 ## 2026-06 — Incasso di titolo coperto in giorno diverso: niente più doppia registrazione
 - **Bug utente** (produzione): titoli messi a SOSPESO (copertura) il 30/10 e incassati il 02/11. Il 02/11 la Prima Nota mostrava registrazioni SBAGLIATE: incasso pieno con TOTALE/PROVVIGIONI/SALDO ricontabilizzati + banca, invece del solo spostamento SOSPESO→BANCA. (Giornata del 30/10 NON chiusa.)
 - **Causa** (`server.py` → `incassa_titolo`): con `merge_copertura=true` (passato dal frontend) la copertura di un GIORNO PRECEDENTE ancora APERTO veniva "unificata" → la riga di copertura del 30/10 veniva CANCELLATA e l'incasso del 02/11 diventava un `incasso_premio` pieno (effective_coperto=False), ricontabilizzando entrate/provvigioni/saldo.
