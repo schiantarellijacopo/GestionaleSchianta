@@ -1,5 +1,15 @@
 # Changelog — Axicura CRM
 
+## 2026-06 — Ripartizione provvigioni: scende automaticamente nel titolo
+- **Richiesta utente**: la ripartizione provvigioni per collaboratore impostata sulla polizza (secondo il profilo provvigionale) deve comparire automaticamente anche nel titolo, senza aprire il dialog e premere "Eredita da polizza".
+- **Backend** (`server.py`):
+  - Nuovo helper `_ripartizione_titolo_da_polizza(pol, provv_tot)` che mappa `provvigioni_operatori` della polizza (`collaboratore_id`/`provvigione`) nel formato titolo (`operatore_id`/`operatore_nome`/`provvigione`).
+  - `create_polizza`: il primo titolo automatico eredita la ripartizione della polizza.
+  - `update_polizza`: aggiunto `provvigioni_operatori` ai campi economici che riallineano il titolo iniziale `da_incassare`; la ripartizione viene ricopiata ad ogni salvataggio dei dati economici della polizza.
+- **Flusso**: crea polizza → inserisci dati economici/ripartizione nella scheda polizza → al salvataggio il titolo `da_incassare` riceve la stessa ripartizione.
+- **Verifica**: curl + query MongoDB — titolo con `provvigioni_operatori=[JACOPO:120, Mario:80]` ereditati correttamente dalla polizza.
+
+
 
 ## 2026-06 — Picker collaboratori WhatsApp: inclusi anche gli admin
 - **Bug utente**: SCHIANTARELLI MARCO (collaboratore attivo in libreria) non compariva nel selettore "Chi può vedere questo WhatsApp". Causa reale: Marco ha ruolo **Amministratore** (`role: admin`), mentre il picker filtrava solo `collaboratore` e `dipendente`, escludendo gli admin.

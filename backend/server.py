@@ -4389,6 +4389,25 @@ def _fill_imposte_residuo(d: dict) -> None:
             d["premio_tasse"] = residuo
 
 
+def _ripartizione_titolo_da_polizza(pol: dict, provv_tot_titolo: float) -> list:
+    """Costruisce la ripartizione provvigioni di un titolo a partire da quella
+    impostata sulla polizza (stessa logica del pulsante 'Eredita da polizza'):
+    copia operatore e quota già calcolata secondo il profilo provvigionale.
+    Ritorna [] se la polizza non ha ripartizione."""
+    po = pol.get("provvigioni_operatori") or []
+    out = []
+    for o in po:
+        oid = o.get("operatore_id") or o.get("collaboratore_id")
+        if not oid:
+            continue
+        out.append({
+            "operatore_id": oid,
+            "operatore_nome": o.get("operatore_nome") or "",
+            "provvigione": round(float(o.get("provvigione") or 0), 2),
+        })
+    return out
+
+
 
 
 
@@ -4491,6 +4510,11 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             collaboratore_id=getattr(obj, "collaboratore_id", None),
             stato="da_incassare",
         )
+        # Eredita automaticamente la ripartizione provvigioni per collaboratore
+        # impostata sulla polizza (stesso profilo provvigionale) → scende nel titolo.
+        _rip = _ripartizione_titolo_da_polizza(obj.model_dump(), primo.provvigioni)
+        if _rip:
+            primo.provvigioni_operatori = _rip
         await db.titoli.insert_one(primo.model_dump())
         # 🆕 Premio ANNUO della scheda polizza (rata × rate/anno) dal titolo valido.
         await ricalcola_premio_annuo_polizza(db, obj.id)
@@ -4545,7 +4569,8 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     # nascita della polizza non deve restare a 0 quando i dati economici vengono
     # inseriti/aggiornati successivamente.
     _ECON_FIELDS = {"premio_lordo", "premio_netto", "premio_tasse", "premio_imposte",
-                    "premio_ssn", "premio_accessori", "provvigioni", "collaboratore_id"}
+                    "premio_ssn", "premio_accessori", "provvigioni", "collaboratore_id",
+                    "provvigioni_operatori"}
     if doc and (set(body) & _ECON_FIELDS):
         # Heal imposte sulla scheda polizza: se il lordo le include ma il campo è 0.
         _tasse_prima = round(float(doc.get("premio_tasse") or 0), 2)
@@ -4558,18 +4583,24 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
             {"_id": 0, "id": 1},
         )
         if titolo_iniz:
-            await db.titoli.update_one(
-                {"id": titolo_iniz["id"]},
-                {"$set": {
+            _provv_tit = round(float(doc.get("provvigioni") or 0), 2)
+            _set_tit = {
                     "importo_lordo": round(float(doc.get("premio_lordo") or 0), 2),
                     "importo_netto": round(float(doc.get("premio_netto") or 0), 2),
                     "imposte": round(float(doc.get("premio_tasse") or 0) + float(doc.get("premio_imposte") or 0), 2),
                     "ssn": round(float(doc.get("premio_ssn") or 0), 2),
                     "accessori": round(float(doc.get("premio_accessori") or 0), 2),
-                    "provvigioni": round(float(doc.get("provvigioni") or 0), 2),
+                    "provvigioni": _provv_tit,
                     "collaboratore_id": doc.get("collaboratore_id"),
                     "updated_at": _now_iso(),
-                }},
+            }
+            # Eredita la ripartizione provvigioni per collaboratore dalla polizza.
+            _rip = _ripartizione_titolo_da_polizza(doc, _provv_tit)
+            if _rip:
+                _set_tit["provvigioni_operatori"] = _rip
+            await db.titoli.update_one(
+                {"id": titolo_iniz["id"]},
+                {"$set": _set_tit},
             )
             await ricalcola_premio_annuo_polizza(db, pid)
     # Se è cambiato un dato veicolo/contratto (o la targa), propaga alle altre polizze
