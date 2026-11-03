@@ -358,10 +358,21 @@ export default function PolizzaDetail() {
     };
 
     const handleDelete = async () => {
-        if (!window.confirm(`Eliminare definitivamente la polizza N. ${pol.numero_polizza}?\n\nVerranno eliminati anche tutti i titoli e sinistri collegati. Operazione non reversibile.`)) return;
+        // Se questa polizza ne sostituisce un'altra che risulta "sostituita",
+        // avvisa che quella precedente tornerà ATTIVA dopo l'eliminazione.
+        const prec = (pol.catena_sostituzioni || []).find(
+            (c) => c.id === pol.sostituisce_polizza_id && c.stato === "sostituita",
+        );
+        let msg = `Eliminare definitivamente la polizza N. ${pol.numero_polizza}?\n\nVerranno eliminati anche tutti i titoli e sinistri collegati. Operazione non reversibile.`;
+        if (prec) {
+            msg += `\n\n⚠️ La polizza precedente N. ${prec.numero_polizza} tornerà in stato ATTIVO.`;
+        }
+        if (!window.confirm(msg)) return;
         try {
             await api.delete(`/polizze/${id}`);
-            toast.success("Polizza eliminata");
+            toast.success(prec
+                ? `Polizza eliminata · N. ${prec.numero_polizza} riportata ad ATTIVA`
+                : "Polizza eliminata");
             navigate("/polizze");
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore");
