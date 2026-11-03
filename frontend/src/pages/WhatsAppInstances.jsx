@@ -214,6 +214,7 @@ function CollaboratoriVisibiliCell({ inst, collaboratori, onSaved }) {
     const [open, setOpen] = useState(false);
     const [sel, setSel] = useState(inst.collaboratori_visibili || []);
     const [saving, setSaving] = useState(false);
+    const [q, setQ] = useState("");
 
     useEffect(() => { setSel(inst.collaboratori_visibili || []); }, [inst.collaboratori_visibili]);
 
@@ -246,6 +247,13 @@ function CollaboratoriVisibiliCell({ inst, collaboratori, onSaved }) {
         ? "Solo admin"
         : current.length === 1 ? nomeById(current[0]) : `${current.length} collaboratori`;
 
+    const ordinati = [...collaboratori].sort((a, b) =>
+        (a.name || a.email || "").localeCompare(b.name || b.email || "", "it", { sensitivity: "base" }));
+    const term = q.trim().toLowerCase();
+    const filtrati = term
+        ? ordinati.filter((c) => `${c.name || ""} ${c.email || ""}`.toLowerCase().includes(term))
+        : ordinati;
+
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -264,12 +272,21 @@ function CollaboratoriVisibiliCell({ inst, collaboratori, onSaved }) {
                     <div className="text-[11px] text-slate-500 mt-0.5">
                         I collaboratori selezionati vedranno questa istanza nella chat. Nessuna selezione = solo admin.
                     </div>
+                    <Input
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="Cerca collaboratore…"
+                        className="mt-2 h-8 text-sm"
+                        data-testid={`wa-collab-search-${inst.instance_name}`}
+                    />
                 </div>
                 <div className="max-h-60 overflow-y-auto p-2 space-y-1">
-                    {collaboratori.length === 0 && (
-                        <div className="text-xs text-slate-400 px-2 py-3">Nessun collaboratore disponibile</div>
+                    {filtrati.length === 0 && (
+                        <div className="text-xs text-slate-400 px-2 py-3">
+                            {collaboratori.length === 0 ? "Nessun collaboratore disponibile" : "Nessun risultato"}
+                        </div>
                     )}
-                    {collaboratori.map((c) => (
+                    {filtrati.map((c) => (
                         <label
                             key={c.id}
                             className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer"
