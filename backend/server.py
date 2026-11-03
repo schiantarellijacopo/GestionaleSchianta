@@ -2383,12 +2383,14 @@ async def compagnia_distinta_bozza_crea(cid: str, body: dict, user=Depends(requi
         raise HTTPException(404, "Compagnia non trovata")
     titoli_ids = body.get("titoli_ids") or []
     voci = body.get("voci") or []
-    if not titoli_ids and not voci:
-        raise HTTPException(400, "Selezionare almeno un titolo o una voce")
+    residui = body.get("residui") or []
+    if not titoli_ids and not voci and not residui:
+        raise HTTPException(400, "Selezionare almeno un titolo, una voce o un residuo")
     # Importo indicativo (stesso calcolo dell'estratto conto)
     ec = await _compagnia_estratto_data(cid, None, None)
     sel_t = set(titoli_ids)
     sel_v = {(v.get("tipo"), v.get("id")) for v in voci}
+    sel_r = set(residui)
     _VOCE_TIPI = ("ritenuta_compagnia", "rappel", "pnc", "fattura_partner", "voce_manuale")
     importo = 0.0
     for r in ec.get("righe", []):
@@ -2397,16 +2399,19 @@ async def compagnia_distinta_bozza_crea(cid: str, body: dict, user=Depends(requi
             importo += net
         elif r.get("tipo") in _VOCE_TIPI and (r.get("tipo"), r.get("_movimento_id")) in sel_v:
             importo += net
+        elif r.get("tipo") == "residuo" and r.get("_movimento_id") in sel_r:
+            importo += net
     doc = assign_tenant(user, {
         "id": str(uuid.uuid4()),
         "compagnia_id": cid,
         "nome": (body.get("nome") or "").strip() or f"Distinta {_now_iso()[:10]}",
         "titoli_ids": titoli_ids,
         "voci": voci,
+        "residui": residui,
         "note": body.get("note"),
         "collaboratore_ids": body.get("collaboratore_ids") or [],
         "importo": round(importo, 2),
-        "n_righe": len(titoli_ids) + len(voci),
+        "n_righe": len(titoli_ids) + len(voci) + len(residui),
         "created_at": _now_iso(),
         "creato_da": user.get("id"),
     })

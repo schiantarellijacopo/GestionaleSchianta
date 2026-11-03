@@ -412,3 +412,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Fix: aggiunto `useGrouping: "always"` ai formatter centrali in `lib/api.js` (`fmtEur`, `fmtNum`, nuovo `fmtImporto`) e agli helper di valuta locali (MiniBilancioTab, PatrimonioTab, PiramidePrivati, Incentivazioni, EstrattoContoContraente, AnagraficaDetail, SaluteFiscaleTab, AzioniPolizzaTab, PortaleCliente). Ora ogni importo mostra sempre il separatore (es. 1.078,50 €).
 - Nuovo helper `fmtImporto(n)` = separatore + 2 decimali senza simbolo €; usato per sostituire i `toFixed(2)` manuali di visualizzazione in Librerie, Provvigioni (input disabilitati + voci), FattureAgenziaPartner, TitoloDialog. Lasciati intatti: campi input editabili, percentuali, dimensioni file e le stringhe di ricerca importo.
 - Solo visualizzazione (dati DB invariati). Verificato in preview: Contabilità → "1.078,50 €", "1.441,27 €". Richiede deploy per vederlo su Railway.
+
+### 2026-06 — Estratto Conto Compagnie: residui in bozza + filtro collaboratore
+- Bug: salvare una lista da pagare con solo una riga "residuo parziale" dava 400 ("Selezionare almeno un titolo o una voce"). Fix backend `compagnia_distinta_bozza_crea`: accetta/salva `residui`, li conta in `n_righe`/`importo`; `versaBozza` e `inBozza` (frontend) ora gestiscono i residui.
+- UX: menu a tendina "Collaboratore" (EstrattoContoCompagnie) ora con campo di ricerca, più largo (w-72) e righe più spaziose/clickabili.
+- Filtro: selezionando uno o più collaboratori specifici, le voci di compagnia non attribuibili al collaboratore (rappel, ritenuta_compagnia, pnc) e i residui NON compaiono più nella lista. Verificato in preview.

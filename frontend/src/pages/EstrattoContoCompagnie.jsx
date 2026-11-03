@@ -137,6 +137,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     const [dal, setDal] = useState("");
     const [al, setAl] = useState("");
     const [collabSel, setCollabSel] = useState(new Set()); // vuoto = Tutti
+    const [collabQuery, setCollabQuery] = useState("");
     const [showCollab, setShowCollab] = useState(false);
     const [collaboratori, setCollaboratori] = useState([]);
     const [conti, setConti] = useState([]);
@@ -176,22 +177,31 @@ function DettaglioEstratto({ compagnia, onBack }) {
     // sopra finché la bozza esiste; alla cancellazione della bozza riappaiono.
     const bozzaTitoliIds = new Set();
     const bozzaVoci = new Set();
+    const bozzaResidui = new Set();
     (bozze || []).forEach((b) => {
         (b.titoli_ids || []).forEach((id) => bozzaTitoliIds.add(id));
         (b.voci || []).forEach((v) => bozzaVoci.add(`${v.tipo}:${v.id}`));
+        (b.residui || []).forEach((id) => bozzaResidui.add(id));
     });
     const inBozza = (r) => ((r.tipo === "incasso" || r.tipo === "incasso_direzione")
         ? bozzaTitoliIds.has(r.titolo_id)
-        : bozzaVoci.has(`${r.tipo}:${r._movimento_id}`));
+        : r.tipo === "residuo"
+            ? bozzaResidui.has(r._movimento_id)
+            : bozzaVoci.has(`${r.tipo}:${r._movimento_id}`));
     const daVersare = incassi.filter((r) => r.stato_pagamento !== "pagato" && !inBozza(r));
     // Voci ancora DA VERSARE. Quelle già versate in un estratto conto precedente
     // (movimento_pagamento_id presente) NON si mostrano qui: stanno solo nello Storico.
+    // Voci di compagnia (non riconducibili a un singolo collaboratore): nascoste
+    // quando si filtra per uno o più collaboratori specifici.
+    const VOCI_COMPAGNIA = ["rappel", "ritenuta_compagnia", "pnc"];
+    const filtroCollab = collabSel.size > 0;
     const altreVoci = (data?.righe || []).filter(
-        (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r) && !r.movimento_pagamento_id,
+        (r) => VOCE_TIPI.includes(r.tipo) && !inBozza(r) && !r.movimento_pagamento_id
+            && !(filtroCollab && VOCI_COMPAGNIA.includes(r.tipo)),
     );
     // Residui di pagamenti parziali ancora da versare (sempre selezionabili)
     const residuiRows = (data?.righe || []).filter(
-        (r) => r.tipo === "residuo" && !r.movimento_pagamento_id,
+        (r) => r.tipo === "residuo" && !r.movimento_pagamento_id && !inBozza(r) && !filtroCollab,
     );
     // Tab "Movimenti & versamenti": SOLO ciò che è ancora da versare (fleggabile).
     // Titoli pagati, voci già versate e i versamenti effettuati sono nello "Storico rimesse".
@@ -268,7 +278,7 @@ function DettaglioEstratto({ compagnia, onBack }) {
     };
     const versaBozza = (b) => {
         setPayCtx({
-            payload: { titoli_ids: b.titoli_ids || [], voci: b.voci || [] },
+            payload: { titoli_ids: b.titoli_ids || [], voci: b.voci || [], residui: b.residui || [] },
             nRighe: b.n_righe, totale: b.importo, bozzaId: b.id,
         });
     };
@@ -356,22 +366,35 @@ function DettaglioEstratto({ compagnia, onBack }) {
                             {showCollab && (
                                 <>
                                     <div className="fixed inset-0 z-10" onClick={() => setShowCollab(false)} />
-                                    <div className="absolute z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg py-1" data-testid="ec-collab-menu">
-                                        <button type="button" onClick={() => setCollabSel(new Set())}
-                                            className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2">
-                                            <input type="checkbox" readOnly checked={collabSel.size === 0} /> Tutti
-                                        </button>
-                                        {collaboratori.map((c) => {
-                                            const on = collabSel.has(c.id);
-                                            return (
-                                                <button key={c.id} type="button"
-                                                    onClick={() => setCollabSel((p) => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n; })}
-                                                    className="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2"
-                                                    data-testid={`ec-collab-opt-${c.id}`}>
-                                                    <input type="checkbox" readOnly checked={on} /> <span className="truncate">{c.name || c.email}</span>
-                                                </button>
-                                            );
-                                        })}
+                                    <div className="absolute z-20 mt-1 w-72 rounded-md border border-slate-200 bg-white shadow-lg" data-testid="ec-collab-menu">
+                                        <div className="sticky top-0 bg-white p-2 border-b border-slate-100">
+                                            <input autoFocus value={collabQuery} onChange={(e) => setCollabQuery(e.target.value)}
+                                                placeholder="Cerca collaboratore…"
+                                                className="w-full h-8 px-2 text-sm rounded border border-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-400"
+                                                data-testid="ec-collab-search" />
+                                        </div>
+                                        <div className="max-h-80 overflow-y-auto py-1">
+                                            <button type="button" onClick={() => { setCollabSel(new Set()); setCollabQuery(""); }}
+                                                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 flex items-center gap-2">
+                                                <input type="checkbox" readOnly checked={collabSel.size === 0} className="pointer-events-none" /> Tutti
+                                            </button>
+                                            {collaboratori
+                                                .filter((c) => !collabQuery.trim() || (c.name || c.email || "").toLowerCase().includes(collabQuery.trim().toLowerCase()))
+                                                .map((c) => {
+                                                    const on = collabSel.has(c.id);
+                                                    return (
+                                                        <button key={c.id} type="button"
+                                                            onClick={() => setCollabSel((p) => { const n = new Set(p); n.has(c.id) ? n.delete(c.id) : n.add(c.id); return n; })}
+                                                            className={`w-full text-left px-3 py-2 text-sm flex items-center gap-2 ${on ? "bg-sky-50 text-sky-800" : "hover:bg-slate-50"}`}
+                                                            data-testid={`ec-collab-opt-${c.id}`}>
+                                                            <input type="checkbox" readOnly checked={on} className="pointer-events-none" /> <span className="truncate">{c.name || c.email}</span>
+                                                        </button>
+                                                    );
+                                                })}
+                                            {collaboratori.filter((c) => !collabQuery.trim() || (c.name || c.email || "").toLowerCase().includes(collabQuery.trim().toLowerCase())).length === 0 && (
+                                                <div className="px-3 py-3 text-xs text-slate-400 text-center">Nessun collaboratore</div>
+                                            )}
+                                        </div>
                                     </div>
                                 </>
                             )}
