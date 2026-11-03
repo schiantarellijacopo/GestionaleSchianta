@@ -6765,16 +6765,13 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
     # Titolo già coperto (anticipato dall'agenzia): l'incasso sposta solo da sospeso a banca,
     # senza riregistrare entrate/provvigioni/saldo (già contabilizzati alla copertura).
     is_coperto = bool(titolo.get("titolo_coperto")) and not is_direzione
-    # Unificazione copertura+incasso in UNA sola riga, per evitare la DOPPIA registrazione.
-    #  - SAFETY NET (sempre attivo): se esiste una copertura dello STESSO giorno dell'incasso
-    #    (giornata aperta) viene unificata a prescindere dal flag → nessun flusso (singolo,
-    #    multiplo, incasso rapido, dialog copertura+incasso) può più produrre la doppia riga.
-    #  - merge_copertura=True (flussi multipli): unifica anche coperture di ALTRI giorni APERTI.
-    #  Le coperture su giornate CHIUSE restano invariate (immutabili → due righe storiche).
-    #  Vale anche per l'incasso IN DIREZIONE: il cliente paga in compagnia → la copertura
-    #  (sospeso anticipato) va assorbita, lasciando la SOLA riga "incasso direzione".
+    # Unificazione copertura+incasso in UNA sola riga SOLO quando avvengono nello
+    # STESSO giorno (es. dialog copertura+incasso, incasso rapido): evita la doppia riga.
+    # Una copertura di un GIORNO PRECEDENTE NON viene mai toccata: l'incasso odierno è un
+    # "incasso_coperto" che sposta il premio da SOSPESO a BANCA SENZA riregistrare
+    # entrate/provvigioni/saldo (già contabilizzati alla copertura). Così la riga di
+    # copertura storica resta al suo giorno e il sospeso si chiude alla data d'incasso.
     _assorbe_copertura = is_coperto or is_direzione
-    merge_flag = bool(body.get("merge_copertura")) and _assorbe_copertura
     cop_movs_merge = []
     cop_docs_merge = []
     if _assorbe_copertura:
@@ -6782,9 +6779,8 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
             {"titolo_id": tid, "categoria": {"$in": ["copertura_titolo", "anticipo"]}},
             {"_id": 0},
         ):
-            same_day = _cm.get("data_movimento") == data_incasso
-            if not (same_day or merge_flag):
-                continue  # copertura di altro giorno e nessun merge richiesto → lascia 2 righe
+            if _cm.get("data_movimento") != data_incasso:
+                continue  # copertura di ALTRO giorno → NON unificare (resta incasso_coperto)
             _ch = await db.chiusure_giorno.find_one(
                 {"data": _cm["data_movimento"]}, {"_id": 0, "riaperta_at": 1})
             if _ch and not _ch.get("riaperta_at"):

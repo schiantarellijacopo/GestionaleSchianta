@@ -1,6 +1,14 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Incasso di titolo coperto in giorno diverso: niente più doppia registrazione
+- **Bug utente** (produzione): titoli messi a SOSPESO (copertura) il 30/10 e incassati il 02/11. Il 02/11 la Prima Nota mostrava registrazioni SBAGLIATE: incasso pieno con TOTALE/PROVVIGIONI/SALDO ricontabilizzati + banca, invece del solo spostamento SOSPESO→BANCA. (Giornata del 30/10 NON chiusa.)
+- **Causa** (`server.py` → `incassa_titolo`): con `merge_copertura=true` (passato dal frontend) la copertura di un GIORNO PRECEDENTE ancora APERTO veniva "unificata" → la riga di copertura del 30/10 veniva CANCELLATA e l'incasso del 02/11 diventava un `incasso_premio` pieno (effective_coperto=False), ricontabilizzando entrate/provvigioni/saldo.
+- **Fix**: l'unificazione copertura+incasso ora avviene SOLO se la copertura è dello STESSO giorno dell'incasso (rimosso il merge cross-day basato su `merge_copertura`). Una copertura di un giorno precedente resta intatta e l'incasso successivo è un `incasso_coperto` (SOSPESI −lordo, banca +importo, nessun ricalcolo di TOTALE/PROVVIGIONI/SALDO).
+- **Verifica** (API + DB): copertura 30/10 (copertura_titolo, 1020,50) RESTA; incasso 02/11 → `incasso_coperto` (provv=0, su conto banca). Nessun doppio conteggio. Il flusso same-day (dialog copertura+incasso, incasso rapido) continua a unificare in una riga.
+- **Effetto**: il fix previene nuove registrazioni errate dal prossimo publish/deploy. Le registrazioni GIÀ errate in produzione (coperture 30/10 cancellate + incasso pieno 02/11) vanno corrette separatamente (serve una ripulitura dati in produzione, non accessibile da qui).
+
+
 ## 2026-06 — Brogliaccio: KPI Sospesi fedele alla data della videata (fix riapertura/richiusura)
 - **Bug utente** (produzione, tenant jacopo@schiantarelli): riaprendo e richiudendo una Prima Nota chiusa — anche senza registrare nulla — il KPI "Sospesi" cambiava/era errato (es. al 26/10/2026 atteso 71.046,59, mostrato 99.194,89). I KPI della videata devono riferirsi SEMPRE alla data del brogliaccio visualizzato.
 - **Causa**: il KPI Sospesi (`_total_sospesi_as_of`, usato da `_compute_brogliaccio` → `riepilogo_kpi.crediti`) sommava i titoli coperti ancora da incassare SENZA filtrare `data_copertura <= data_giorno` (pur dichiarandolo nel docstring). Così conteggiava anche le coperture fatte DOPO la data della videata (attività dei giorni/mesi successivi) → valore gonfiato e che "deriva" nel tempo. Le altre voci KPI (entrate/provvigioni/rimesse/sconti/spese/saldo) sono invece ricostruite dai movimenti immutabili `<= data_giorno`, quindi già fedeli alla data.
