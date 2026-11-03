@@ -691,6 +691,18 @@ async def get_anagrafica(aid: str, user: dict = Depends(current_user)):
                 "handicap": rel.get("handicap"),
             })
     doc["relazioni_risolte"] = relazioni_risolte
+    # Collaboratore/i di riferimento → nomi risolti per l'header
+    coll_ids = list(doc.get("collaboratori_ids") or [])
+    if not coll_ids and doc.get("collaboratore_id"):
+        coll_ids = [doc["collaboratore_id"]]
+    nomi = []
+    if coll_ids:
+        cmap = {}
+        async for u in db.users.find({"id": {"$in": coll_ids}}, {"_id": 0, "id": 1, "name": 1}):
+            cmap[u["id"]] = u["name"]
+        nomi = [cmap[i] for i in coll_ids if i in cmap]
+    doc["collaboratori_nomi"] = nomi
+    doc["collaboratore_nome"] = nomi[0] if nomi else None
     return doc
 
 
@@ -1036,10 +1048,13 @@ async def anagrafica_network(aid: str, user: dict = Depends(current_user)):
             stato = (p.get("stato") or "").lower()
             if stato in ("attiva", "in_emissione"):
                 n_attive += 1
+                # Premio e provvigioni SOLO sulle polizze attive: la colonna PREMIO
+                # affiancata ad ATTIVE deve riflettere il portafoglio attivo, non le
+                # polizze scadute/sostituite/annullate (che gonfiavano il totale).
+                premio += float(p.get("premio_totale") or p.get("premio_lordo") or 0)
+                provv += float(p.get("provvigione_totale") or p.get("provvigioni") or 0)
             elif stato in ("preventivo", "bozza"):
                 n_preventivo += 1
-            premio += float(p.get("premio_totale") or p.get("premio_lordo") or 0)
-            provv += float(p.get("provvigione_totale") or p.get("provvigioni") or 0)
         return {
             "n_polizze_attive": n_attive,
             "n_preventivi": n_preventivo,

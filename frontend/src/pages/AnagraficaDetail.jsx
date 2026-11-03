@@ -29,7 +29,7 @@ import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
     Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool, AlertTriangle,
-    Receipt, Bell,
+    Receipt, Bell, UserCircle,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -209,8 +209,22 @@ export default function AnagraficaDetail() {
                                 </Button>
                             )}
                         </div>
-                        <AnagraficaAvatar ana={ana} size="lg" editable
-                            onUpdated={(url) => { setAna({ ...ana, avatar_url: url }); }} />
+                        <div className="flex flex-col items-center gap-1.5">
+                            {(ana.collaboratori_nomi?.length > 0 || ana.collaboratore_nome) && (
+                                <div
+                                    className="inline-flex items-center gap-1.5 text-[11px] bg-sky-50 border border-sky-200 text-sky-800 px-2.5 py-1 rounded-full max-w-[200px]"
+                                    title={`Collaboratore di riferimento: ${(ana.collaboratori_nomi?.length ? ana.collaboratori_nomi : [ana.collaboratore_nome]).join(", ")}`}
+                                    data-testid="hdr-collaboratore-rif"
+                                >
+                                    <UserCircle size={13} className="shrink-0 text-sky-600" />
+                                    <span className="truncate font-medium">
+                                        {(ana.collaboratori_nomi?.length ? ana.collaboratori_nomi : [ana.collaboratore_nome]).join(", ")}
+                                    </span>
+                                </div>
+                            )}
+                            <AnagraficaAvatar ana={ana} size="lg" editable
+                                onUpdated={(url) => { setAna({ ...ana, avatar_url: url }); }} />
+                        </div>
                     </div>
                 }
             />

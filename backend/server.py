@@ -4367,6 +4367,29 @@ async def _match_anagrafica_cf_piva(user: dict, cf: Optional[str], piva: Optiona
     return None, False
 
 
+def _fill_imposte_residuo(d: dict) -> None:
+    """Se il premio LORDO è noto ma le imposte sono 0/mancanti, deducile come residuo
+    (lordo − netto − ssn − accessori − addizionale). Evita che la scheda polizza nasca
+    con 'Imposte €: 0' pur avendo un lordo che le include — così netto+imposte+ssn
+    quadra col lordo e la polizza resta allineata al titolo. No-op per le Vita dove
+    lordo == netto (residuo ≈ 0)."""
+    try:
+        lordo = float(d.get("premio_lordo") or 0)
+        netto = float(d.get("premio_netto") or 0)
+        tasse = float(d.get("premio_tasse") or 0)
+        imposte2 = float(d.get("premio_imposte") or 0)
+        ssn = float(d.get("premio_ssn") or 0)
+        acc = float(d.get("premio_accessori") or 0)
+        add = float(d.get("premio_addizionale") or 0)
+    except (TypeError, ValueError):
+        return
+    if lordo > 0 and (tasse + imposte2) <= 0.01:
+        residuo = round(lordo - netto - ssn - acc - add, 2)
+        if residuo > 0.01:
+            d["premio_tasse"] = residuo
+
+
+
 
 
 @api.post("/polizze", status_code=201)
@@ -4440,6 +4463,8 @@ async def create_polizza(body: dict, user=Depends(require_user("admin", "collabo
             body["prossima_quietanza"] = _add_months(_eff, _mesi_fraz)
         if not body.get("scadenza_copertura"):
             body["scadenza_copertura"] = body["prossima_quietanza"]
+    # Imposte residue: se il lordo include imposte ma il campo è 0, deducile.
+    _fill_imposte_residuo(body)
     try:
         obj = Polizza(**body)
     except ValidationError as _ve:
@@ -4522,6 +4547,12 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     _ECON_FIELDS = {"premio_lordo", "premio_netto", "premio_tasse", "premio_imposte",
                     "premio_ssn", "premio_accessori", "provvigioni", "collaboratore_id"}
     if doc and (set(body) & _ECON_FIELDS):
+        # Heal imposte sulla scheda polizza: se il lordo le include ma il campo è 0.
+        _tasse_prima = round(float(doc.get("premio_tasse") or 0), 2)
+        _fill_imposte_residuo(doc)
+        _tasse_dopo = round(float(doc.get("premio_tasse") or 0), 2)
+        if _tasse_dopo != _tasse_prima:
+            await db.polizze.update_one({"id": pid}, {"$set": {"premio_tasse": _tasse_dopo}})
         titolo_iniz = await db.titoli.find_one(
             {"polizza_id": pid, "stato": "da_incassare", "effetto": doc.get("effetto")},
             {"_id": 0, "id": 1},
