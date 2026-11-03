@@ -9606,6 +9606,18 @@ async def estratto_conto(anagrafica_id: str, user=Depends(current_user)):
     return {"anagrafica": ana, "movimenti": rows, "saldo_finale": round(saldo, 2)}
 
 
+def _q_importo(qs: str):
+    """Converte una stringa di ricerca in importo numerico, accettando sia il
+    formato italiano '1.234,56' sia '1234.56'. Ritorna None se non è un numero."""
+    raw = (qs or "").replace("€", "").replace(" ", "")
+    if "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
 @api.get("/contabilita/prima-nota")
 async def prima_nota(
     dal: Optional[str] = None, al: Optional[str] = None, q: Optional[str] = None,
@@ -9621,10 +9633,15 @@ async def prima_nota(
         flt["data_movimento"] = cond
     if q and q.strip():
         rx = {"$regex": re.escape(q.strip()), "$options": "i"}
-        flt["$or"] = [
+        ors = [
             {"descrizione": rx}, {"numero_documento": rx},
             {"mezzo_pagamento": rx}, {"categoria": rx},
         ]
+        # Ricerca anche per IMPORTO (es. "131,95" o "131.95"), con tolleranza di 1 centesimo.
+        val = _q_importo(q.strip())
+        if val is not None:
+            ors.append({"importo": {"$gte": val - 0.005, "$lte": val + 0.005}})
+        flt["$or"] = ors
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(2000)
     # arricchimento count allegati
     ids = [m["id"] for m in items]
@@ -17850,8 +17867,12 @@ async def stampa_prima_nota(dal: Optional[str] = None, al: Optional[str] = None,
         flt["data_movimento"] = cond
     if q and q.strip():
         rx = {"$regex": re.escape(q.strip()), "$options": "i"}
-        flt["$or"] = [{"descrizione": rx}, {"numero_documento": rx},
-                      {"mezzo_pagamento": rx}, {"categoria": rx}]
+        ors = [{"descrizione": rx}, {"numero_documento": rx},
+               {"mezzo_pagamento": rx}, {"categoria": rx}]
+        val = _q_importo(q.strip())
+        if val is not None:
+            ors.append({"importo": {"$gte": val - 0.005, "$lte": val + 0.005}})
+        flt["$or"] = ors
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(5000)
     headers = ["Data", "Tipo", "Categoria", "Descrizione", "Mezzo", "Entrata €", "Uscita €"]
     rows = []
@@ -17880,8 +17901,12 @@ async def export_prima_nota_xlsx(dal: Optional[str] = None, al: Optional[str] = 
         flt["data_movimento"] = cond
     if q and q.strip():
         rx = {"$regex": re.escape(q.strip()), "$options": "i"}
-        flt["$or"] = [{"descrizione": rx}, {"numero_documento": rx},
-                      {"mezzo_pagamento": rx}, {"categoria": rx}]
+        ors = [{"descrizione": rx}, {"numero_documento": rx},
+               {"mezzo_pagamento": rx}, {"categoria": rx}]
+        val = _q_importo(q.strip())
+        if val is not None:
+            ors.append({"importo": {"$gte": val - 0.005, "$lte": val + 0.005}})
+        flt["$or"] = ors
     items = await db.movimenti.find(flt, {"_id": 0}).sort("data_movimento", 1).to_list(20000)
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment

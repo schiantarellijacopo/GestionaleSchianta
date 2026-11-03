@@ -1,6 +1,13 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Prima Nota: la ricerca trova anche per importo
+- **Richiesta/bug utente**: nel tab "Movimenti (elenco)" il campo Cerca non trovava nulla digitando un importo (cercava solo descrizione/categoria/mezzo/n. documento). L'export Excel per intervallo date esiste già nello stesso tab (pulsante Excel).
+- **Fix** (`server.py`): aggiunto helper `_q_importo` che interpreta la query come numero accettando sia il formato italiano `1.234,56` sia `1234.56`. La ricerca per importo (con tolleranza di 1 centesimo) è stata aggiunta a tutti gli endpoint Prima Nota: elenco `/contabilita/prima-nota`, stampa PDF `/stampa/prima-nota`, export `/stampa/prima-nota.xlsx`.
+- **Verifica** (curl, dati reali): `q=505.0` e `q=505,0` trovano entrambi il movimento da 505,00 €; i risultati rispettano l'importo richiesto. Backend compila e riparte correttamente.
+- **Nota**: così puoi cercare direttamente `131,95` in Movimenti (elenco) per individuare data e conto di quel movimento.
+
+
 ## 2026-06 — Saldo cassa storico: non cambia più alla riapertura (conti disattivati inclusi)
 - **Bug utente** (produzione): riaprendo una giornata chiusa SENZA modifiche, il "saldo cassa" cambiava di un importo COSTANTE di 131,95 su più giorni (23, 26, 27, 28, 29, 30 ottobre). Es. 26/10 corretto 101.345,70 → mostrato 101.213,75.
 - **Meccanica**: giornata CHIUSA → mostra lo snapshot congelato (corretto); RIAPERTA → ricalcolo live. Lo scarto COSTANTE su tutti i giorni indicava un unico elemento escluso dal live.
