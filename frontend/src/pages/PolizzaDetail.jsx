@@ -155,9 +155,9 @@ export default function PolizzaDetail() {
     // Sezione Vita/Previdenza: solo per polizze del ramo vita/previdenza
     const _ramoTxt = `${pol.ramo || ""} ${pol.ramo_originale || ""} ${pol.prodotto || ""}`.toUpperCase();
     const isRamoVita = /VITA|PREVID|TCM|TEMPORANEA CASO MORTE/.test(_ramoTxt) || (pol.rendita_annua || 0) > 0;
-    // Polizza non eliminabile se esistono titoli incassati o coperti
+    // Polizza non eliminabile SOLO se esistono titoli incassati o coperti
     const haTitoliBloccanti = (pol.titoli || []).some(
-        (t) => t.stato === "incassato" || t.titolo_coperto || t.data_copertura,
+        (t) => t.stato === "incassato" || t.titolo_coperto === true,
     );
 
     const canEdit = ["admin", "collaboratore", "dipendente"].includes(user?.role);

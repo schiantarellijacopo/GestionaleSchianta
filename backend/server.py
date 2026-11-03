@@ -5030,8 +5030,7 @@ async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
     # Blocco: una polizza con titoli incassati o coperti non è eliminabile
     bloccanti = await db.titoli.count_documents(
         {"polizza_id": pid,
-         "$or": [{"stato": "incassato"}, {"titolo_coperto": True},
-                 {"data_copertura": {"$nin": [None, ""]}}]},
+         "$or": [{"stato": "incassato"}, {"titolo_coperto": True}]},
     )
     if bloccanti:
         raise HTTPException(
