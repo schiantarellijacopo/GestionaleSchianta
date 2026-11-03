@@ -50,6 +50,65 @@ import ContrattoConsulenzaTab from "@/components/ContrattoConsulenzaTab";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
+function CollaboratoreRifSelect({ ana, canEdit, onChanged }) {
+    const [operatori, setOperatori] = useState([]);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => {
+        api.get("/auth/users")
+            .then((r) => setOperatori((r.data || []).filter((u) => u.role !== "cliente" && u.attivo !== false)))
+            .catch(() => setOperatori([]));
+    }, []);
+    const current = ana.collaboratore_id || "";
+    const currentName = ana.collaboratore_nome
+        || (ana.collaboratori_nomi?.length ? ana.collaboratori_nomi[0] : "")
+        || operatori.find((o) => o.id === current)?.name
+        || "";
+    const salva = async (val) => {
+        const newId = val === "__none__" ? null : val;
+        setSaving(true);
+        try {
+            await api.put(`/anagrafiche/${ana.id}`, { collaboratore_id: newId, collaboratori_ids: newId ? [newId] : [] });
+            const nome = newId ? (operatori.find((o) => o.id === newId)?.name || "") : null;
+            onChanged?.(newId, nome);
+            toast.success(newId ? "Operatore di riferimento aggiornato" : "Operatore di riferimento rimosso");
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio operatore");
+        } finally { setSaving(false); }
+    };
+    if (!canEdit) {
+        if (!currentName) return null;
+        return (
+            <span className="inline-flex items-center gap-1.5 text-xs text-sky-800" data-testid="hdr-collaboratore-rif">
+                <UserCircle size={13} className="text-sky-600" />
+                <span className="font-medium">{currentName}</span>
+            </span>
+        );
+    }
+    return (
+        <span className="inline-flex items-center gap-1.5 mt-1.5" data-testid="hdr-collaboratore-rif">
+            <UserCircle size={14} className="text-sky-600 shrink-0" />
+            <span className="text-xs text-slate-400 uppercase tracking-wide">Operatore</span>
+            <Select value={current || "__none__"} onValueChange={salva} disabled={saving}>
+                <SelectTrigger
+                    className="h-7 min-w-[180px] max-w-[260px] text-xs border-sky-200 bg-sky-50/60 text-sky-800 font-medium"
+                    data-testid="hdr-collaboratore-select"
+                >
+                    <SelectValue placeholder="— Nessuno —">{currentName || "— Nessuno —"}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                    <SelectItem value="__none__">— Nessuno —</SelectItem>
+                    {operatori.map((o) => (
+                        <SelectItem key={o.id} value={o.id} data-testid={`hdr-collab-opt-${o.id}`}>
+                            {o.name || o.email}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        </span>
+    );
+}
+
+
 export default function AnagraficaDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -181,7 +240,16 @@ export default function AnagraficaDetail() {
                         )}
                     </span>
                 }
-                subtitle={`${ana.tipo === "persona_giuridica" ? "Persona giuridica" : "Persona fisica"} · ${ana.codice_fiscale || ana.partita_iva || "—"}`}
+                subtitle={
+                    <span className="flex flex-col">
+                        <span>{`${ana.tipo === "persona_giuridica" ? "Persona giuridica" : "Persona fisica"} · ${ana.codice_fiscale || ana.partita_iva || "—"}`}</span>
+                        <CollaboratoreRifSelect
+                            ana={ana}
+                            canEdit={canEdit}
+                            onChanged={(cid, nome) => setAna({ ...ana, collaboratore_id: cid, collaboratore_nome: nome, collaboratori_nomi: nome ? [nome] : [] })}
+                        />
+                    </span>
+                }
                 actions={
                     <div className="flex items-start gap-3">
                         <div className="flex gap-2">
@@ -210,18 +278,6 @@ export default function AnagraficaDetail() {
                             )}
                         </div>
                         <div className="flex flex-col items-center gap-1.5">
-                            {(ana.collaboratori_nomi?.length > 0 || ana.collaboratore_nome) && (
-                                <div
-                                    className="inline-flex items-center gap-1.5 text-[11px] bg-sky-50 border border-sky-200 text-sky-800 px-2.5 py-1 rounded-full max-w-[200px]"
-                                    title={`Collaboratore di riferimento: ${(ana.collaboratori_nomi?.length ? ana.collaboratori_nomi : [ana.collaboratore_nome]).join(", ")}`}
-                                    data-testid="hdr-collaboratore-rif"
-                                >
-                                    <UserCircle size={13} className="shrink-0 text-sky-600" />
-                                    <span className="truncate font-medium">
-                                        {(ana.collaboratori_nomi?.length ? ana.collaboratori_nomi : [ana.collaboratore_nome]).join(", ")}
-                                    </span>
-                                </div>
-                            )}
                             <AnagraficaAvatar ana={ana} size="lg" editable
                                 onUpdated={(url) => { setAna({ ...ana, avatar_url: url }); }} />
                         </div>

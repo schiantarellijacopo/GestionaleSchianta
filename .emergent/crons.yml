@@ -1,0 +1,8 @@
+crons:
+  - name: imap-poll-watchdog
+    description: "Ogni 15 min ri-arma e lancia lo smistamento automatico email IMAP, così non resta mai fermo dopo un riavvio"
+    cron: "*/15 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/imap-poll"
+    method: POST
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    enabled: true

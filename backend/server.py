@@ -381,7 +381,16 @@ async def update_user(uid: str, body: dict, user=Depends(require_user("admin")))
     if "email" in clean:
         new_email = (clean["email"] or "").lower().strip()
         if not new_email:
-            clean.pop("email")
+            # Email svuotata: azzera davvero (consentito agli utenti senza login).
+            # L'indice parziale permette più utenti senza email.
+            # Ma un utente CON accesso al software ha bisogno dell'email per il login.
+            _acc = clean.get("accesso_software")
+            if _acc is None:
+                _existing = await db.users.find_one({"id": uid}, {"_id": 0, "accesso_software": 1})
+                _acc = (_existing or {}).get("accesso_software")
+            if _acc is not False:
+                raise HTTPException(400, "L'email è obbligatoria per gli utenti con accesso al software. Disattiva l'accesso per rimuoverla.")
+            clean["email"] = None
         else:
             clean["email"] = new_email
             dup = await db.users.find_one(
@@ -15995,11 +16004,13 @@ async def delete_email_inbox(eid: str, user=Depends(current_user)):
 # ============================================================
 @api.get("/email/poller/status")
 async def imap_poller_status(user=Depends(require_user("admin"))):
-    az = await db.azienda_config.find_one(
-        {}, {"_id": 0, "imap_poller_enabled": 1, "imap_poller_minutes": 1,
-             "imap_poller_last_run": 1, "imap_poller_last_uid": 1,
-             "imap_host": 1, "imap_user": 1},
-    ) or {}
+    az = await imap_poller.get_active_config(db)
+    if not az:
+        az = await db.azienda_config.find_one(
+            {}, {"_id": 0, "imap_poller_enabled": 1, "imap_poller_minutes": 1,
+                 "imap_poller_last_run": 1, "imap_poller_last_uid": 1,
+                 "imap_host": 1, "imap_user": 1},
+        ) or {}
     return {
         "running": imap_poller.is_running(),
         "enabled": bool(az.get("imap_poller_enabled")),
@@ -16017,7 +16028,7 @@ async def imap_poller_start(
 ):
     body = body or {}
     minutes = int(body.get("minutes") or 5)
-    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    az = await imap_poller.get_active_config(db)
     if not (az.get("imap_host") and az.get("imap_user") and az.get("imap_password")):
         raise HTTPException(400, "IMAP non configurato (host/user/password)")
     imap_poller.start_scheduler(db, minutes=minutes)
@@ -16032,7 +16043,7 @@ async def imap_poller_start(
 @api.post("/email/poller/stop")
 async def imap_poller_stop(user=Depends(require_user("admin"))):
     imap_poller.stop_scheduler()
-    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1}) or {}
+    az = await imap_poller.get_active_config(db)
     if az.get("id"):
         await db.azienda_config.update_one(
             {"id": az["id"]}, {"$set": {"imap_poller_enabled": False}},
@@ -16045,6 +16056,43 @@ async def imap_poller_run_now(user=Depends(require_user("admin"))):
     """Esegue un singolo ciclo di polling on-demand (utile per test)."""
     res = await imap_poller.poll_once(db)
     return res
+
+
+@api.post("/cron/imap-poll")
+async def cron_imap_poll(request: Request):
+    """Watchdog cron per lo smistamento automatico email.
+
+    Chiamato dalla piattaforma (vedi .emergent/crons.yml). Garantisce che la
+    sincronizzazione NON resti mai "sganciata" dopo un riavvio/deploy del
+    backend: ri-arma lo scheduler in-memory se risulta abilitato ma spento, ed
+    esegue comunque un ciclo di polling. Sopravvive ai riavvii perché è la
+    piattaforma a schedularlo, non un timer interno.
+    """
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    import hmac
+    import asyncio as _asyncio
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Unauthorized")
+
+    async def _bg():
+        try:
+            az = await imap_poller.get_active_config(db)
+            enabled = bool(az.get("imap_poller_enabled"))
+            configured = bool(az.get("imap_host") and az.get("imap_user") and az.get("imap_password"))
+            if enabled and configured and not imap_poller.is_running():
+                imap_poller.start_scheduler(db, minutes=int(az.get("imap_poller_minutes") or 5))
+                logger.info("Cron watchdog: scheduler IMAP ri-armato")
+            if enabled and configured:
+                res = await imap_poller.poll_once(db)
+                logger.info("Cron watchdog IMAP poll: %s", res)
+        except Exception:
+            logger.exception("Cron watchdog IMAP errore")
+
+    _asyncio.create_task(_bg())
+    return {"ok": True}
 
 
 # =============== CONFIG VISIBILITÀ CARD DOCUMENTI ===============
@@ -19427,7 +19475,20 @@ if _FRONTEND_DIR.is_dir() and (_FRONTEND_DIR / "index.html").exists():
 @app.on_event("startup")
 async def startup():
     # indexes (base + estesi per ricerche veloci senza limiti)
-    await db.users.create_index("email", unique=True)
+    # Email unica SOLO quando è una stringa non vuota: gli utenti senza accesso al
+    # software possono non avere email (più utenti con email assente non collidono).
+    try:
+        _uix = await db.users.index_information()
+        _cur = _uix.get("email_1")
+        if _cur and not _cur.get("partialFilterExpression"):
+            await db.users.drop_index("email_1")
+        await db.users.create_index(
+            "email", unique=True,
+            partialFilterExpression={"email": {"$type": "string"}},
+            name="email_1",
+        )
+    except Exception as _e:
+        logger.warning("Migrazione indice users.email non riuscita: %s", _e)
     await db.anagrafiche.create_index("id_anagrafica_exp")
     await db.polizze.create_index("id_polizza_exp")
     await db.titoli.create_index("id_titolo_exp")
@@ -19657,10 +19718,7 @@ async def startup():
 
     # IMAP Poller — avviato automaticamente solo se abilitato in config
     try:
-        az_cfg = await db.azienda_config.find_one(
-            {}, {"_id": 0, "imap_poller_enabled": 1, "imap_poller_minutes": 1,
-                 "imap_host": 1, "imap_user": 1, "imap_password": 1},
-        ) or {}
+        az_cfg = await imap_poller.get_active_config(db)
         if (az_cfg.get("imap_poller_enabled")
                 and az_cfg.get("imap_host")
                 and az_cfg.get("imap_user")

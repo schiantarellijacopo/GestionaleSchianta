@@ -37,6 +37,26 @@ _job_id = "imap_poller_job"
 
 
 # ============================================================
+# Config lookup (multi-tenant safe)
+# ============================================================
+async def get_active_config(db: AsyncIOMotorDatabase) -> dict:
+    """Ritorna l'UNICA casella IMAP realmente configurata (host+user+password).
+
+    In ambiente multi-tenant esistono più documenti ``azienda_config`` (uno per
+    agenzia) ma un solo poller globale. Un ``find_one({})`` restituirebbe un
+    documento arbitrario (spesso quello di un tenant senza IMAP), facendo
+    risultare la sincronizzazione "ferma". Qui selezioniamo deterministicamente
+    il documento con le credenziali IMAP valorizzate.
+    """
+    cfg = await db.azienda_config.find_one({
+        "imap_host": {"$nin": [None, ""]},
+        "imap_user": {"$nin": [None, ""]},
+        "imap_password": {"$nin": [None, ""]},
+    }, {"_id": 0})
+    return cfg or {}
+
+
+# ============================================================
 # Helpers
 # ============================================================
 def _decode(h: Optional[str]) -> str:
@@ -234,7 +254,7 @@ async def fetch_attachment_bytes(db: AsyncIOMotorDatabase, em: dict, att: dict):
         folder = em.get("folder") or "INBOX"
         if not uid:
             raise first_err
-        az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+        az = await get_active_config(db)
         downloaded = await asyncio.to_thread(
             _redownload_attachment_from_imap, az, uid=str(uid), folder=folder
         )
@@ -546,7 +566,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
     Restituisce statistiche: ``{ok, totali, nuovi, errore}``.
     """
     from credentials_utils import clean_password, clean_email
-    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    az = await get_active_config(db)
     host = az.get("imap_host")
     port = int(az.get("imap_port") or 993)
     user_ = clean_email(az.get("imap_user"))
