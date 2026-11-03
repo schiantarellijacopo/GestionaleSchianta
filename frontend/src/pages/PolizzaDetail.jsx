@@ -205,7 +205,7 @@ export default function PolizzaDetail() {
     const startPremiEdit = () => {
         setPremiForm({
             premio_netto: pol.premio_netto ?? 0,
-            premio_imposte: pol.premio_imposte ?? 0,
+            premio_imposte: (Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0),
             premio_ssn: pol.premio_ssn ?? 0,
             premio_accessori: pol.premio_accessori ?? 0,
             premio_addizionale: pol.premio_addizionale ?? 0,
@@ -225,6 +225,7 @@ export default function PolizzaDetail() {
         try {
             const payload = {};
             Object.entries(premiForm).forEach(([k, v]) => { payload[k] = parseFloat(v) || 0; });
+            payload.premio_tasse = 0;  // imposte consolidate in premio_imposte (evita doppio conteggio)
             payload.premio_lordo = calcLordo(premiForm);
             await api.put(`/polizze/${pol.id}`, payload);
             toast.success("Premi aggiornati");
@@ -824,7 +825,7 @@ export default function PolizzaDetail() {
                         {!premiEdit ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
-                                <F label="Imposte" value={fmtEur(pol.premio_imposte)} />
+                                <F label="Imposte" value={fmtEur((Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0))} />
                                 <F label="SSN" value={fmtEur(pol.premio_ssn)} />
                                 <F label="Accessori" value={fmtEur(pol.premio_accessori)} />
                                 <F label="Addizionale" value={fmtEur(pol.premio_addizionale)} />
@@ -1518,8 +1519,8 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         iter_status: pol.iter_status || "",
         oggetto_assicurato: pol.oggetto_assicurato || "",
         premio_netto: pol.premio_netto || 0,
-        premio_tasse: pol.premio_tasse || 0,
-        premio_imposte: pol.premio_imposte || 0,
+        premio_tasse: 0,
+        premio_imposte: (Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0),
         premio_ssn: pol.premio_ssn || 0,
         premio_accessori: pol.premio_accessori || 0,
         premio_addizionale: pol.premio_addizionale || 0,
