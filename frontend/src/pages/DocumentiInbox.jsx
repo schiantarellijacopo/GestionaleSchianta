@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
+import OcrProgressBar from "@/components/OcrProgressBar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -194,6 +195,9 @@ export default function DocumentiInbox() {
                             <Upload size={14} className="mr-1" /> {uploading ? "Analisi in corso…" : "Carica documenti"}
                         </label>
                     </Button>
+                    <div className="max-w-md mx-auto mt-4">
+                        <OcrProgressBar active={uploading} label="Analisi OCR documenti in corso…" />
+                    </div>
                 </div>
             </Card>
 

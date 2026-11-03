@@ -25,6 +25,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 import KpiBar from "@/components/KpiBar";
 import ImportExcelDialog from "@/components/ImportExcelDialog";
+import OcrProgressBar from "@/components/OcrProgressBar";
 import { useTableColumns } from "@/components/ColumnManager";
 
 // Colonne tabella Polizze — selezionabili/riordinabili per utente
@@ -942,6 +943,9 @@ function NuovaPolizzaDialog({ onClose }) {
                     <ScanLine size={13} className="mr-1" />
                     {ocrLoading ? "Riconoscimento..." : "Carica PDF polizza"}
                 </Button>
+                <div className="w-full">
+                    <OcrProgressBar active={ocrLoading} label="Riconoscimento polizza in corso…" />
+                </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4 py-2">

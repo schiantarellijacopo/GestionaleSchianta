@@ -1,6 +1,15 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — OCR: imposte dedotte dal lordo + barra di avanzamento
+- **Richiesta/bug utente**: (1) durante l'OCR (creazione polizza / salvataggio documenti) mostrare una barra di caricamento per sapere che è in lavorazione; (2) l'OCR creava il titolo con i dati corretti ma i campi economici della polizza (tab Economici) nascevano con **imposte a 0** pur avendo il lordo corretto — es. netto 1205,86 + ssn 44,89 ≠ lordo 1410 (mancavano 159,25 di imposte).
+- **Fix barra** (`components/OcrProgressBar.jsx`, nuovo): barra di avanzamento simulata (fluida, si ferma al 92% e scatta al 100% a fine elaborazione). Integrata in `Polizze.jsx` (OCR "Carica PDF polizza") e `DocumentiInbox.jsx` (dropzone "Carica documenti").
+- **Fix imposte** (`ocr_polizza.py` → `_riconcilia_premi`): quando il LORDO è noto ma le imposte sono assenti/0 (PDF che riporta il totale ma non itemizza le imposte riga per riga), le imposte vengono dedotte come residuo `lordo − netto − ssn − diritti`. Così la scomposizione quadra sempre e sia la **polizza** sia il **titolo** nascono con i dati corretti (il titolo è generato dai campi economici della polizza in `create_polizza`). Non inventa imposte per le polizze realmente esenti (lordo == netto+ssn).
+- **Verifica**: unit test su 3 scenari (residuo 159,25 che quadra a 1410; vita esente resta 0; garanzie itemizzate sommano correttamente). Dialog nuova polizza renderizza senza regressioni (screenshot). Backend riparte OK. Fix attivo per OCR manuale (`/utility/ocr-polizza`) ed email automatico (`polizze_email.py`); entrambi usano `estrai_dati_polizza`.
+- **Nota**: la polizza già esistente 184643591 va corretta a mano (o ri-passata in OCR); il fix agisce sui NUOVI OCR. Richiede publish per andare in produzione.
+
+
+
 ## 2026-06 — Prima Nota: la ricerca trova anche per importo
 - **Richiesta/bug utente**: nel tab "Movimenti (elenco)" il campo Cerca non trovava nulla digitando un importo (cercava solo descrizione/categoria/mezzo/n. documento). L'export Excel per intervallo date esiste già nello stesso tab (pulsante Excel).
 - **Fix** (`server.py`): aggiunto helper `_q_importo` che interpreta la query come numero accettando sia il formato italiano `1.234,56` sia `1234.56`. La ricerca per importo (con tolleranza di 1 centesimo) è stata aggiunta a tutti gli endpoint Prima Nota: elenco `/contabilita/prima-nota`, stampa PDF `/stampa/prima-nota`, export `/stampa/prima-nota.xlsx`.
