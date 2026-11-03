@@ -64,7 +64,7 @@ export default function WhatsAppInstances() {
     useEffect(() => {
         if (!isAdmin) return;
         api.get("/auth/users")
-            .then((r) => setCollaboratori((r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))))
+            .then((r) => setCollaboratori((r.data || []).filter((u) => ["admin", "collaboratore", "dipendente"].includes(u.role))))
             .catch(() => {});
     }, [isAdmin]);
 

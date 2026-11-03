@@ -1,6 +1,13 @@
 # Changelog — Axicura CRM
 
 
+## 2026-06 — Picker collaboratori WhatsApp: inclusi anche gli admin
+- **Bug utente**: SCHIANTARELLI MARCO (collaboratore attivo in libreria) non compariva nel selettore "Chi può vedere questo WhatsApp". Causa reale: Marco ha ruolo **Amministratore** (`role: admin`), mentre il picker filtrava solo `collaboratore` e `dipendente`, escludendo gli admin.
+- **Fix** (`WhatsAppInstances.jsx`): il filtro ora include `["admin","collaboratore","dipendente"]` — tutti gli operatori dell'agenzia del tenant (l'endpoint `/auth/users` restituisce già tutti gli utenti del tenant, escluso solo il super_admin). I `cliente` restano esclusi.
+- **Verifica** (curl, tenant di test): `/auth/users` ritorna anche gli admin (es. SCHIANTARELLI JACOPO) che ora rientrano nella lista. Richiede publish per la produzione.
+
+
+
 ## 2026-06 — OCR: imposte dedotte dal lordo + barra di avanzamento
 - **Richiesta/bug utente**: (1) durante l'OCR (creazione polizza / salvataggio documenti) mostrare una barra di caricamento per sapere che è in lavorazione; (2) l'OCR creava il titolo con i dati corretti ma i campi economici della polizza (tab Economici) nascevano con **imposte a 0** pur avendo il lordo corretto — es. netto 1205,86 + ssn 44,89 ≠ lordo 1410 (mancavano 159,25 di imposte).
 - **Fix barra** (`components/OcrProgressBar.jsx`, nuovo): barra di avanzamento simulata (fluida, si ferma al 92% e scatta al 100% a fine elaborazione). Integrata in `Polizze.jsx` (OCR "Carica PDF polizza") e `DocumentiInbox.jsx` (dropzone "Carica documenti").
