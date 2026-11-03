@@ -27,8 +27,9 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
   "tacito_rinnovo": "true | false | null",
   "premio_lordo_totale": "numero decimale o null",
   "premio_netto_totale": "numero decimale o null",
-  "imposte_totali": "numero decimale (SOLO imposte assicurative, SENZA il contributo SSN) o null",
+  "imposte_totali": "numero decimale (SOLO imposte assicurative, SENZA il contributo SSN, GIÀ al netto del contributo forzoso) o null",
   "contributo_ssn": "numero decimale (Contributo SSN / Servizio Sanitario Nazionale) o null",
+  "contributo_forzoso": "numero decimale del 'Contributo forzoso ex comma 63, L. n. 199/2025' (importo da SOTTRARRE dalle imposte) o null",
   "provvigioni_totali": "numero decimale o null",
   "diritti": "numero decimale o null",
   "contraente": {
@@ -69,7 +70,9 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
       "descrizione": "stringa",
       "massimale": "stringa o null",
       "franchigia": "stringa o null",
-      "premio": "numero decimale o null"
+      "premio_netto": "numero decimale: premio NETTO/imponibile di QUESTA garanzia o null",
+      "imposte": "numero decimale: imposte/tasse di QUESTA garanzia o null",
+      "premio": "numero decimale: importo complessivo di questa garanzia se indicato come voce unica o null"
     }
   ],
   "valore_veicolo": "numero o null",
@@ -87,6 +90,9 @@ Regole:
 - "ID. Veicolo" / "ID Veicolo" / "Identificativo veicolo": se contiene un codice tipo targa (es. DS973SV) usalo come veicolo.targa.
 - Durata: se vedi "dalle ore 24 del GG/MM/AAAA alle ore 24 del GG/MM/AAAA" (oppure "dal GG/MM/AAAA al GG/MM/AAAA"), la PRIMA data è data_decorrenza, la SECONDA è data_scadenza.
 - Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"/"tasse"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale.
+- DETTAGLIO PER GARANZIA: le polizze auto/multirischio hanno una tabella con una RIGA PER GARANZIA (RCA, Incendio, Furto, Eventi Atmosferici, Grandine, Kasko, Cristalli, Assistenza, ecc.) con per ciascuna il premio netto e le imposte. Per OGNI garanzia compila SEMPRE `premio_netto` e `imposte` con i valori di QUELLA riga.
+- premio_netto_totale = SOMMA dei `premio_netto` di TUTTE le garanzie. imposte_totali (prima del contributo forzoso) = SOMMA delle `imposte` di TUTTE le garanzie. NON usare un singolo valore letto male: calcola la somma riga per riga.
+- Contributo forzoso: la voce "Contributo forzoso ex comma 63, L. n. 199/2025" (o "ex comma 63") va messa in `contributo_forzoso` e VA SOTTRATTA dalle imposte. Quindi imposte_totali = (somma imposte garanzie) − contributo_forzoso.
 - Contributo SSN: la voce "Contributo SSN", "Contributo S.S.N.", "Servizio Sanitario Nazionale" (tipica dei rami RC Auto) va messa SOLO in `contributo_ssn` e NON va inclusa in imposte_totali. imposte_totali deve contenere esclusivamente le imposte assicurative.
 - Se il totale non è esplicito, premio_lordo_totale = premio_netto_totale + imposte_totali + contributo_ssn + diritti.
 - UCA / "UcaSicura" / "tutela legale" → ramo = TUTELA_GIUDIZIARIA.
@@ -158,4 +164,60 @@ async def estrai_dati_polizza(image_bytes, mime_type: str = "image/jpeg") -> dic
         data = json.loads(match.group(0))
     except json.JSONDecodeError as e:
         raise ValueError(f"JSON non valido: {e}. Raw: {raw[:300]}") from e
+    _riconcilia_premi(data)
     return data
+
+
+def _num(x):
+    """Coerce un valore OCR in float (gestisce None, stringhe con €/virgole)."""
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).replace("€", "").replace(" ", "").strip()
+    if not s:
+        return None
+    # formato italiano: migliaia con '.' e decimali con ',' → normalizza
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _riconcilia_premi(data: dict) -> None:
+    """Ricalcola i totali di premio in modo deterministico dalle garanzie.
+
+    - premio_netto_totale = somma dei premi netti di ogni garanzia (se disponibili)
+    - imposte_totali = somma delle imposte di ogni garanzia − contributo forzoso
+    - premio_lordo_totale = netto + imposte + ssn + diritti (ricalcolato se abbiamo
+      ricostruito le componenti)
+    """
+    gar = data.get("garanzie") or []
+    netti = [_num(g.get("premio_netto")) for g in gar if isinstance(g, dict)]
+    imposte = [_num(g.get("imposte")) for g in gar if isinstance(g, dict)]
+    netti = [n for n in netti if n is not None]
+    imposte = [i for i in imposte if i is not None]
+
+    ricalcolato = False
+    if len(netti) >= 2:
+        data["premio_netto_totale"] = round(sum(netti), 2)
+        ricalcolato = True
+    if len(imposte) >= 2:
+        data["imposte_totali"] = round(sum(imposte), 2)
+        ricalcolato = True
+
+    # Contributo forzoso ex comma 63, L. 199/2025: va sottratto dalle imposte
+    cf = _num(data.get("contributo_forzoso"))
+    imp = _num(data.get("imposte_totali"))
+    if cf and cf > 0 and imp is not None:
+        data["imposte_totali"] = round(imp - cf, 2)
+        ricalcolato = True
+
+    if ricalcolato:
+        netto = _num(data.get("premio_netto_totale")) or 0.0
+        imp = _num(data.get("imposte_totali")) or 0.0
+        ssn = _num(data.get("contributo_ssn")) or 0.0
+        diritti = _num(data.get("diritti")) or 0.0
+        data["premio_lordo_totale"] = round(netto + imp + ssn + diritti, 2)
