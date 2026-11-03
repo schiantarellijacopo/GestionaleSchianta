@@ -1576,6 +1576,17 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                                 👁 Apri
                             </button>
                         )}
+                        {v.allegato && (
+                            <a
+                                href={`${api.defaults.baseURL}/allegati/${v.allegato.id}/download`}
+                                target="_blank" rel="noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium inline-flex items-center gap-1"
+                                data-testid={`diario-allegato-${v.id}`}
+                            >
+                                📎 Scarica allegato
+                            </a>
+                        )}
                     </div>
                 </div>
                 <RowActions onEdit={canEdit ? () => setEditing(v) : null} onDelete={() => elimina(v.id)} label="voce" />
@@ -1642,6 +1653,17 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                         <div className="text-sm text-slate-800 whitespace-pre-wrap bg-slate-50 rounded-md p-3 border border-slate-100" data-testid="diario-voce-content">
                             {viewVoce.descrizione || "—"}
                         </div>
+                        {viewVoce.allegato && (
+                            <a
+                                href={`${api.defaults.baseURL}/allegati/${viewVoce.allegato.id}/download`}
+                                target="_blank" rel="noreferrer"
+                                className="mt-3 inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                data-testid="diario-voce-allegato"
+                            >
+                                📎 {viewVoce.allegato.nome_file || "Scarica allegato"}
+                                {viewVoce.allegato.size ? <span className="text-[11px] text-emerald-600">({(viewVoce.allegato.size / 1024).toFixed(0)} KB)</span> : null}
+                            </a>
+                        )}
                         <DialogFooter><Button variant="outline" onClick={() => setViewVoce(null)}>Chiudi</Button></DialogFooter>
                     </DialogContent>
                 </Dialog>

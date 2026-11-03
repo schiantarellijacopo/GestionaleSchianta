@@ -5027,7 +5027,12 @@ async def patch_polizza_garanzia(
 
 @api.delete("/polizze/{pid}")
 async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
-    # Blocco: una polizza con titoli incassati o coperti non è eliminabile
+    # La polizza da eliminare (serve per ripristinare l'eventuale polizza sostituita)
+    pol_da_eliminare = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    if not pol_da_eliminare:
+        raise HTTPException(404, "Polizza non trovata")
+    # Blocco: SOLO i titoli della polizza ATTIVA (corrente) bloccano l'eliminazione.
+    # I titoli delle polizze precedenti sostituite hanno polizza_id diverso e non contano.
     bloccanti = await db.titoli.count_documents(
         {"polizza_id": pid,
          "$or": [{"stato": "incassato"}, {"titolo_coperto": True}]},
@@ -5052,6 +5057,21 @@ async def delete_polizza(pid: str, user=Depends(require_user("admin"))):
                 "giornata chiusa. Riaprire la giornata per poterla eliminare.",
             )
     await db.polizze.delete_one({"id": pid})
+    # Se questa polizza ne sostituiva un'altra (è l'ultima attiva della catena),
+    # rimetti la polizza precedente in stato 'attiva'.
+    rif_prec = pol_da_eliminare.get("sostituisce_polizza")
+    if rif_prec:
+        prec = await db.polizze.find_one(
+            {"$or": [{"id": rif_prec}, {"numero_polizza": rif_prec}]},
+            {"_id": 0, "id": 1, "stato": 1},
+        )
+        if prec and prec.get("stato") == "sostituita":
+            await db.polizze.update_one(
+                {"id": prec["id"]},
+                {"$set": {"stato": "attiva", "updated_at": _now_iso()},
+                 "$unset": {"sostituita_da_id": "", "sostituita_da_polizza_id": "",
+                            "data_sostituzione": ""}},
+            )
     await log_attivita(user, "delete", "polizza", pid)
     return {"ok": True}
 
@@ -5515,6 +5535,7 @@ async def bulk_azione_allegato(
     #    (iter23: prima era linkato solo alla prima anagrafica -> bug)
     allegato_id = None
     allegati_ids: list[str] = []
+    al_ana_id = None
     if allegato_meta and ids:
         for tid in ids:
             al = Allegato(
@@ -5535,6 +5556,7 @@ async def bulk_azione_allegato(
                 descrizione=f"{azione_label} — {len(ids)} titoli", autore_id=user["id"],
             )
             await db.allegati.insert_one(al_ana.model_dump())
+            al_ana_id = al_ana.id
 
     # 5) crea email in coda per ogni cliente
     if invia_cliente:
@@ -5558,6 +5580,8 @@ async def bulk_azione_allegato(
                 titolo=f"📎 {azione_label}",
                 descrizione=f"{len(ids)} titoli interessati. File: {allegato_meta['nome_file'] if allegato_meta else '—'}",
                 autore=user,
+                payload=({"allegato_id": al_ana_id, "allegato_nome": allegato_meta["nome_file"]}
+                         if (al_ana_id and allegato_meta and ana["id"] == anas[0]["id"]) else None),
             )
 
     # 6) email ai collaboratori
@@ -16742,6 +16766,48 @@ async def list_diario_anagrafica(aid: str, user=Depends(current_user)):
     if user["role"] == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
     items = await db.diario.find({"anagrafica_id": aid}, {"_id": 0}).sort("data_evento", -1).to_list(500)
+
+    # Arricchisci le voci con l'eventuale allegato scaricabile (incassi/email/whatsapp/documenti).
+    # Carico in un solo batch tutti gli allegati collegati al cliente e alle sue polizze/titoli/sinistri.
+    pol_ids = [p["id"] async for p in db.polizze.find({"contraente_id": aid}, {"_id": 0, "id": 1})]
+    tit_ids = []
+    if pol_ids:
+        tit_ids = [t["id"] async for t in db.titoli.find({"polizza_id": {"$in": pol_ids}}, {"_id": 0, "id": 1})]
+    sin_ids = [s["id"] async for s in db.sinistri.find({"contraente_id": aid}, {"_id": 0, "id": 1})]
+    acl = {"is_deleted": False, "$or": [
+        {"entita_tipo": "anagrafica", "entita_id": aid},
+        {"entita_tipo": "polizza", "entita_id": {"$in": pol_ids}},
+        {"entita_tipo": "titolo", "entita_id": {"$in": tit_ids}},
+        {"entita_tipo": "sinistro", "entita_id": {"$in": sin_ids}},
+    ]}
+    alleg_by_id, alleg_by_name = {}, {}
+    async for a in db.allegati.find(acl, {"_id": 0, "id": 1, "nome_file": 1, "content_type": 1, "size": 1}):
+        meta = {"id": a["id"], "nome_file": a.get("nome_file"),
+                "content_type": a.get("content_type"), "size": a.get("size")}
+        alleg_by_id[a["id"]] = meta
+        if a.get("nome_file"):
+            alleg_by_name.setdefault(a["nome_file"], meta)
+
+    import re as _re
+    for v in items:
+        found = None
+        pay = v.get("payload") or {}
+        if pay.get("allegato_id") and pay["allegato_id"] in alleg_by_id:
+            found = alleg_by_id[pay["allegato_id"]]
+        if not found:
+            # Match per nome file nel titolo ("📎 Documento caricato: X") o descrizione ("File: X")
+            nome = None
+            m = _re.search(r"Documento caricato:\s*(.+)$", v.get("titolo") or "")
+            if m:
+                nome = m.group(1).strip()
+            if not nome:
+                m = _re.search(r"File:\s*(.+?)\s*$", v.get("descrizione") or "")
+                if m and m.group(1).strip() not in ("—", "-"):
+                    nome = m.group(1).strip()
+            if nome and nome in alleg_by_name:
+                found = alleg_by_name[nome]
+        if found:
+            v["allegato"] = found
     return items
 
 
@@ -16950,6 +17016,7 @@ async def upload_allegato(
             titolo=f"📎 Documento caricato: {file.filename}",
             descrizione=f"Allegato a {entita_tipo} (size: {result.get('size', len(data))} bytes)" + (f" - {descrizione}" if descrizione else ""),
             autore=user,
+            payload={"allegato_id": obj.id, "allegato_nome": file.filename},
         )
     return obj.model_dump()
 
