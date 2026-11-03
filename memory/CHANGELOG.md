@@ -417,3 +417,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Bug: salvare una lista da pagare con solo una riga "residuo parziale" dava 400 ("Selezionare almeno un titolo o una voce"). Fix backend `compagnia_distinta_bozza_crea`: accetta/salva `residui`, li conta in `n_righe`/`importo`; `versaBozza` e `inBozza` (frontend) ora gestiscono i residui.
 - UX: menu a tendina "Collaboratore" (EstrattoContoCompagnie) ora con campo di ricerca, più largo (w-72) e righe più spaziose/clickabili.
 - Filtro: selezionando uno o più collaboratori specifici, le voci di compagnia non attribuibili al collaboratore (rappel, ritenuta_compagnia, pnc) e i residui NON compaiono più nella lista. Verificato in preview.
+
+## 2026-06 — Fix: associazione collaboratori su Persone Giuridiche
+- Bug: nella modifica anagrafica la sezione "Collaboratori / Operatori di riferimento" era racchiusa nel blocco `{f.tipo !== "persona_giuridica" && (...)}`, quindi per le aziende/persone giuridiche NON appariva e non era possibile associare il collaboratore.
+- Fix: spostata la sezione collaboratori FUORI dal blocco condizionale in `AnagraficaDetail.jsx` → ora visibile per tutti i tipi di anagrafica (persona fisica e giuridica).
+- Verificato in preview su tenant jacopo@schiantarelli.it (azienda +39 ITALIA S.R.L.): selettore collaboratori presente e popolato.

@@ -644,6 +644,16 @@ function DatiTab({ ana, canEdit, onReload }) {
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
                 <div><Label>Inizio contribuzione</Label><Input type="date" value={f.data_inizio_contribuzione || ""} onChange={(e) => set("data_inizio_contribuzione", e.target.value)} /></div>
                 <div><Label>Settimane contributive</Label><Input type="number" value={f.settimane_contributive || ""} onChange={(e) => set("settimane_contributive", parseInt(e.target.value) || null)} /></div>
+                <div className="col-span-2 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <Label className="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-2 block">Documento d&apos;identità (carta d&apos;identità)</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div><Label>N° Carta d&apos;identità</Label><Input value={f.numero_carta_identita || ""} onChange={(e) => set("numero_carta_identita", e.target.value.toUpperCase())} data-testid="anag-ci-numero" /></div>
+                        <div><Label>Comune di emissione</Label><Input value={f.ci_comune_emissione || ""} onChange={(e) => set("ci_comune_emissione", e.target.value)} data-testid="anag-ci-comune" /></div>
+                        <div><Label>Data emissione</Label><Input type="date" value={f.ci_data_emissione || ""} onChange={(e) => set("ci_data_emissione", e.target.value)} data-testid="anag-ci-emissione" /></div>
+                        <div><Label>Data scadenza</Label><Input type="date" value={f.ci_data_scadenza || ""} onChange={(e) => set("ci_data_scadenza", e.target.value)} data-testid="anag-ci-scadenza" /></div>
+                    </div>
+                </div>
+                </>)}
                 <div className="col-span-2 md:col-span-3 rounded-lg border border-sky-200 bg-sky-50/50 p-3">
                     <Label className="text-xs uppercase tracking-wide text-sky-800 font-semibold mb-2 block">Collaboratori / Operatori di riferimento</Label>
                     <div className="flex flex-wrap gap-2" data-testid="anag-collaboratori">
@@ -664,16 +674,6 @@ function DatiTab({ ana, canEdit, onReload }) {
                     </div>
                     <p className="text-[11px] text-slate-500 mt-2">Puoi selezionarne più di uno. Il primo scelto (★) è il responsabile principale (usato per la visibilità).</p>
                 </div>
-                <div className="col-span-2 md:col-span-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-                    <Label className="text-xs uppercase tracking-wide text-slate-600 font-semibold mb-2 block">Documento d&apos;identità (carta d&apos;identità)</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div><Label>N° Carta d&apos;identità</Label><Input value={f.numero_carta_identita || ""} onChange={(e) => set("numero_carta_identita", e.target.value.toUpperCase())} data-testid="anag-ci-numero" /></div>
-                        <div><Label>Comune di emissione</Label><Input value={f.ci_comune_emissione || ""} onChange={(e) => set("ci_comune_emissione", e.target.value)} data-testid="anag-ci-comune" /></div>
-                        <div><Label>Data emissione</Label><Input type="date" value={f.ci_data_emissione || ""} onChange={(e) => set("ci_data_emissione", e.target.value)} data-testid="anag-ci-emissione" /></div>
-                        <div><Label>Data scadenza</Label><Input type="date" value={f.ci_data_scadenza || ""} onChange={(e) => set("ci_data_scadenza", e.target.value)} data-testid="anag-ci-scadenza" /></div>
-                    </div>
-                </div>
-                </>)}
                 <div><Label>Email</Label>
                     <Input
                         value={f.email || ""}
