@@ -706,6 +706,28 @@ function StoricoPrimaNotaTab() {
     const [q, setQ] = useState("");
     const [items, setItems] = useState(null);
     const [pageSize, setPageSize] = useState(50);
+    const [riallOpen, setRiallOpen] = useState(false);
+    const [riallData, setRiallData] = useState(null);
+    const [riallLoading, setRiallLoading] = useState(false);
+    const [riallApplying, setRiallApplying] = useState(false);
+
+    const apriRiallinea = async () => {
+        setRiallOpen(true); setRiallData(null); setRiallLoading(true);
+        try {
+            const r = await api.get("/contabilita/riallinea-snapshot/anteprima");
+            setRiallData(r.data);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore anteprima"); }
+        finally { setRiallLoading(false); }
+    };
+    const applicaRiallinea = async () => {
+        setRiallApplying(true);
+        try {
+            const r = await api.post("/contabilita/riallinea-snapshot", {});
+            toast.success(`Riallineate ${r.data.aggiornate} giornate`);
+            setRiallOpen(false); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        finally { setRiallApplying(false); }
+    };
 
     const load = () => {
         setItems(null);
@@ -752,6 +774,9 @@ function StoricoPrimaNotaTab() {
                     </div>
                     <Button onClick={load} className="bg-sky-700 hover:bg-sky-800" data-testid="storico-carica">
                         Carica
+                    </Button>
+                    <Button onClick={apriRiallinea} variant="outline" className="border-amber-300 text-amber-700 hover:bg-amber-50" data-testid="btn-riallinea-saldi">
+                        Riallinea saldi
                     </Button>
                     <div className="ml-auto flex items-end gap-3">
                         <div>
@@ -823,6 +848,60 @@ function StoricoPrimaNotaTab() {
                     </div>
                 )}
             </Card>
+
+            <Dialog open={riallOpen} onOpenChange={setRiallOpen}>
+                <DialogContent className="max-w-2xl" data-testid="riallinea-dialog">
+                    <DialogHeader>
+                        <DialogTitle>Riallinea saldi giornate chiuse</DialogTitle>
+                    </DialogHeader>
+                    <div className="text-sm text-slate-600 mb-1">
+                        Anteprima (sola lettura): confronto tra saldo cassa memorizzato alla chiusura e saldo ricalcolato.
+                        Nessun movimento viene modificato; "Applica" aggiorna solo i totali congelati.
+                    </div>
+                    {riallLoading || !riallData ? <Loading /> : (
+                        <>
+                            <div className="text-sm mb-2">
+                                Giornate chiuse: <b>{riallData.totale_giornate}</b> · da correggere:{" "}
+                                <b className="text-amber-700">{riallData.giornate_da_correggere}</b>
+                            </div>
+                            <div className="max-h-80 overflow-auto border rounded">
+                                <table className="tbl w-full text-sm">
+                                    <thead className="bg-slate-100">
+                                        <tr>
+                                            <th className="text-left px-2 py-1">Data</th>
+                                            <th className="text-right px-2 py-1">Saldo attuale</th>
+                                            <th className="text-right px-2 py-1">Saldo corretto</th>
+                                            <th className="text-right px-2 py-1">Differenza</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {riallData.giornate.filter((g) => g.differenza).map((g) => (
+                                            <tr key={g.chiusura_id} className="border-t" data-testid={`riall-row-${g.data}`}>
+                                                <td className="px-2 py-1">{fmtDate(g.data)}</td>
+                                                <td className="px-2 py-1 text-right num">{fmtEur(g.saldo_attuale || 0)}</td>
+                                                <td className="px-2 py-1 text-right num">{fmtEur(g.saldo_corretto || 0)}</td>
+                                                <td className={`px-2 py-1 text-right num ${g.differenza > 0 ? "text-emerald-700" : "text-rose-600"}`}>
+                                                    {g.differenza > 0 ? "+" : ""}{fmtEur(g.differenza)}
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {riallData.giornate_da_correggere === 0 && (
+                                            <tr><td colSpan={4} className="px-2 py-3 text-center text-slate-500">Tutte le giornate sono già allineate ✓</td></tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-3">
+                                <Button variant="outline" onClick={() => setRiallOpen(false)} data-testid="riallinea-annulla">Chiudi</Button>
+                                <Button onClick={applicaRiallinea} disabled={riallApplying || riallData.giornate_da_correggere === 0}
+                                    className="bg-amber-600 hover:bg-amber-700 text-white" data-testid="riallinea-applica">
+                                    {riallApplying ? "Applico…" : `Applica a ${riallData.giornate_da_correggere} giornate`}
+                                </Button>
+                            </div>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

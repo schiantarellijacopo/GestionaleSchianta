@@ -10759,6 +10759,86 @@ async def chiudi_giorno(
     return {**chiusura.model_dump(), "invio_commercialista": invio_result}
 
 
+async def _riallinea_calcola(dal: Optional[str], al: Optional[str]):
+    """Ricalcola lo snapshot delle giornate CHIUSE (riaperta_at=None) e confronta il
+    saldo cassa memorizzato con quello ricalcolato. SOLA LETTURA (nessuna scrittura)."""
+    flt: dict = {"riaperta_at": None}
+    if dal or al:
+        cond = {}
+        if dal:
+            cond["$gte"] = dal
+        if al:
+            cond["$lte"] = al
+        flt["data"] = cond
+    chiusure = await db.chiusure_giorno.find(flt, {"_id": 0}).sort("data", 1).to_list(5000)
+    out = []
+    for ch in chiusure:
+        snap = ch.get("riepilogo") or {}
+        old_sum = (snap.get("liquidita") or {}).get("sum_conti")
+        fresh = await _compute_brogliaccio(ch["data"])
+        new_sum = (fresh.get("liquidita") or {}).get("sum_conti")
+        diff = None
+        if old_sum is not None and new_sum is not None:
+            diff = round(float(new_sum) - float(old_sum), 2)
+        out.append({
+            "chiusura_id": ch["id"],
+            "data": ch["data"],
+            "saldo_attuale": round(float(old_sum), 2) if old_sum is not None else None,
+            "saldo_corretto": round(float(new_sum), 2) if new_sum is not None else None,
+            "differenza": diff,
+            "_fresh": fresh,
+        })
+    return out
+
+
+@api.get("/contabilita/riallinea-snapshot/anteprima")
+async def riallinea_snapshot_anteprima(
+    dal: Optional[str] = None, al: Optional[str] = None,
+    user=Depends(require_user("admin")),
+):
+    """ANTEPRIMA (sola lettura): elenca le giornate chiuse con saldo attuale vs corretto."""
+    rows = await _riallinea_calcola(dal, al)
+    giorni = [{k: v for k, v in r.items() if k != "_fresh"} for r in rows]
+    con_diff = [g for g in giorni if g.get("differenza") not in (None, 0, 0.0)]
+    return {
+        "totale_giornate": len(giorni),
+        "giornate_da_correggere": len(con_diff),
+        "giornate": giorni,
+    }
+
+
+@api.post("/contabilita/riallinea-snapshot")
+async def riallinea_snapshot_apply(
+    body: dict, user=Depends(require_user("admin")),
+):
+    """APPLICA: aggiorna lo snapshot (solo totali/saldi) delle giornate chiuse con
+    differenza, SENZA toccare i movimenti. Le transazioni restano immutate."""
+    dal = body.get("dal")
+    al = body.get("al")
+    rows = await _riallinea_calcola(dal, al)
+    aggiornate = 0
+    for r in rows:
+        if r.get("differenza") in (None, 0, 0.0):
+            continue
+        fresh = r["_fresh"]
+        await db.chiusure_giorno.update_one(
+            {"id": r["chiusura_id"]},
+            {"$set": {
+                "riepilogo.totali_giornata": fresh["totali_giornata"],
+                "riepilogo.riepilogo_kpi": fresh["riepilogo_kpi"],
+                "riepilogo.conti_riepilogo": fresh["conti_riepilogo"],
+                "riepilogo.liquidita": fresh["liquidita"],
+                "riepilogo.saldi_compagnie": fresh["saldi_compagnie"],
+                "updated_at": _now_iso(),
+            }},
+        )
+        aggiornate += 1
+    await log_attivita(user, "riallinea_snapshot", "contabilita", "-",
+                       f"Riallineati {aggiornate} snapshot chiusure (dal={dal} al={al})")
+    return {"aggiornate": aggiornate, "totale_valutate": len(rows)}
+
+
+
 @api.post("/contabilita/chiusura-giorno/{chiusura_id}/invia")
 async def invia_chiusura_giorno(
     chiusura_id: str, user=Depends(require_user("admin", "collaboratore")),
