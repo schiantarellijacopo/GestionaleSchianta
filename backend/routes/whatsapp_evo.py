@@ -179,6 +179,12 @@ async def list_instances(user=Depends(require_user("admin", "collaboratore"))) -
     è lenta/down, ritorniamo comunque la lista dal DB con state_live=None.
     """
     rows = await db.whatsapp_instances.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    # Visibilità per collaboratore: l'admin vede tutte le istanze; il collaboratore
+    # vede solo quelle in cui è stato assegnato (collaboratori_visibili). Nessun
+    # assegnato = visibile solo all'admin.
+    if user.get("role") != "admin":
+        uid = user.get("id")
+        rows = [r for r in rows if uid in (r.get("collaboratori_visibili") or [])]
     for r in rows:
         try:
             st = await _call("GET", f"/instance/connectionState/{r['instance_name']}", timeout=5.0)
@@ -190,6 +196,29 @@ async def list_instances(user=Depends(require_user("admin", "collaboratore"))) -
         except Exception:  # noqa: BLE001
             r["state_live"] = None
     return rows
+
+
+class SetCollaboratoriBody(BaseModel):
+    collaboratori_ids: list[str] = []
+
+
+@router.put("/instances/{name}/collaboratori")
+async def set_instance_collaboratori(
+    name: str,
+    body: SetCollaboratoriBody,
+    user=Depends(require_user("admin")),
+) -> dict:
+    """Assegna i collaboratori che possono vedere/usare questa istanza nella chat.
+    Lista vuota = visibile solo all'admin."""
+    ids = [str(x) for x in (body.collaboratori_ids or []) if x]
+    res = await db.whatsapp_instances.update_one(
+        {"instance_name": name},
+        {"$set": {"collaboratori_visibili": ids, "updated_at": _now_iso(),
+                  "updated_by": user.get("id")}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Istanza non trovata")
+    return {"ok": True, "collaboratori_visibili": ids}
 
 
 WEBHOOK_EVENTS = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "MESSAGES_UPDATE"]

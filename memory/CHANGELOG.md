@@ -422,3 +422,14 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Bug: nella modifica anagrafica la sezione "Collaboratori / Operatori di riferimento" era racchiusa nel blocco `{f.tipo !== "persona_giuridica" && (...)}`, quindi per le aziende/persone giuridiche NON appariva e non era possibile associare il collaboratore.
 - Fix: spostata la sezione collaboratori FUORI dal blocco condizionale in `AnagraficaDetail.jsx` → ora visibile per tutti i tipi di anagrafica (persona fisica e giuridica).
 - Verificato in preview su tenant jacopo@schiantarelli.it (azienda +39 ITALIA S.R.L.): selettore collaboratori presente e popolato.
+
+## 2026-06 — Titolo iniziale sincronizzato con i dati economici della polizza
+- Bug: creando una polizza nuova il titolo restava a 0 anche inserendo premi/provvigioni dopo, perché il titolo viene creato solo alla nascita della polizza e `PUT /polizze/{id}` non lo riallineava.
+- Fix: in `update_polizza` (server.py), se cambiano i campi economici (premio_lordo/netto/tasse/imposte/ssn/accessori/provvigioni/collaboratore_id) si riallinea il titolo iniziale ancora `da_incassare` con stesso effetto della polizza (importi, imposte=tasse+imposte, ssn, accessori, provvigioni, collaboratore) e si ricalcola il premio annuo. I titoli già in Prima Nota (coperti/sospesi/incassati) NON vengono toccati.
+- Verificato in preview via curl: premi 100/8/2/5 lordo 115 provv 25 → titolo importo_lordo 115, netto 100, imposte 10, ssn 5, provv 25.
+
+## 2026-06 — Visibilità istanze WhatsApp per collaboratore
+- Richiesta: l'admin, nella pagina Istanze WhatsApp, sceglie da una tendina quali collaboratori possono vedere ciascuna istanza; il collaboratore nella chat vede solo le istanze a lui assegnate.
+- Backend (routes/whatsapp_evo.py): nuovo campo `collaboratori_visibili` sulle istanze; endpoint `PUT /whatsapp-evo/instances/{name}/collaboratori` (solo admin); `GET /whatsapp-evo/instances` ora filtra per i non-admin (vede solo le istanze in cui il suo id è presente). Nessuna selezione = visibile solo all'admin.
+- Frontend (WhatsAppInstances.jsx): nuova colonna "Collaboratori" (solo admin) con tendina a checkbox `CollaboratoriVisibiliCell` (Popover) per selezionare i collaboratori; etichetta "Solo admin" / "N collaboratori". La Chat WhatsApp usa lo stesso endpoint istanze, quindi il filtro si applica automaticamente.
+- Verificato: PUT set/reset vis OK via curl (tenant jacopo); tendina renderizzata e funzionante (screenshot admin). NB: il filtro lato collaboratore non è stato testato con login collaboratore reale (password non disponibili nel tenant mirror) ma è una semplice list-comprehension.

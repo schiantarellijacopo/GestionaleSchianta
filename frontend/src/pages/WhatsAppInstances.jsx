@@ -1,18 +1,21 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import {
     MessageCircle, Plus, RefreshCcw, Trash2, LogOut,
-    QrCode, Send, ShieldAlert, CheckCircle2, Loader2, RadioTower,
+    QrCode, Send, ShieldAlert, CheckCircle2, Loader2, RadioTower, Users,
 } from "lucide-react";
 
 // ─── Utility: colore + label per lo stato Evolution API ──────────────
@@ -37,8 +40,11 @@ const stateBadge = (st) => {
 };
 
 export default function WhatsAppInstances() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
     const [cfg, setCfg] = useState(null);
     const [list, setList] = useState(null);
+    const [collaboratori, setCollaboratori] = useState([]);
     const [creating, setCreating] = useState(false);
     const [qrDialog, setQrDialog] = useState(null); // { name, base64, code }
 
@@ -55,6 +61,12 @@ export default function WhatsAppInstances() {
     }, []);
 
     useEffect(() => { load(); }, [load]);
+    useEffect(() => {
+        if (!isAdmin) return;
+        api.get("/auth/users")
+            .then((r) => setCollaboratori((r.data || []).filter((u) => ["collaboratore", "dipendente"].includes(u.role))))
+            .catch(() => {});
+    }, [isAdmin]);
 
     if (list == null) return <Loading />;
 
@@ -119,13 +131,14 @@ export default function WhatsAppInstances() {
                                 <th>Agenzia</th>
                                 <th>Instance name</th>
                                 <th>Stato</th>
+                                {isAdmin && <th>Collaboratori</th>}
                                 <th>Creata il</th>
                                 <th className="text-right">Azioni</th>
                             </tr>
                         </thead>
                         <tbody>
                             {list.length === 0 && (
-                                <tr><td colSpan="5" className="text-center text-slate-500 py-8">
+                                <tr><td colSpan={isAdmin ? "6" : "5"} className="text-center text-slate-500 py-8">
                                     Nessuna istanza creata. Clicca <strong>Nuova istanza</strong> per iniziare.
                                 </td></tr>
                             )}
@@ -134,6 +147,15 @@ export default function WhatsAppInstances() {
                                     <td className="font-medium">{inst.agenzia_nome}</td>
                                     <td className="font-mono text-xs text-slate-600">{inst.instance_name}</td>
                                     <td>{stateBadge(inst.state_live || inst.state)}</td>
+                                    {isAdmin && (
+                                        <td>
+                                            <CollaboratoriVisibiliCell
+                                                inst={inst}
+                                                collaboratori={collaboratori}
+                                                onSaved={load}
+                                            />
+                                        </td>
+                                    )}
                                     <td className="text-xs text-slate-500">{inst.created_at?.slice(0, 10)}</td>
                                     <td className="text-right">
                                         <div className="flex gap-1 justify-end">
@@ -184,6 +206,91 @@ export default function WhatsAppInstances() {
                 <QrDialog data={qrDialog} onClose={() => setQrDialog(null)} onDone={load} />
             )}
         </div>
+    );
+}
+
+// ─── Tendina collaboratori con visibilità istanza ──────────────────
+function CollaboratoriVisibiliCell({ inst, collaboratori, onSaved }) {
+    const [open, setOpen] = useState(false);
+    const [sel, setSel] = useState(inst.collaboratori_visibili || []);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => { setSel(inst.collaboratori_visibili || []); }, [inst.collaboratori_visibili]);
+
+    const toggle = (id) => {
+        setSel((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    };
+
+    const save = async () => {
+        setSaving(true);
+        try {
+            await api.put(`/whatsapp-evo/instances/${inst.instance_name}/collaboratori`, {
+                collaboratori_ids: sel,
+            });
+            toast.success("Visibilità aggiornata");
+            setOpen(false);
+            onSaved?.();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore salvataggio");
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const nomeById = (id) => {
+        const c = collaboratori.find((x) => x.id === id);
+        return c?.name || c?.email || id;
+    };
+    const current = inst.collaboratori_visibili || [];
+    const label = current.length === 0
+        ? "Solo admin"
+        : current.length === 1 ? nomeById(current[0]) : `${current.length} collaboratori`;
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    size="sm" variant="outline"
+                    className={`text-xs max-w-[220px] justify-start ${current.length === 0 ? "text-slate-500" : "text-slate-800"}`}
+                    data-testid={`wa-collab-trigger-${inst.instance_name}`}
+                >
+                    <Users size={13} className="mr-1.5 shrink-0" />
+                    <span className="truncate">{label}</span>
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-72 p-0" align="start" data-testid={`wa-collab-popover-${inst.instance_name}`}>
+                <div className="p-3 border-b">
+                    <div className="text-sm font-semibold text-slate-800">Chi può vedere questo WhatsApp</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">
+                        I collaboratori selezionati vedranno questa istanza nella chat. Nessuna selezione = solo admin.
+                    </div>
+                </div>
+                <div className="max-h-60 overflow-y-auto p-2 space-y-1">
+                    {collaboratori.length === 0 && (
+                        <div className="text-xs text-slate-400 px-2 py-3">Nessun collaboratore disponibile</div>
+                    )}
+                    {collaboratori.map((c) => (
+                        <label
+                            key={c.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-slate-50 cursor-pointer"
+                            data-testid={`wa-collab-opt-${c.id}`}
+                        >
+                            <Checkbox checked={sel.includes(c.id)} onCheckedChange={() => toggle(c.id)} />
+                            <span className="text-sm text-slate-700 truncate">{c.name || c.email}</span>
+                        </label>
+                    ))}
+                </div>
+                <div className="p-2 border-t flex justify-end gap-2">
+                    <Button size="sm" variant="ghost" onClick={() => setOpen(false)} disabled={saving}
+                            data-testid={`wa-collab-cancel-${inst.instance_name}`}>Annulla</Button>
+                    <Button size="sm" onClick={save} disabled={saving}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                            data-testid={`wa-collab-save-${inst.instance_name}`}>
+                        {saving ? "Salvo…" : "Salva"}
+                    </Button>
+                </div>
+            </PopoverContent>
+        </Popover>
     );
 }
 

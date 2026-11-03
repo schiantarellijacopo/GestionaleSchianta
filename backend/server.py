@@ -4515,6 +4515,32 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
         raise HTTPException(404, "Non trovata")
     await log_attivita(user, "update", "polizza", pid)
     doc = await db.polizze.find_one({"id": pid}, {"_id": 0})
+    # Se sono cambiati i dati economici (premi/provvigioni), riallinea il titolo
+    # iniziale ancora "da_incassare" (non ancora in Prima Nota): il titolo creato alla
+    # nascita della polizza non deve restare a 0 quando i dati economici vengono
+    # inseriti/aggiornati successivamente.
+    _ECON_FIELDS = {"premio_lordo", "premio_netto", "premio_tasse", "premio_imposte",
+                    "premio_ssn", "premio_accessori", "provvigioni", "collaboratore_id"}
+    if doc and (set(body) & _ECON_FIELDS):
+        titolo_iniz = await db.titoli.find_one(
+            {"polizza_id": pid, "stato": "da_incassare", "effetto": doc.get("effetto")},
+            {"_id": 0, "id": 1},
+        )
+        if titolo_iniz:
+            await db.titoli.update_one(
+                {"id": titolo_iniz["id"]},
+                {"$set": {
+                    "importo_lordo": round(float(doc.get("premio_lordo") or 0), 2),
+                    "importo_netto": round(float(doc.get("premio_netto") or 0), 2),
+                    "imposte": round(float(doc.get("premio_tasse") or 0) + float(doc.get("premio_imposte") or 0), 2),
+                    "ssn": round(float(doc.get("premio_ssn") or 0), 2),
+                    "accessori": round(float(doc.get("premio_accessori") or 0), 2),
+                    "provvigioni": round(float(doc.get("provvigioni") or 0), 2),
+                    "collaboratore_id": doc.get("collaboratore_id"),
+                    "updated_at": _now_iso(),
+                }},
+            )
+            await ricalcola_premio_annuo_polizza(db, pid)
     # Se è cambiato un dato veicolo/contratto (o la targa), propaga alle altre polizze
     # con la stessa targa (ultima info vince).
     if doc and doc.get("targa") and (set(body) & (set(_VEICOLO_SYNC_FIELDS) | {"targa"})):
