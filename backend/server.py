@@ -9666,7 +9666,36 @@ async def prima_nota(
 # ============================================================
 # BROGLIACCIO - Prima Nota giornaliera con colonne per conto cassa
 # ============================================================
-async def _compute_brogliaccio(data_giorno: str) -> dict:
+async def _checkpoint_valido(d0: str, cp: dict) -> bool:
+    """Un checkpoint salvato alla giornata chiusa d0 è valido come punto di
+    ripartenza SOLO se nessun movimento con data <= d0 è cambiato dopo la sua
+    creazione. Guard O(index-only): confronta conteggio e max(updated_at)."""
+    if not cp or not cp.get("data"):
+        return False
+    agg = await db.movimenti.aggregate([
+        {"$match": {"data_movimento": {"$lte": d0}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "mx": {"$max": "$updated_at"}}},
+    ]).to_list(1)
+    n = agg[0]["n"] if agg else 0
+    mx = (agg[0].get("mx") if agg else None) or ""
+    return n == cp.get("src_count") and mx == (cp.get("src_maxupd") or "")
+
+
+async def _find_resume_checkpoint(data_giorno: str):
+    """Trova il checkpoint della giornata CHIUSA più recente < data_giorno ancora
+    valido. Ritorna (d0, checkpoint) oppure (None, None) → ricalcolo da inizio vita."""
+    async for ch in db.chiusure_giorno.find(
+        {"riaperta_at": None, "data": {"$lt": data_giorno},
+         "riepilogo.checkpoint": {"$exists": True}},
+        {"_id": 0, "data": 1, "riepilogo.checkpoint": 1},
+    ).sort("data", -1):
+        cp = (ch.get("riepilogo") or {}).get("checkpoint")
+        if cp and await _checkpoint_valido(cp.get("data") or ch["data"], cp):
+            return cp.get("data") or ch["data"], cp
+    return None, None
+
+
+async def _compute_brogliaccio(data_giorno: str, apply_snapshot: bool = True) -> dict:
     """Calcola il brogliaccio della Prima Nota con la semantica assicurativa corretta.
 
     Mappatura colonne (dal flusso descritto dall'utente):
@@ -10011,19 +10040,35 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     totali_giornata = {**{k: round(v, 2) for k, v in tot.items()},
                        "per_conto": {k: round(v, 2) for k, v in per_conto_tot.items()}}
 
+    # === FASE 2: punto di ripartenza (checkpoint) =========================
+    # Invece di risommare da inizio vita, riparti dall'ultima giornata CHIUSA
+    # con checkpoint valido (d0) e processa SOLO i movimenti d0 < data <= giorno.
+    _cp_data, _cp = await _find_resume_checkpoint(data_giorno)
+    _cp_cum = (_cp or {}).get("cum") or {}
+    _cp_per_conto = (_cp or {}).get("per_conto_cum") or {}
+    _cp_rid = float((_cp or {}).get("rid_cum") or 0.0)
+    # Tutti i conti (anche disattivati): disattivare un conto NON deve alterare i
+    # saldi storici (il suo saldo/movimenti continuano a contare).
+    conti_all = await db.conti_cassa.find({}, {"_id": 0}).sort(
+        [("ordine", 1), ("nome", 1)]).to_list(500)
+
     # 3) Riepilogo conti cassa: saldo precedente, giornata, totale periodo
     # NB: il cash reale del giorno (imp_giornata) usa direttamente `importo` del
     # movimento (già al netto del sospeso). Il saldo precedente DEVE usare la stessa
     # base (somma degli `importo`), senza sottrarre di nuovo quota_credito: altrimenti
     # l'IMP. PRECEDENTE non coincide col TOTALE PERIODO con cui il giorno è stato chiuso.
     conti_riepilogo = []
-    for c in conti:
-        # Il conto "Pagamento Direzione" (tipo RID) raccoglie i pagamenti in direzione,
-        # che NON hanno conto_cassa_id: il saldo precedente si calcola su is_direzione.
+    per_conto_cum_out = {}   # saldo cumulativo REALE attraverso `data_giorno` (per checkpoint)
+    rid_cum_out = _cp_rid
+    for c in conti_all:
         _is_rid = (c["id"] == rid_conto_id)
-        _prev_match = ({"is_direzione": True, "data_movimento": {"$lt": data_giorno}, "pregresso": {"$ne": True}}
+        # finestra "precedente": da inizio (o da d0) fino a < data_giorno
+        _date_prec = {"$lt": data_giorno}
+        if _cp_data:
+            _date_prec = {"$gt": _cp_data, "$lt": data_giorno}
+        _prev_match = ({"is_direzione": True, "data_movimento": _date_prec, "pregresso": {"$ne": True}}
                        if _is_rid else
-                       {"conto_cassa_id": c["id"], "data_movimento": {"$lt": data_giorno},
+                       {"conto_cassa_id": c["id"], "data_movimento": _date_prec,
                         "is_direzione": {"$ne": True}, "pregresso": {"$ne": True}})
         prev = await db.movimenti.aggregate([
             {"$match": _prev_match},
@@ -10033,23 +10078,41 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         ]).to_list(1)
         prev_in = prev[0]["in"] if prev else 0
         prev_out = prev[0]["out"] if prev else 0
-        imp_prec = float(c.get("saldo_iniziale", 0)) + prev_in - prev_out
+        # base cumulativa a d0: dal checkpoint se presente, altrimenti saldo iniziale del conto
+        if _cp_data:
+            base = _cp_rid if _is_rid else float(_cp_per_conto.get(c["id"], 0.0))
+        else:
+            base = 0.0 if _is_rid else float(c.get("saldo_iniziale", 0))
+        imp_prec = base + prev_in - prev_out
         imp_giornata = per_conto_tot.get(c["id"], 0.0)
+        totale_periodo = imp_prec + imp_giornata
+        # memorizza il cumulativo attraverso il giorno (per il checkpoint)
+        if _is_rid:
+            rid_cum_out = totale_periodo
+        else:
+            per_conto_cum_out[c["id"]] = totale_periodo
+        # non mostrare i conti disattivati e azzerati (nessun saldo, nessun movimento)
+        if not c.get("attivo", True) and abs(totale_periodo) < 0.005 and abs(imp_giornata) < 0.005:
+            continue
         conti_riepilogo.append({
             "id": c["id"],
             "nome": c["nome"],
             "imp_precedente": round(imp_prec, 2),
             "imp_giornata": round(imp_giornata, 2),
-            "totale_periodo": round(imp_prec + imp_giornata, 2),
+            "totale_periodo": round(totale_periodo, 2),
         })
 
     # 4) Saldi compagnie (cumulativi: dal'inizio a fine giornata)
     saldi_compagnie = await _compute_saldi_compagnie(data_giorno)
 
     # 5) KPI CUMULATIVI fino al giorno corrente compreso (totali progressivi che crescono ogni giorno)
+    # Con checkpoint: processa SOLO la finestra d0 < data <= giorno e parte dai totali salvati.
+    _date_cum = {"$lte": data_giorno}
+    if _cp_data:
+        _date_cum = {"$gt": _cp_data, "$lte": data_giorno}
     cum_movs = await db.movimenti.find(
-        {"data_movimento": {"$lte": data_giorno}, "pregresso": {"$ne": True}}, {"_id": 0}
-    ).to_list(50000)
+        {"data_movimento": _date_cum, "pregresso": {"$ne": True}}, {"_id": 0}
+    ).to_list(None)
     # carica le compagnie per applicare "trattiene_provvigioni" correttamente
     all_comp_ids = list({m.get("compagnia_id") for m in cum_movs if m.get("compagnia_id")})
     pol_ids_cum = list({m.get("polizza_id") for m in cum_movs if m.get("polizza_id")})
@@ -10067,14 +10130,17 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         ):
             comp_map.setdefault(c["id"], c)
 
-    cum_entrate = 0.0; cum_provv = 0.0; cum_sospesi = 0.0
-    cum_rimesse = 0.0; cum_sconti = 0.0; cum_spese = 0.0; cum_saldo = 0.0
-    cum_ritenute_comp = 0.0
-    cum_rappel = 0.0
+    cum_entrate = float(_cp_cum.get("entrate", 0.0)); cum_provv = float(_cp_cum.get("provv", 0.0))
+    cum_sospesi = float(_cp_cum.get("sospesi", 0.0))
+    cum_rimesse = float(_cp_cum.get("rimesse", 0.0)); cum_sconti = float(_cp_cum.get("sconti", 0.0))
+    cum_spese = float(_cp_cum.get("spese", 0.0)); cum_saldo = float(_cp_cum.get("saldo", 0.0))
+    cum_ritenute_comp = float(_cp_cum.get("ritenute_comp", 0.0))
+    cum_rappel = float(_cp_cum.get("rappel", 0.0))
     # Valori di apertura dal Setup agenzia: alimentano SOLO i KPI cumulativi storici
     # (Entrate/Provvigioni/Spese/Rimesse). NON toccano i conti cassa né il saldo cassa
     # (il debito compagnie da setup è già in _compute_saldi_compagnie).
-    setup_entrate = 0.0; setup_provv = 0.0; setup_spese = 0.0; setup_rimesse = 0.0
+    setup_entrate = float(_cp_cum.get("setup_entrate", 0.0)); setup_provv = float(_cp_cum.get("setup_provv", 0.0))
+    setup_spese = float(_cp_cum.get("setup_spese", 0.0)); setup_rimesse = float(_cp_cum.get("setup_rimesse", 0.0))
     for m in cum_movs:
         importo = float(m.get("importo") or 0)
         cat = m["categoria"]; is_e = (m["tipo"] == "entrata")
@@ -10175,21 +10241,11 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     saldo_cassa_compagnie_tot = round(sum(s["saldo_cassa"] for s in saldi_compagnie), 2)
     # Includi TUTTI i conti, anche quelli disattivati: disattivare un conto NON deve
     # cambiare i saldi storici già chiusi (un conto azzerato contribuisce comunque 0).
-    conti_attivi = await db.conti_cassa.find({}, {"_id": 0}).to_list(500)
-    sum_conti = 0.0
-    for c in conti_attivi:
-        agg = await db.movimenti.aggregate([
-            {"$match": {"conto_cassa_id": c["id"], "data_movimento": {"$lte": data_giorno},
-                        "is_direzione": {"$ne": True}, "pregresso": {"$ne": True}}},
-            {"$group": {"_id": None,
-                        "in": {"$sum": {"$cond": [{"$eq": ["$tipo", "entrata"]}, "$importo", 0]}},
-                        "out": {"$sum": {"$cond": [{"$eq": ["$tipo", "uscita"]}, "$importo", 0]}}}},
-        ]).to_list(1)
-        in_tot = agg[0]["in"] if agg else 0
-        out_tot = agg[0]["out"] if agg else 0
-        sum_conti += float(c.get("saldo_iniziale", 0)) + in_tot - out_tot
-
     sospesi_attivi = sospesi_titoli_tot
+    # Liquidità reale = somma dei saldi cumulativi REALI di tutti i conti (anche
+    # disattivati), già calcolati sopra in `per_conto_cum_out` (= saldo iniziale +
+    # movimenti reali attraverso il giorno, esclusi i pagamenti in direzione).
+    sum_conti = round(sum(per_conto_cum_out.values()), 2)
 
     liquidita_box = {
         "sum_conti": round(sum_conti, 2),
@@ -10216,7 +10272,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
     # non cambiano più al variare dello stato attuale (sospesi, saldo cassa, ecc.).
     snap = (chiusura or {}).get("riepilogo") or {}
     snapshot_applicato = False
-    if chiusa and snap:
+    if apply_snapshot and chiusa and snap:
         if snap.get("riepilogo_kpi"):
             riepilogo_kpi = snap["riepilogo_kpi"]
         if snap.get("conti_riepilogo"):
@@ -10228,6 +10284,30 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         if snap.get("saldi_compagnie") is not None:
             saldi_compagnie = snap["saldi_compagnie"]
         snapshot_applicato = True
+
+    # Checkpoint attraverso `data_giorno`: consente ai giorni successivi di ripartire
+    # da qui invece di risommare da inizio vita. Persisto solo alla chiusura/riallineo.
+    _src = await db.movimenti.aggregate([
+        {"$match": {"data_movimento": {"$lte": data_giorno}}},
+        {"$group": {"_id": None, "n": {"$sum": 1}, "mx": {"$max": "$updated_at"}}},
+    ]).to_list(1)
+    _checkpoint_out = {
+        "data": data_giorno,
+        "built_at": _now_iso(),
+        "src_count": (_src[0]["n"] if _src else 0),
+        "src_maxupd": (_src[0].get("mx") if _src else None) or "",
+        "cum": {
+            "entrate": round(cum_entrate, 2), "provv": round(cum_provv, 2),
+            "sospesi": round(cum_sospesi, 2), "rimesse": round(cum_rimesse, 2),
+            "sconti": round(cum_sconti, 2), "spese": round(cum_spese, 2),
+            "saldo": round(cum_saldo, 2), "ritenute_comp": round(cum_ritenute_comp, 2),
+            "rappel": round(cum_rappel, 2),
+            "setup_entrate": round(setup_entrate, 2), "setup_provv": round(setup_provv, 2),
+            "setup_spese": round(setup_spese, 2), "setup_rimesse": round(setup_rimesse, 2),
+        },
+        "per_conto_cum": {k: round(v, 2) for k, v in per_conto_cum_out.items()},
+        "rid_cum": round(rid_cum_out, 2),
+    }
 
     return {
         "data": data_giorno,
@@ -10241,6 +10321,7 @@ async def _compute_brogliaccio(data_giorno: str) -> dict:
         "chiusura": chiusura,
         "chiusa": chiusa,
         "snapshot": snapshot_applicato,
+        "_checkpoint": _checkpoint_out,
     }
 
 
@@ -10641,7 +10722,9 @@ async def brogliaccio(
 ):
     if not data:
         data = _now_iso()[:10]
-    return await _compute_brogliaccio(data)
+    res = await _compute_brogliaccio(data)
+    res.pop("_checkpoint", None)
+    return res
 
 
 async def _generate_brogliaccio_pdf(payload: dict) -> bytes:
@@ -10722,6 +10805,7 @@ async def chiudi_giorno(
             "liquidita": payload["liquidita"],
             "saldi_compagnie": payload["saldi_compagnie"],
             "n_movimenti": len(payload["righe"]),
+            "checkpoint": payload.get("_checkpoint"),
         },
     )
 
@@ -10775,7 +10859,7 @@ async def _riallinea_calcola(dal: Optional[str], al: Optional[str]):
     for ch in chiusure:
         snap = ch.get("riepilogo") or {}
         old_sum = (snap.get("liquidita") or {}).get("sum_conti")
-        fresh = await _compute_brogliaccio(ch["data"])
+        fresh = await _compute_brogliaccio(ch["data"], apply_snapshot=False)
         new_sum = (fresh.get("liquidita") or {}).get("sum_conti")
         diff = None
         if old_sum is not None and new_sum is not None:
@@ -10818,21 +10902,25 @@ async def riallinea_snapshot_apply(
     rows = await _riallinea_calcola(dal, al)
     aggiornate = 0
     for r in rows:
-        if r.get("differenza") in (None, 0, 0.0):
-            continue
         fresh = r["_fresh"]
-        await db.chiusure_giorno.update_one(
-            {"id": r["chiusura_id"]},
-            {"$set": {
+        # Aggiorna SEMPRE il checkpoint (anche a differenza zero → backfill), così le
+        # giornate successive possono ripartire da qui senza risommare da inizio vita.
+        set_fields = {
+            "riepilogo.checkpoint": fresh.get("_checkpoint"),
+            "updated_at": _now_iso(),
+        }
+        if r.get("differenza") not in (None, 0, 0.0):
+            set_fields.update({
                 "riepilogo.totali_giornata": fresh["totali_giornata"],
                 "riepilogo.riepilogo_kpi": fresh["riepilogo_kpi"],
                 "riepilogo.conti_riepilogo": fresh["conti_riepilogo"],
                 "riepilogo.liquidita": fresh["liquidita"],
                 "riepilogo.saldi_compagnie": fresh["saldi_compagnie"],
-                "updated_at": _now_iso(),
-            }},
+            })
+            aggiornate += 1
+        await db.chiusure_giorno.update_one(
+            {"id": r["chiusura_id"]}, {"$set": set_fields},
         )
-        aggiornate += 1
     await log_attivita(user, "riallinea_snapshot", "contabilita", "-",
                        f"Riallineati {aggiornate} snapshot chiusure (dal={dal} al={al})")
     return {"aggiornate": aggiornate, "totale_valutate": len(rows)}

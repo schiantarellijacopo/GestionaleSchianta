@@ -377,3 +377,27 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - `build_context()`: nuovi parametri `titolo_id` e `sinistro_id` con risoluzione a cascata (sinistro→polizza/cliente, titolo→polizza→cliente). Popola tutti i nuovi segnaposto: agenzia estesa (forma giuridica, p.iva, cf, rui+sezione+data, comune/prov/cap/nazione, fax, sito, banca, capitale, rea), cliente esteso (pec, sesso, stato civile, titolo studio, tipo, amministratore, prov. nascita), polizza estesa (frazionamento, netto/imposte/ssn/accessori/provvigioni, veicolo, massimali, franchigia, capitale, mandato), titolo completo, sinistro completo, compagnia estesa (codice/email/telefono/sito/referente), operatore esteso (cf/piva/iban).
 - `GeneraDocBody` + endpoint `/genera` e `/genera-fedele`: passano `titolo_id`/`sinistro_id`. `_resolve_contatti` e `/comunica/render` propagano titolo/sinistro.
 - Verificato: endpoint `/api/librerie/placeholders` → totale 126, gruppi corretti, sinistro con numero/data/descrizione ecc.; UI "Segnaposto {…}" renderizza tutti i gruppi ordinati.
+
+## 2026-06 — Contabilità: Fase 1 (performance) + Fase 2 (snapshot concatenati) Prima Nota
+**Problema:** il calcolo Prima Nota/brogliaccio risommava TUTTI i movimenti dall'inizio vita ad ogni apertura giornata (`cum_movs = find({data<=giorno}).to_list(50000)` + loop Python), con rischio di rallentamento negli anni e tetto a 50k (troncamento silenzioso). Inoltre riaprire/richiudere una giornata poteva disallineare i saldi (snapshot congelati vs ricalcolo live) e lo strumento "Riallinea saldi" non rilevava mai differenze.
+
+**Fase 1 — performance & correttezza (server.py `_compute_brogliaccio`, indexes.py):**
+- Nuovi indici compound su `movimenti`: `[tenant, conto_cassa_id, data_movimento]`, `[tenant, is_direzione, data_movimento]`, `[tenant, data_movimento, updated_at]` (covered per il guard).
+- Rimosso tetto 50k: finestra delta con `.to_list(None)`.
+- Liquidità (`sum_conti`) ora riusa i cumulativi già calcolati (`per_conto_cum_out`) — eliminata 1 aggregazione per conto.
+- Conti DISATTIVATI con saldo residuo ora inclusi nei saldi (iterazione su `conti_all`, non solo attivi); la lista conti per data-entry resta solo-attivi.
+
+**Fase 2 — snapshot giornalieri concatenati (carry-forward):**
+- Ogni giornata CHIUSA salva un `checkpoint` nello snapshot (`riepilogo.checkpoint`): cumulativi KPI, saldo per conto (`per_conto_cum`), `rid_cum`, + guard (`src_count`, `src_maxupd` su movimenti con data<=giorno).
+- `_compute_brogliaccio` riparte dall'ultimo checkpoint CHIUSO valido < giorno e somma SOLO i movimenti successivi (finestra delta), invece di risommare da inizio vita.
+- **Guard auto-verificante:** `_checkpoint_valido` riconteggia `count`+`max(updated_at)` su data<=D0; se cambiati (insert/update/delete in passato) il checkpoint è scartato → fallback al checkpoint valido precedente o ricalcolo completo. Nessuna istrumentazione delle scritture richiesta, self-healing.
+- **Cascade:** riaprire una giornata la esclude dal resume (`riaperta_at` filtro); i checkpoint a valle si auto-invalidano via guard. "Riallinea saldi" ricostruisce i checkpoint (backfill su TUTTE le giornate valutate, anche diff=0).
+- **Fix riconciliazione:** `_compute_brogliaccio(..., apply_snapshot=False)` per il confronto del riallineo → ora rileva davvero gli snapshot stantii (prima confrontava snapshot vs snapshot = sempre 0 differenze).
+
+**Verifiche (curl su tenant admin reale):**
+- Invariante chiave: ricalcolo via checkpoint == full-scan, identico al centesimo (sum_conti 1078.5, KPI invariati).
+- Guard: insert movimento passato (+50 su 2026-10-10) → oggi 1078.5→1128.5 (checkpoint stantio scartato, fallback a checkpoint precedente); dopo delete → ripristino 1078.5.
+- Riallineo: rilevata e corretta differenza reale −200 su 2026-10-15; idempotente (0 da correggere dopo apply). Chiamate frontend senza parametri OK.
+- 3 indici compound creati e verificati.
+
+**Nota:** `_compute_saldi_compagnie` resta ricalcolo completo (non checkpointato) — possibile ottimizzazione futura se diventa collo di bottiglia.

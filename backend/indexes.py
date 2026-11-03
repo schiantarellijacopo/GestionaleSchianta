@@ -58,7 +58,11 @@ INDEXES: dict[str, list[list[str]]] = {
                   ["anagrafica_id"], ["compagnia_id"], ["conto_cassa_id"], ["chiusura_id"],
                   ["agenzia_tenant_id", "data_movimento"], ["agenzia_tenant_id", "categoria"],
                   ["agenzia_tenant_id", "tipo"], ["agenzia_tenant_id", "conto_cassa_id"],
-                  ["agenzia_tenant_id", "titolo_id"]],
+                  ["agenzia_tenant_id", "titolo_id"],
+                  # Accelerano il ricalcolo cumulativo Prima Nota (checkpoint + saldi conto)
+                  ["agenzia_tenant_id", "conto_cassa_id", "data_movimento"],
+                  ["agenzia_tenant_id", "is_direzione", "data_movimento"],
+                  ["agenzia_tenant_id", "data_movimento", "updated_at"]],
     "allegati_extra": [],
     "storico_avvisi": [["agenzia_tenant_id", "canale"], ["agenzia_tenant_id", "contraente_id"],
                        ["titoli_ids"], ["agenzia_tenant_id", "created_at"]],

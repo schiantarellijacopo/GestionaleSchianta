@@ -273,3 +273,11 @@ Vedi `/app/memory/test_credentials.md` (admin@assicura.it / Admin123!).
 - **Esito reale consegna link** (`/esignature/invia`): la consegna WhatsApp/Email ora è attesa (non più background) e ritorna `recapito:{whatsapp:{ok,error?}, email:{ok,error?}}` + `signing_url`. Frontend `GeneraDocumentoButton.jsx`: toast di successo solo sui canali realmente riusciti, toast di errore con motivo sui canali falliti, e box con il **signing_url copiabile** per inoltro manuale. (Nel preview WhatsApp risulta "connecting" e SMTP non configurato → i canali falliscono, ma ora l'operatore lo vede e ha il link.)
 - **LIMITE SANDBOX YouSign** (da ricerca + test reale): in sandbox l'email del firmatario DEVE appartenere all'organizzazione/dominio dell'account YouSign, altrimenti 400 "the recipient email must belong to your organization". Le SMS OTP in sandbox vengono invece inviate realmente al numero del firmatario (usare numeri propri/del team).
 - **Railway TODO**: impostare `YOUSIGN_SANDBOX_API_KEY` (env) oppure inserire la chiave in Super Admin→Chiavi API→card YouSign; il log d'avvio confermerà l'inizializzazione.
+
+---
+## [2026-06] COMPLETATO — Prima Nota: performance (Fase 1) + snapshot concatenati (Fase 2)
+Architettura carry-forward implementata e verificata (dettagli in CHANGELOG.md):
+- Fase 1: indici compound su `movimenti`, finestra delta (niente risomma da inizio vita, niente tetto 50k), conti disattivati con saldo residuo inclusi.
+- Fase 2: checkpoint giornalieri nelle chiusure (`riepilogo.checkpoint`) con resume dall'ultimo giorno chiuso valido + guard auto-verificante (count + max updated_at) → self-healing su modifiche passate; "Riallinea saldi" ricostruisce/backfilla i checkpoint e ora rileva davvero snapshot stantii.
+- Invariante verificata: resume == full-scan (identico). Guard verificato con insert/delete passato.
+- Backlog: ottimizzare `_compute_saldi_compagnie` (ancora full recompute) se diventa collo di bottiglia.
