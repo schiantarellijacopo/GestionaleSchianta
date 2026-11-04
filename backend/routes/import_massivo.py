@@ -1317,6 +1317,7 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
             "ssn": round(float(_pol.get("premio_ssn") or 0), 2),
             "accessori": round(float(_pol.get("premio_accessori") or 0), 2),
             "provvigioni": round(float(_pol.get("provvigioni") or 0), 2),
+            "provvigioni_operatori": _pol.get("provvigioni_operatori") or [],
             "collaboratore_id": _pol.get("collaboratore_id"),
             "stato": "da_incassare",
         }

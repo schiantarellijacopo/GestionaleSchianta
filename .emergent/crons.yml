@@ -6,3 +6,9 @@ crons:
     method: POST
     # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
     enabled: true
+  - name: disdette-reminder
+    description: "Ogni giorno alle 8:00 avvisa l'agenzia delle disdette da inviare in scadenza (promemoria interno, mai al cliente)"
+    cron: "0 8 * * *"
+    endpoint: "{{BASE_URL}}/api/cron/disdette-reminder"
+    method: POST
+    enabled: true

@@ -16277,6 +16277,62 @@ async def cron_imap_poll(request: Request):
     return {"ok": True}
 
 
+@api.post("/cron/disdette-reminder")
+async def cron_disdette_reminder(request: Request):
+    """Promemoria disdette: avvisa SOLO l'agenzia (utenti admin del tenant) qualche
+    giorno prima della scadenza di invio di ogni disdetta ancora 'da_inviare'.
+    Il cliente NON viene mai avvisato. Dedup giornaliero via `ultimo_promemoria`.
+    Chiamato dalla piattaforma (vedi .emergent/crons.yml)."""
+    import hmac
+    from datetime import date as _date, timedelta as _td
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Unauthorized")
+
+    from database import raw_db
+    from alert_models import Notification
+    giorni_preavviso = int(os.environ.get("DISDETTE_REMINDER_DAYS") or 5)
+    oggi = _date.today()
+    oggi_s = oggi.isoformat()
+    limite = (oggi + _td(days=giorni_preavviso)).isoformat()
+    created = 0
+    cur = raw_db.disdette.find({
+        "stato": "da_inviare",
+        "data_scadenza": {"$gte": "2000-01-01", "$lte": limite},
+        "ultimo_promemoria": {"$ne": oggi_s},
+    }, {"_id": 0})
+    async for d in cur:
+        scad = d.get("data_scadenza")
+        tid = d.get("agenzia_tenant_id")
+        try:
+            giorni = (_date.fromisoformat(scad) - oggi).days
+        except Exception:
+            giorni = None
+        quando = ("è SCADUTA" if (giorni is not None and giorni < 0)
+                  else ("scade OGGI" if giorni == 0
+                        else (f"scade tra {giorni} giorni" if giorni is not None else f"scade il {scad}")))
+        titolo = f"⏰ Disdetta da inviare — {d.get('compagnia_da_disdire') or ''}".strip()
+        msg = (f"La disdetta verso {d.get('compagnia_da_disdire') or 'la compagnia'}"
+               f"{(' (polizza ' + str(d['numero_polizza']) + ')') if d.get('numero_polizza') else ''} "
+               f"{quando} — termine invio {scad}. Ricordati di inviarla.")
+        # destinatari = SOLO agenzia: utenti admin del tenant
+        admins = await raw_db.users.find(
+            {"agenzia_tenant_id": tid, "role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+        for a in admins:
+            n = Notification(
+                user_id=a["id"], titolo=titolo[:200], messaggio=msg,
+                tipo="warning", icona="AlertTriangle", link="/disdette",
+                entita_tipo="disdetta", entita_id=d.get("id"))
+            nd = n.model_dump()
+            nd["agenzia_tenant_id"] = tid
+            await raw_db.notifications.insert_one(nd)
+            created += 1
+        await raw_db.disdette.update_one({"id": d.get("id")}, {"$set": {"ultimo_promemoria": oggi_s}})
+    return {"ok": True, "notifiche_create": created}
+
+
 # =============== CONFIG VISIBILITÀ CARD DOCUMENTI ===============
 # Card di ogni entità (allineate ai detail frontend) + default visibilità cliente
 CARD_DEFS = {

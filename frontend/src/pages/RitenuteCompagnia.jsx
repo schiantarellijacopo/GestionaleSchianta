@@ -219,7 +219,19 @@ function RitenutaCompagniaDialog({ item, compagnie, onClose }) {
         note: "",
     });
     const [saving, setSaving] = useState(false);
+    // La descrizione si autocompila con compagnia + data, ma resta SEMPRE modificabile:
+    // appena l'utente la modifica a mano, smettiamo di sovrascriverla.
+    const [descTouched, setDescTouched] = useState(!!item);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+
+    useEffect(() => {
+        if (descTouched) return;
+        const comp = compagnie.find((c) => c.id === f.compagnia_id);
+        if (comp && f.data) {
+            const [y, m, d] = f.data.split("-");
+            setF((p) => ({ ...p, descrizione: `RITENUTA ${comp.ragione_sociale} DEL ${d}-${m}-${y}` }));
+        }
+    }, [f.compagnia_id, f.data, descTouched, compagnie]);
 
     const save = async () => {
         if (!f.compagnia_id) { toast.error("Seleziona la compagnia"); return; }
@@ -280,7 +292,9 @@ function RitenutaCompagniaDialog({ item, compagnie, onClose }) {
                     <div>
                         <Label>Descrizione</Label>
                         <Input placeholder="es. Ritenuta vita Q3, Storno commissioni..."
-                            value={f.descrizione} onChange={(e) => set("descrizione", e.target.value)} />
+                            value={f.descrizione}
+                            onChange={(e) => { setDescTouched(true); set("descrizione", e.target.value); }}
+                            data-testid="ritc-descrizione" />
                     </div>
                     <div>
                         <Label>Note</Label>

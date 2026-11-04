@@ -43,8 +43,10 @@ export default function RappelPage() {
 
     useEffect(() => { load(); }, [load]);
     useEffect(() => {
+        // Solo compagnie con mandato DIRETTO (le collaborazioni/indirette, es. REDION,
+        // non danno rappel/ritenute/PNC alla nostra agenzia).
         api.get("/compagnie")
-            .then((r) => setCompagnie((r.data || []).filter((c) => c.attiva !== false)));
+            .then((r) => setCompagnie((r.data || []).filter((c) => c.attiva !== false && (c.tipo_mandato || "diretto") === "diretto")));
     }, []);
 
     const apriNuovo = () => { setEditing(null); setDialogOpen(true); };
