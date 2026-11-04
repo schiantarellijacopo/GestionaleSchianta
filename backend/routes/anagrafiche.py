@@ -296,6 +296,8 @@ async def list_anagrafiche(
         for tok in tokens:
             and_clauses.append({"$or": [
                 {"ragione_sociale": {"$regex": re.escape(tok), "$options": "i"}},
+                {"cognome": {"$regex": re.escape(tok), "$options": "i"}},
+                {"nome": {"$regex": re.escape(tok), "$options": "i"}},
                 {"codice_fiscale": {"$regex": re.escape(tok), "$options": "i"}},
                 {"partita_iva": {"$regex": re.escape(tok), "$options": "i"}},
                 {"email": {"$regex": re.escape(tok), "$options": "i"}},

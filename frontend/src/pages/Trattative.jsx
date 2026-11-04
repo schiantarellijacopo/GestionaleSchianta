@@ -169,9 +169,18 @@ function TrattativaDialog({ editing, onClose }) {
         stato: "aperta", note: "", polizza_id: "", visibili_cliente: false,
     });
     useEffect(() => {
-        api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data));
         api.get("/compagnie").then((r) => setCompagnie(r.data));
     }, []);
+    // Ricerca cliente server-side (debounce) — scala su migliaia di anagrafiche
+    useEffect(() => {
+        const term = clienteSearch.trim();
+        const t = setTimeout(() => {
+            api.get("/anagrafiche", { params: term ? { q: term, limit: 50 } : { limit: 50 } })
+                .then((r) => setAnagrafiche(Array.isArray(r.data) ? r.data : (r.data?.items || [])))
+                .catch(() => setAnagrafiche([]));
+        }, 300);
+        return () => clearTimeout(t);
+    }, [clienteSearch]);
     useEffect(() => {
         if (f.anagrafica_id) {
             api.get("/polizze", { params: { contraente_id: f.anagrafica_id, limit: 500 } })
@@ -189,6 +198,9 @@ function TrattativaDialog({ editing, onClose }) {
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
     const invia = async (canale) => {
+        const dest = canale === "email" ? editing?.anagrafica_email : editing?.anagrafica_cellulare;
+        if (!dest) { toast.error(`Nessun ${canale === "email" ? "indirizzo email" : "numero cellulare"} sull'anagrafica`); return; }
+        if (!window.confirm(`Inviare il preventivo via ${canale.toUpperCase()} a ${dest}?`)) return;
         setInvio(canale);
         try {
             const r = await api.post(`/trattative/${editing.id}/invia`, { canale });
@@ -207,22 +219,24 @@ function TrattativaDialog({ editing, onClose }) {
                         <SelectTrigger data-testid="tr-cliente"><SelectValue placeholder="Seleziona cliente" /></SelectTrigger>
                         <SelectContent className="max-h-80">
                             <div className="sticky top-0 bg-white z-10 p-1.5 border-b border-slate-100">
-                                <Input autoFocus placeholder="Cerca cliente…" value={clienteSearch}
+                                <Input autoFocus placeholder="Cerca cliente (nome, CF, email…)" value={clienteSearch}
                                     onChange={(e) => setClienteSearch(e.target.value)}
                                     onKeyDown={(e) => e.stopPropagation()}
                                     className="h-8 text-sm" data-testid="tr-cliente-search" />
                             </div>
-                            {anagrafiche
-                                .filter((a) => {
-                                    const n = (a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`).toLowerCase();
-                                    return n.includes(clienteSearch.toLowerCase());
-                                })
-                                .slice(0, 100)
-                                .map((a) => (
-                                    <SelectItem key={a.id} value={a.id}>
-                                        {a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}
-                                    </SelectItem>
-                                ))}
+                            {editing?.anagrafica_id && !anagrafiche.some((a) => a.id === editing.anagrafica_id) && (
+                                <SelectItem key={editing.anagrafica_id} value={editing.anagrafica_id}>
+                                    {editing.anagrafica_nome || "Cliente selezionato"}
+                                </SelectItem>
+                            )}
+                            {anagrafiche.length === 0 && (
+                                <div className="px-3 py-2 text-xs text-slate-400">Digita per cercare…</div>
+                            )}
+                            {anagrafiche.map((a) => (
+                                <SelectItem key={a.id} value={a.id}>
+                                    {a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}
+                                </SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
                 </div>

@@ -1,0 +1,46 @@
+{
+  "summary": "Tested backend and frontend on the real tenant c5ae2d0e. The requested account qa.tester@schiantarelli.it does NOT exist in the preview DB (login returns 401, no row in users), so all tests ran as jacopo@schiantarelli.it, the admin of the same tenant listed in test_credentials.md. Backend: 13/13 pytest pass. Covered: trattative CRUD with checklist and premio_proposto, toggling a checklist item, per-column valore on /pipeline/trattative before and after a move, /invia returning 400 for a missing recipient (email and whatsapp) and for an invalid canale, /invia returning 404, whatsapp-chat with the numero param (including the +39 format), diario document download (Bearer and cookie-only) and storage ?token= (200 with token, 401 without). Frontend passes: typeable client search, create/reopen persistence of checklist and premio, checklist toggle persistence, Email/WhatsApp send controls render, invia email shows the 400 toast, empty gates plus 'Popola automaticamente' on polizze/sinistri/titoli/regolazione/clienti, trattative not gated, polizze populated after confirm, Diario 'Apri chat' loads the real WA conversation, diario PDF link shows '(240 KB)' with no NaN and fetches 200 application/pdf 245833 bytes, logo and avatar <img> include ?token= and render. Two bugs found: (1) the kanban column totals do NOT update after a drag-move until a page reload; (2) the trattativa client search only covers the first 2000 of 5627 clients.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/trattative/{id}/invia", "issue": "The 'Canale non valido' check runs after find_one and enrich, so an invalid canale on a nonexistent id returns 404 instead of 400. Cosmetic."},
+      {"endpoint": "GET /api/anagrafiche/{aid}/diario", "issue": "WhatsApp media enrichment runs one whatsapp_messages query per diario row (N+1) and attaches ALL media of that number to EVERY whatsapp row of the client, so the same files repeat on each row. The endpoint is also slow: about 5-8s per call on the real tenant (13 tests took 102s, mostly diario calls)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Pipeline > Trattative kanban (Pipeline.jsx onDrop optimistic update ~line 163)", "issue": "After dragging a deal to another column, the backend updates stato correctly (verified in DB), but the column header totals col-valore-{key} and riepilogo-valore-aperte/vinte stay stale. Only cards and count are updated optimistically; valore and riepilogo are not recalculated and load() is not called on success. Reproduced: dragged a 777€ deal from Vinte to Aperte, and the headers still showed Aperte €0 / Vinte €777 until reload. Fix: recompute valore in the optimistic update (needs the card's premio) or call load() after a successful move.", "selector": "[data-testid='col-valore-aperta'], [data-testid='col-valore-vinta'], [data-testid='riepilogo-valore-aperte']", "priority": "HIGH"},
+      {"component": "TrattativaDialog client search (Trattative.jsx line 172)", "issue": "The dialog loads only /anagrafiche?limit=2000 and filters client-side. The real tenant has 5627 anagrafiche, so 3627 clients (64%) cannot be found by typing. Verified: searching 'EMMECI LOGISTICA' returns 0 options, but the client exists. Fix: server-side search (/anagrafiche?q=...) with debounce, or remove the limit. Related: the list is also cut with .slice(0,100), so in edit mode a selected client outside the filtered list may show a blank trigger.", "selector": "[data-testid='tr-cliente-search']", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Send quote (tr-invia-email / tr-invia-whatsapp)", "issue": "There is no confirmation step: one click sends a REAL email or WhatsApp to the customer, with no preview of the recipient or message. It also sends the last SAVED state, not unsaved form edits. Recommend a confirm dialog showing destinatario and the message text.", "affected_selectors": ["[data-testid='tr-invia-email']", "[data-testid='tr-invia-whatsapp']"]}
+    ],
+    "design_issues": [
+      {"screen": "TrattativaDialog", "issues": ["'Scadenza polizza concorrente' uses the native browser date picker (mm/dd/yyyy) instead of the shadcn Calendar/DatePicker, and the US format is inconsistent with the Italian UI", "The 'Risparmio' column shows a negative red value (e.g. -777€) when premio_corrente is 0; it should show '—' when no current premium exists", "The delete button in the trattative table has no data-testid"]},
+      {"screen": "Pipeline gate", "issues": ["Board activation is stored in localStorage (pipeline_attiva_{entita}), so it is per-browser, not per-user or per-tenant: a different user on the same browser inherits it, and the same user sees an empty board on a new device"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter129_trattative_diario_pipeline.py", "/app/test_reports/pytest/iter129.xml"],
+  "action_items": [
+    "Pipeline.jsx: after a successful drag/move, recompute col.valore and riepilogo (or call load()) so the per-column premium totals update immediately",
+    "Trattative.jsx: replace the /anagrafiche?limit=2000 client-side filter with a server-side typeahead (q param) so all 5600+ clients are searchable; make sure the selected client in edit mode always renders",
+    "Add a confirmation dialog (recipient + message preview) before the real Email/WhatsApp send from a trattativa",
+    "Create the qa.tester@schiantarelli.it user in the preview DB, or fix test_credentials.md: the account does not exist (login 401)",
+    "Optional: diario whatsapp media N+1 and duplicate files on every WA row; replace the native date input with the shadcn date picker"
+  ],
+  "critical_code_review_comments": [
+    "auth.get_token_from_request now accepts ?token= for EVERY endpoint, not only storage/download. A full-privilege JWT in the URL leaks into proxy/access logs, browser history and Referer headers. Restrict the query-param fallback to /api/storage/* and the download routes, or use short-lived signed URLs.",
+    "imgUrl reads localStorage 'token'. If the login uses httpOnly cookies, also keeping the JWT in localStorage removes the XSS protection of httpOnly.",
+    "server.py is over 20k lines and AnagraficaDetail.jsx is 2752 lines; both should be split.",
+    "invia_preventivo calls the blocking smtplib _invia_email inside an async route, which blocks the event loop during SMTP I/O. Use run_in_threadpool or asyncio.to_thread.",
+    "Diario documents use <a href target=_blank> and depend on the access_token cookie (works: 200 with cookie, 401 without)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter129_trattative_diario_pipeline.py"],
+  "success_rate": {"backend": "100% (13/13)", "frontend": "~80% (2 bugs: stale kanban totals after move; client search limited to 2000)"},
+  "test_credentials": "qa.tester@schiantarelli.it / QaTest123! does NOT exist (401). Used jacopo@schiantarelli.it / NtdZs5ilxTSP (tenant c5ae2d0e) from test_credentials.md.",
+  "seed_data_creation": "Created and then deleted 2 TEST_ trattative (pytest fixture + UI 'TEST_UI iter129'); the tenant's trattative are back to 0. No real email or WhatsApp was sent: invia was only called on 'TEST CATENA' (1694b6b8, no email or cellulare) and returned 400. Clicking 'Popola automaticamente' on polizze only sets localStorage; no data changed.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Real tenant fixtures: WA chat anagrafica 9beed006-704f-4339-ac05-9d3dcd23efbc (numero 393402934389, 6 msgs) and ea195462-f6b7-489f-bf60-9fe609c21211 (393356891100); diario PDF anagrafica 45e8c0a1-da0d-4775-b3b7-abbd1a50fa9f; no-contact anagrafica 1694b6b8-34ac-4525-b3ac-f0ad62dfe401 (safe for invia 400 tests). The tenant has no WA media, email attachments or pdf_storage_path diario rows, so those document sources were NOT tested end-to-end (only manual allegati). Client beyond the 2000 limit: 'EMMECI LOGISTICA SRL'. Pipeline remembers the last tab; click pipeline-tab-trattative explicitly.",
+  "rca of the issue": "Kanban totals: Pipeline.jsx onDrop optimistically moves cards and adjusts count, but col.valore/riepilogo come only from the server response of GET /pipeline/trattative, which is re-fetched only on error. Client search: Trattative.jsx fetches /anagrafiche?limit=2000 and filters locally, so records after 2000 are never loaded."
+}

@@ -178,6 +178,7 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
         try {
             await api.post(`/pipeline/${entita}/${draggedCard.id}/move`, { nuovo_stato: toCol });
             toast.success(`Spostato in "${toCol.replace(/_/g, " ")}"`);
+            load();
         } catch (err) {
             toast.error(err.response?.data?.detail || "Errore spostamento");
             load();
