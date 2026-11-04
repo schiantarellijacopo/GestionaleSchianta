@@ -190,18 +190,38 @@ async def invia_preventivo(
         msg = "\n".join(righe)
 
     esito = "inviato"
+    # Allegati caricati sulla trattativa (preventivo PDF ecc.) → inviati insieme
+    import base64 as _b64
+    import storage as _storage
+    allegati_rows = await db.allegati.find(
+        {"entita_tipo": "trattativa", "entita_id": tid, "is_deleted": False}, {"_id": 0},
+    ).sort("created_at", -1).to_list(20)
+    allegati_files = []  # [(nome, bytes, mime)]
+    for al in allegati_rows:
+        try:
+            data_bytes, ctype = _storage.get_object(al["storage_path"])
+            allegati_files.append((al.get("nome_file") or "allegato", data_bytes, al.get("content_type") or ctype))
+        except Exception:
+            pass
     try:
         if canale == "whatsapp":
-            from routes.whatsapp_evo import send_text_via_evolution
+            from routes.whatsapp_evo import send_text_via_evolution, send_media_via_evolution
             r = await send_text_via_evolution(dest, msg)
             if not r.get("ok"):
                 esito = f"errore: {r.get('error')}"
+            else:
+                for (nome, data_bytes, mime) in allegati_files:
+                    await send_media_via_evolution(
+                        dest, _b64.b64encode(data_bytes).decode(), nome,
+                        caption=None, mimetype=mime,
+                    )
         else:
             az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
             if not az.get("smtp_host"):
                 raise HTTPException(503, "SMTP non configurato in Librerie/Azienda")
             from avvisi_scadenze import _invia_email as _send_mail
-            _send_mail(az, dest, oggetto, msg, msg.replace("\n", "<br/>"))
+            email_att = [{"filename": n, "content": b, "mime": m} for (n, b, m) in allegati_files]
+            _send_mail(az, dest, oggetto, msg, msg.replace("\n", "<br/>"), attachments=email_att)
     except HTTPException:
         raise
     except Exception as e:

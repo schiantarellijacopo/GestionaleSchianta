@@ -525,3 +525,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Aggiunta conferma destinatario prima dell'invio reale Email/WhatsApp.
 - Allineato formato valuta totali colonna (2 decimali it-IT).
 - Backend 13/13, frontend fix 3/3 + dialog modifica verificato a video.
+
+## 2026-06 — Date picker IT + allegato al preventivo
+- Trattative: campo "Scadenza polizza concorrente" ora usa DateInputIt (gg/mm/aaaa) invece del date picker nativo US — verificato a video (15/09/2026).
+- Trattative: all'invio preventivo via Email/WhatsApp vengono allegati automaticamente i documenti caricati sulla trattativa (sezione DOCUMENTI/PREVENTIVO → AllegatiCell). Email via msg.add_attachment; WhatsApp via nuovo helper send_media_via_evolution (/message/sendMedia). Il caricamento del PDF è già disponibile nel dialog; aggiunta nota esplicativa.
+- NB: l'invio reale con allegato non è stato lanciato a video per non messaggiare un cliente reale; path verificato sintatticamente e basato sull'endpoint send-media già funzionante.

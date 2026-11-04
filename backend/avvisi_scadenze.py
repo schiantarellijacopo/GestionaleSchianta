@@ -349,14 +349,21 @@ def _render_email_html(scadenze: dict[str, list[dict]], giorni: int) -> tuple[st
     return subject, text, html
 
 
-def _invia_email(az: dict, to_addr: str, subject: str, text: str, html: str) -> None:
-    """Invia email via SMTP. Solleva in caso di errore."""
+def _invia_email(az: dict, to_addr: str, subject: str, text: str, html: str, attachments: list | None = None) -> None:
+    """Invia email via SMTP. Solleva in caso di errore. `attachments` = lista di
+    dict {filename, content(bytes), mime}."""
     msg = EmailMessage()
     msg["From"] = az.get("smtp_from") or az.get("smtp_user") or "noreply@assicura.local"
     msg["To"] = to_addr
     msg["Subject"] = subject
     msg.set_content(text)
     msg.add_alternative(html, subtype="html")
+    for att in (attachments or []):
+        maintype, _, subtype = (att.get("mime") or "application/octet-stream").partition("/")
+        msg.add_attachment(
+            att["content"], maintype=maintype or "application",
+            subtype=subtype or "octet-stream", filename=att.get("filename") or "allegato",
+        )
 
     port = int(az.get("smtp_port") or 587)
     host = az["smtp_host"]

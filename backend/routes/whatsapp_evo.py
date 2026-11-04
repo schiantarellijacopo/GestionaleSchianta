@@ -1194,3 +1194,56 @@ async def send_text_via_evolution(number: str, text: str, instance_name: Optiona
         pass
     await _unarchive_chat(inst["instance_name"], to_clean)
     return {"ok": True, "instance_name": inst["instance_name"]}
+
+
+async def send_media_via_evolution(number: str, media_base64: str, filename: str,
+                                   caption: Optional[str] = None, mimetype: Optional[str] = None,
+                                   instance_name: Optional[str] = None) -> dict:
+    """Invio allegato (PDF/doc/immagine) best-effort sull'istanza connessa del tenant.
+    Normalizza il numero come send_text_via_evolution."""
+    to_clean = "".join(c for c in str(number or "") if c.isdigit())
+    if not to_clean:
+        return {"ok": False, "error": "numero non valido"}
+    if to_clean.startswith("00"):
+        to_clean = to_clean[2:]
+    if len(to_clean) == 10 and to_clean.startswith("3"):
+        to_clean = "39" + to_clean
+    inst = None
+    if instance_name:
+        inst = await db.whatsapp_instances.find_one({"instance_name": instance_name}, {"_id": 0})
+    if not inst:
+        inst = await db.whatsapp_instances.find_one({"state": {"$in": ["open", "connected"]}}, {"_id": 0})
+    if not inst:
+        inst = await db.whatsapp_instances.find_one({}, {"_id": 0})
+    if not inst:
+        return {"ok": False, "error": "nessuna istanza WhatsApp configurata"}
+    mt = (mimetype or "").lower()
+    if mt.startswith("image/"):
+        media_type = "image"
+    elif mt.startswith("video/"):
+        media_type = "video"
+    elif mt.startswith("audio/"):
+        media_type = "audio"
+    else:
+        media_type = "document"
+    payload = {"number": to_clean, "mediatype": media_type, "media": media_base64, "fileName": filename}
+    if caption:
+        payload["caption"] = caption
+    if mimetype:
+        payload["mimetype"] = mimetype
+    try:
+        await _call("POST", f"/message/sendMedia/{inst['instance_name']}",
+                    json=payload, instance_token=inst.get("token"))
+    except HTTPException as e:
+        return {"ok": False, "error": str(e.detail)[:200]}
+    try:
+        await db.whatsapp_messages.insert_one({
+            "id": str(uuid.uuid4()), "instance_name": inst["instance_name"],
+            "direction": "out", "number": to_clean, "text": caption or f"[allegato: {filename}]",
+            "message_type": media_type, "attachment_name": filename, "attachment_mimetype": mimetype,
+            "source": "trattativa_preventivo", "created_at": _now_iso(),
+        })
+    except Exception:
+        pass
+    await _unarchive_chat(inst["instance_name"], to_clean)
+    return {"ok": True, "instance_name": inst["instance_name"]}

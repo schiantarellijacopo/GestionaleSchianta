@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { Plus, Edit, Trash2, Briefcase, ArrowRight, Paperclip, Mail, MessageCircle, Link2, Send } from "lucide-react";
 import { toast } from "sonner";
 import AllegatiCell from "@/components/AllegatiCell";
+import DateInputIt from "@/components/DateInputIt";
 
 const STATI = [
     { v: "aperta", l: "Aperta", color: "sky" },
@@ -266,7 +267,7 @@ function TrattativaDialog({ editing, onClose }) {
                     </Select>
                 </div>
                 <div><Label className="text-xs">Scadenza polizza concorrente</Label>
-                    <Input type="date" value={f.data_scadenza_corrente || ""} onChange={(e) => set("data_scadenza_corrente", e.target.value)} /></div>
+                    <DateInputIt value={f.data_scadenza_corrente || ""} onChange={(v) => set("data_scadenza_corrente", v)} /></div>
                 <div><Label className="text-xs">Premio attuale concorrente €</Label>
                     <Input type="number" step="0.01" value={f.premio_corrente} onChange={(e) => set("premio_corrente", parseFloat(e.target.value) || 0)} /></div>
                 <div><Label className="text-xs">Premio proposto da noi €</Label>
@@ -328,6 +329,7 @@ function TrattativaDialog({ editing, onClose }) {
                                 <MessageCircle size={13} className="mr-1" /> {invio === "whatsapp" ? "Invio…" : "WhatsApp"}
                             </Button>
                         </div>
+                        <p className="text-[10px] text-slate-400">I documenti caricati qui sopra (PDF preventivo ecc.) verranno allegati all'email / inviati su WhatsApp.</p>
                     </div>
                 )}
             </div>
