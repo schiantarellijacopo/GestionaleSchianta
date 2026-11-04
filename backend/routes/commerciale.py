@@ -225,6 +225,69 @@ async def invia_preventivo(
 
 
 # ===========================================================
+#  DISDETTE (verso altre compagnie) con avviso scadenza
+# ===========================================================
+class DisdettaBody(BaseModel):
+    anagrafica_id: Optional[str] = None
+    compagnia_da_disdire: str
+    polizza_id: Optional[str] = None
+    numero_polizza: Optional[str] = None
+    ramo: Optional[str] = None
+    data_scadenza: Optional[str] = None   # scadenza polizza / termine ultimo invio
+    data_invio: Optional[str] = None      # quando è stata inviata
+    modalita_invio: Optional[str] = None  # pec | raccomandata | email
+    stato: str = "da_inviare"             # da_inviare | inviata | confermata | annullata
+    note: Optional[str] = None
+
+
+async def _enrich_disdetta(d: dict) -> dict:
+    if d.get("anagrafica_id"):
+        a = await db.anagrafiche.find_one(
+            {"id": d["anagrafica_id"]}, {"_id": 0, "ragione_sociale": 1, "nome": 1, "cognome": 1}) or {}
+        d["anagrafica_nome"] = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+    return d
+
+
+@router.get("/disdette")
+async def list_disdette(stato: Optional[str] = None, user=Depends(current_user)) -> list[dict]:
+    flt: dict = {}
+    if stato:
+        flt["stato"] = stato
+    items = await db.disdette.find(flt, {"_id": 0}).sort("data_scadenza", 1).to_list(2000)
+    for d in items:
+        await _enrich_disdetta(d)
+    return items
+
+
+@router.post("/disdette", status_code=201)
+async def create_disdetta(body: DisdettaBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    if not (body.compagnia_da_disdire or "").strip():
+        raise HTTPException(400, "Compagnia da disdire obbligatoria")
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(), "operatore_id": user.get("id"), "created_at": _now_iso()}
+    await db.disdette.insert_one(doc)
+    doc.pop("_id", None)
+    return await _enrich_disdetta(doc)
+
+
+@router.put("/disdette/{did}")
+async def update_disdetta(did: str, body: DisdettaBody, user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    data = body.model_dump()
+    data["updated_at"] = _now_iso()
+    res = await db.disdette.update_one({"id": did}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Disdetta non trovata")
+    return await _enrich_disdetta(await db.disdette.find_one({"id": did}, {"_id": 0}))
+
+
+@router.delete("/disdette/{did}")
+async def delete_disdetta(did: str, user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    res = await db.disdette.delete_one({"id": did})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Disdetta non trovata")
+    return {"ok": True}
+
+
+# ===========================================================
 #  RITENUTE COLLABORATORE
 # ===========================================================
 class RitenutaBody(BaseModel):

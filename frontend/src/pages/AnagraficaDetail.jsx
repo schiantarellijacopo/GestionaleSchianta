@@ -1606,6 +1606,7 @@ function DiarioTab({ anagrafica_id, canEdit }) {
     const [editing, setEditing] = useState(null);
     const [viewingMsg, setViewingMsg] = useState(null);  // dialog "visualizza + rimanda"
     const [viewVoce, setViewVoce] = useState(null);  // vista completa voce (email ricevute, note)
+    const [chatVoce, setChatVoce] = useState(null);  // vista chat WhatsApp (bolle)
     const [cat, setCat] = useState("tutti");  // filtro categoria-attività
     const load = () => api.get(`/anagrafiche/${anagrafica_id}/diario`).then((r) => setList(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [anagrafica_id]);
@@ -1663,7 +1664,16 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                                 )}
                             </>
                         )}
-                        {!isCom && v.descrizione && (
+                        {!isCom && v.tipo === "whatsapp" && v.numero && (
+                            <button
+                                onClick={() => setChatVoce(v)}
+                                className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium inline-flex items-center gap-1"
+                                data-testid={`diario-chat-${v.id}`}
+                            >
+                                <MessageCircle size={12} /> Apri chat
+                            </button>
+                        )}
+                        {!isCom && v.tipo !== "whatsapp" && v.descrizione && (
                             <button
                                 onClick={() => setViewVoce(v)}
                                 className="text-sky-700 hover:text-sky-900 underline text-[11px] font-medium"
@@ -1764,6 +1774,21 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                             </div>
                         )}
                         <DialogFooter><Button variant="outline" onClick={() => setViewVoce(null)}>Chiudi</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
+            {chatVoce && (
+                <Dialog open onOpenChange={(o) => !o && setChatVoce(null)}>
+                    <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto" data-testid="diario-chat-dialog">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-emerald-100 text-emerald-700"><MessageCircle size={15} /></span>
+                                Conversazione WhatsApp
+                                {chatVoce.numero && <span className="text-xs font-normal text-slate-400 num">+{chatVoce.numero}</span>}
+                            </DialogTitle>
+                        </DialogHeader>
+                        <WhatsAppChatPreview anagrafica_id={anagrafica_id} />
+                        <DialogFooter><Button variant="outline" onClick={() => setChatVoce(null)}>Chiudi</Button></DialogFooter>
                     </DialogContent>
                 </Dialog>
             )}

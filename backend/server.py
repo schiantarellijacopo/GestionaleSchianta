@@ -13863,6 +13863,24 @@ async def pipeline_move(
             raise HTTPException(404, "Polizza non trovata")
         await log_attivita(user, "move_pipeline", "regolazione", eid, f"Stato -> {nuovo}")
         return {"ok": True, "id": eid, "stato": nuovo}
+    if entita == "trattative":
+        validi = {"aperta", "proposta_inviata", "in_attesa", "vinta", "persa"}
+        if nuovo not in validi:
+            raise HTTPException(400, f"Stato trattativa non valido: {nuovo}")
+        res = await db.trattative.update_one({"id": eid}, {"$set": {"stato": nuovo, "updated_at": _now_iso()}})
+        if res.matched_count == 0:
+            raise HTTPException(404, "Trattativa non trovata")
+        await log_attivita(user, "move_pipeline", "trattativa", eid, f"Stato -> {nuovo}")
+        return {"ok": True, "id": eid, "stato": nuovo}
+    if entita == "disdette":
+        validi = {"da_inviare", "inviata", "confermata", "annullata"}
+        if nuovo not in validi:
+            raise HTTPException(400, f"Stato disdetta non valido: {nuovo}")
+        res = await db.disdette.update_one({"id": eid}, {"$set": {"stato": nuovo, "updated_at": _now_iso()}})
+        if res.matched_count == 0:
+            raise HTTPException(404, "Disdetta non trovata")
+        await log_attivita(user, "move_pipeline", "disdetta", eid, f"Stato -> {nuovo}")
+        return {"ok": True, "id": eid, "stato": nuovo}
     if entita in PIPELINE_STATI_VALIDI:
         if nuovo not in PIPELINE_STATI_VALIDI[entita]:
             raise HTTPException(400, f"Stato non valido per {entita}: {nuovo}")
@@ -14021,6 +14039,63 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
             } for a in cols_data[k][:50]],
         } for k, label in stages]
         return {"entita": "clienti", "colonne": cols}
+
+    if entita == "trattative":
+        stages = [("aperta", "Aperte"), ("proposta_inviata", "Proposta inviata"),
+                  ("in_attesa", "In attesa"), ("vinta", "Vinte"), ("persa", "Perse")]
+        flt_t: dict = {}
+        if user.get("role") == "collaboratore":
+            flt_t["collaboratore_id"] = user.get("id")
+        items = await db.trattative.find(flt_t, {"_id": 0}).sort("created_at", -1).to_list(5000)
+        ana_ids = list({t.get("anagrafica_id") for t in items if t.get("anagrafica_id")})
+        anas = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+                async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1})}
+        cols = []
+        for stato, label in stages:
+            cards = [t for t in items if (t.get("stato") or "aperta") == stato]
+            cols.append({"key": stato, "label": label, "count": len(cards), "cards": [{
+                "id": t["id"], "title": t.get("titolo") or "—",
+                "subtitle": anas.get(t.get("anagrafica_id", ""), ""),
+                "footer": t.get("ramo") or t.get("compagnia_di_provenienza") or "",
+                "extra": (f"€{float(t.get('premio_proposto') or 0):.0f}" if t.get("premio_proposto") else ""),
+                "date": t.get("data_scadenza_corrente"), "link": "/trattative",
+            } for t in cards[:50]]})
+        return {"entita": "trattative", "colonne": cols}
+
+    if entita == "disdette":
+        stages = [("da_inviare", "Da inviare"), ("inviata", "Inviata"),
+                  ("confermata", "Confermata"), ("annullata", "Annullata")]
+        items = await db.disdette.find({}, {"_id": 0}).sort("data_scadenza", 1).to_list(5000)
+        ana_ids = list({d.get("anagrafica_id") for d in items if d.get("anagrafica_id")})
+        anas = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
+                async for a in db.anagrafiche.find({"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1, "nome": 1, "cognome": 1})}
+        oggi = _now_iso()[:10]
+        from datetime import datetime as _dt, timedelta as _td
+        try:
+            soglia = (_dt.fromisoformat(oggi) + _td(days=15)).date().isoformat()
+        except Exception:
+            soglia = oggi
+        cols = []
+        for stato, label in stages:
+            cards = [d for d in items if (d.get("stato") or "da_inviare") == stato]
+            out = []
+            for d in cards[:80]:
+                scad = d.get("data_scadenza")
+                tags = []
+                if stato == "da_inviare" and scad:
+                    if scad <= oggi:
+                        tags.append("⚠ scaduta")
+                    elif scad <= soglia:
+                        tags.append("in scadenza")
+                out.append({
+                    "id": d["id"], "title": d.get("compagnia_da_disdire") or "Disdetta",
+                    "subtitle": anas.get(d.get("anagrafica_id", ""), "") or (d.get("numero_polizza") or ""),
+                    "footer": (f"Pol. {d.get('numero_polizza')}" if d.get("numero_polizza") else (d.get("ramo") or "")),
+                    "extra": (d.get("modalita_invio") or ""),
+                    "date": scad, "tags": tags, "link": "/disdette",
+                })
+            cols.append({"key": stato, "label": label, "count": len(cards), "cards": out})
+        return {"entita": "disdette", "colonne": cols}
 
     # ===== PIPELINE CUSTOM (entita = id pipeline) =====
     pipeline = await db.pipelines_custom.find_one({"id": entita}, {"_id": 0})

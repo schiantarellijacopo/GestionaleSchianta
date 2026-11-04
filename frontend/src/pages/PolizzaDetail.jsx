@@ -1493,6 +1493,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
     const [collaboratori, setCollaboratori] = useState([]);
     const [rami, setRami] = useState([]);
     const [prodotti, setProdotti] = useState([]);
+    const [prodottoSearch, setProdottoSearch] = useState("");
     useEffect(() => {
         api.get("/auth/users", { params: { role: "collaboratore" } })
             .then((r) => setCollaboratori((r.data || []).filter((u) => u.attivo !== false)))
@@ -1693,9 +1694,25 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
                                         <SelectValue placeholder={f.ramo ? (prodotti.length ? "Seleziona prodotto" : "Nessun prodotto per questo ramo") : "Scegli prima un ramo"} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {prodotti.map((p) => (
-                                            <SelectItem key={p.id || p.nome} value={p.nome}>{p.nome}</SelectItem>
-                                        ))}
+                                        <div className="sticky top-0 bg-white z-10 p-1.5 border-b border-slate-100">
+                                            <Input
+                                                autoFocus
+                                                placeholder="Cerca prodotto…"
+                                                value={prodottoSearch}
+                                                onChange={(e) => setProdottoSearch(e.target.value)}
+                                                onKeyDown={(e) => e.stopPropagation()}
+                                                className="h-8 text-sm"
+                                                data-testid="edit-pol-prodotto-search"
+                                            />
+                                        </div>
+                                        {prodotti
+                                            .filter((p) => (p.nome || "").toLowerCase().includes(prodottoSearch.toLowerCase()))
+                                            .map((p) => (
+                                                <SelectItem key={p.id || p.nome} value={p.nome}>{p.nome}</SelectItem>
+                                            ))}
+                                        {prodotti.filter((p) => (p.nome || "").toLowerCase().includes(prodottoSearch.toLowerCase())).length === 0 && (
+                                            <div className="px-3 py-2 text-xs text-slate-400">Nessun prodotto trovato</div>
+                                        )}
                                     </SelectContent>
                                 </Select>
                             </div>

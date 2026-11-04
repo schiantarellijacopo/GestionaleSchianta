@@ -30,6 +30,7 @@ const ALL_MENU_ITEMS = [
     { id: "avvisi", path: "/avvisi", icon: "Bell", label: "Avvisi", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "carichi-mensili", path: "/carichi-mensili", icon: "PackageCheck", label: "Carichi Mensili", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "trattative", path: "/trattative", icon: "Briefcase", label: "Trattative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "disdette", path: "/disdette", icon: "TrendingDown", label: "Disdette", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "alert", path: "/alert", icon: "Zap", label: "Alert & Automazioni", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "libro_matricola", path: "/libro-matricola", icon: "ClipboardList", label: "Libro Matricola / Cumulative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "regolazione_premio", path: "/regolazione-premio", icon: "Percent", label: "Regolazione Premio", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },

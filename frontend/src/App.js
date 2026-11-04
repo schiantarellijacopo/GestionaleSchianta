@@ -33,6 +33,7 @@ import ImmaginiAI from "@/pages/ImmaginiAI";
 import StudioMarketing from "@/pages/StudioMarketing";
 import Ritenute from "@/pages/Ritenute";
 import Trattative from "@/pages/Trattative";
+import Disdette from "@/pages/Disdette";
 import Newsletter from "@/pages/Newsletter";
 import Voucher from "@/pages/Voucher";
 import Contabilita from "@/pages/Contabilita";
@@ -157,6 +158,7 @@ function App() {
                                 <ProtectedRoute roles={["admin", "collaboratore", "dipendente"]}><DocumentiInbox /></ProtectedRoute>
                             } />
                             <Route path="/trattative" element={<Trattative />} />
+                            <Route path="/disdette" element={<Disdette />} />
                             <Route path="/newsletter" element={<Newsletter />} />
                             <Route path="/voucher" element={<Voucher />} />
                             <Route path="/agenzie" element={

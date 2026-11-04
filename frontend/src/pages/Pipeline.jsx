@@ -17,6 +17,8 @@ import {
 import AllegatiCell from "@/components/AllegatiCell";
 
 const BUILTIN = [
+    { key: "trattative", label: "Trattative", editable: true, builtin: true },
+    { key: "disdette", label: "Disdette", editable: true, builtin: true },
     { key: "polizze", label: "Polizze", editable: true, builtin: true },
     { key: "sinistri", label: "Sinistri", editable: true, builtin: true },
     { key: "titoli", label: "Titoli", editable: true, builtin: true },
@@ -33,6 +35,8 @@ const COL_COLORS_BUILTIN = {
     prospect: "#94A3B8", nuovo: "#0EA5E9", attivo: "#10B981", top: "#7C3AED",
     da_richiedere: "#94A3B8", lettera_inviata: "#0EA5E9", dati_ricevuti: "#F59E0B",
     calcolata: "#7C3AED", titolo_generato: "#10B981", chiusa: "#64748B",
+    aperta: "#0EA5E9", proposta_inviata: "#F59E0B", in_attesa: "#7C3AED", vinta: "#10B981", persa: "#EF4444",
+    da_inviare: "#F59E0B", inviata: "#0EA5E9", confermata: "#10B981",
 };
 
 const TIPO_ICON = {
@@ -111,13 +115,27 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
     const [newCardCol, setNewCardCol] = useState(null);
     const [editingCard, setEditingCard] = useState(null);
     const nav = useNavigate();
+    const SINI_LS = "pipeline_sinistri_attiva";
+    const [siniActive, setSiniActive] = useState(() => {
+        try { return localStorage.getItem(SINI_LS) === "1"; } catch { return false; }
+    });
+    const gated = entita === "sinistri" && !siniActive;
 
     const load = useCallback(() => {
+        if (entita === "sinistri" && localStorage.getItem(SINI_LS) !== "1") { setData(null); return; }
         setData(null);
         api.get(`/pipeline/${entita}`).then((r) => setData(r.data));
     }, [entita]);
 
     useEffect(() => { load(); }, [load]);
+
+    const attivaSinistri = () => {
+        if (!window.confirm("Vuoi popolare automaticamente la pipeline Sinistri con i sinistri esistenti?")) return;
+        try { localStorage.setItem(SINI_LS, "1"); } catch { /* noop */ }
+        setSiniActive(true);
+        setData(null);
+        api.get(`/pipeline/${entita}`).then((r) => setData(r.data));
+    };
 
     const onDragStart = (card, fromCol, ev) => {
         if (!editable) return;
@@ -166,6 +184,21 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
         setDraggedCard(null);
     };
 
+    if (gated) {
+        return (
+            <div data-testid="board-sinistri-gate" className="flex flex-col items-center justify-center text-center py-16 px-4 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/60">
+                <ShieldAlert size={40} className="text-amber-500 mb-3" />
+                <div className="font-semibold text-slate-800 mb-1">Pipeline Sinistri vuota</div>
+                <p className="text-sm text-slate-500 max-w-md mb-5">
+                    Questa pipeline parte vuota. Puoi popolarla automaticamente con i sinistri già presenti,
+                    organizzati per stato (Aperti, In istruttoria, Liquidati…).
+                </p>
+                <Button onClick={attivaSinistri} className="bg-amber-600 hover:bg-amber-700" data-testid="sinistri-popola-btn">
+                    <Plus size={14} className="mr-1.5" /> Popola automaticamente dai sinistri
+                </Button>
+            </div>
+        );
+    }
     if (!data) return <Loading />;
     const isCustom = !builtin && data.pipeline;
 
