@@ -1,0 +1,41 @@
+{
+  "summary": "Tested the 5 new features as admin (tenant-principale-schiantarelli), with backend pytest (5/5 new tests pass) and Playwright UI. Everything requested works: (1) Pipeline has the Trattative and Disdette tabs. Trattative columns Aperte/Proposta inviata/In attesa/Vinte/Perse; dragging a card to In attesa showed a toast, wrote to attivita_log and kept the new stato after reload; clicking a card goes to /trattative. Disdette columns Da inviare/Inviata/Confermata/Annullata; dragging a card to Confermata worked. (2) With localStorage cleared, the Sinistri tab shows the gate. 'Popola automaticamente dai sinistri' asks for confirmation, sets pipeline_sinistri_attiva=1 and loads the board, and the board stays loaded after reload. (3) /disdette (sidebar link works): creating 'TEST UnipolSai' with scadenza 2026-10-01 shows the 'scaduta' badge and KPI In scadenza = 1. A scadenza 6 days ahead shows a '6gg' badge. Editing the stato to Inviata keeps it after reload, removes the badge and puts the KPI back to 0. Delete works. (4) Diario: a WhatsApp entry has an 'Apri chat' button and no '👁 Apri' button; the diario-chat-dialog opens. (5) Prodotto search box is visible and focused: typing 'ACT' narrows 7 options to 1, a nonsense term shows 'Nessun prodotto trovato', and an option can be selected. Found one HIGH backend issue: the disdette collection is not tenant-scoped.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "/api/disdette (GET/POST/PUT/DELETE) and /api/pipeline/disdette", "issue": "'disdette' is missing from TENANT_SCOPED_COLLECTIONS in /app/backend/tenant.py ('trattative' is present). New disdette get no agenzia_tenant_id, and every tenant can list, edit and delete every other tenant's disdette, including on the Pipeline Disdette board. This leaks data between tenants.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "Prima Nota regression (tests/test_iter_primanota_trattative_pipeline.py)", "issue": "Still 3 failing tests, the same as iteration_126 (not caused by this round): tipi_pagamento have no tenant field and their conto_id points to conti_cassa of tenant c5ae2d0e. So in the admin tenant, manual incassi land in a per_conto key that is not shown as a column."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AnagraficaDetail DiarioTab chat dialog", "issue": "The dialog header shows the entry's numero (+39...), but <WhatsAppChatPreview anagrafica_id> looks up the chat from the anagrafica's own cellulare. If the client has no cellulare, or it differs from the number on the entry, the dialog says 'Nessun numero di cellulare valido' although the entry has a number. Pass chatVoce.numero to the preview and use it for the lookup.", "selector": "[data-testid=diario-chat-dialog]", "priority": "MEDIUM"},
+      {"component": "PolizzaDetail edit Prodotto search", "issue": "prodottoSearch is not cleared when the dropdown closes, so on reopen the list is still filtered. If the search filters out the currently selected product, the trigger can show nothing (the Radix SelectItem for that value is not rendered).", "selector": "[data-testid=edit-pol-prodotto-search]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Pipeline Trattative/Sinistri at 1920px", "issues": ["The 5th column (Perse/Respinti) is cut off at the right edge of the container and needs a horizontal scroll"]},
+      {"screen": "Disdette dialog", "issues": ["Scadenza invio and Data invio use the browser's native date picker instead of the shadcn Calendar"]},
+      {"screen": "PolizzaDetail edit dialog", "issues": ["The Ramo select shows blank for policy 8331031c (ramo 'RCA' is not in the rami list), while Prodotto is enabled because f.ramo is set. This is an existing issue."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter127_disdette_pipeline.py", "/app/test_reports/pytest/pytest_iter127.xml"],
+  "action_items": [
+    "HIGH: add 'disdette' to TENANT_SCOPED_COLLECTIONS in /app/backend/tenant.py so disdette are kept separate per tenant",
+    "MEDIUM: pass chatVoce.numero to WhatsAppChatPreview so the Diario chat shows that conversation even when the anagrafica cellulare is missing or different",
+    "LOW: reset prodottoSearch when the Prodotto Select closes (onOpenChange)",
+    "Still open from iteration_126: tipi_pagamento conto mapping to another tenant (Prima Nota columns)"
+  ],
+  "critical_code_review_comments": [
+    "pipeline_data trattative/disdette return count = full length, but cards are capped at [:50] / [:80] and no 'altri N' indicator is shown",
+    "Disdette.jsx daysTo compares new Date('YYYY-MM-DD') (UTC midnight) with local midnight, so the day count can be off by one near timezone boundaries",
+    "Pipeline.jsx is 781 lines; it should be split (PipelineBoard, dialogs)"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter127_disdette_pipeline.py"],
+  "success_rate": {"backend": "100% of new tests (5/5); 3 Prima Nota regression tests still fail, as in iteration_126", "frontend": "100% of requested flows"},
+  "seed_data_creation": "Temporary only, all removed: 4 TEST disdette (2 pytest, 1 UI, 1 API for the delete test), deleted by id; 1 TEST_WA diario entry (6f00659f) on anagrafica 613f4ff5, deleted. Trattativa 459c4a47 was moved and returned to 'aperta'. The policy edit dialog was not saved.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "No anagrafica in the admin tenant has a cellulare, and WhatsApp diario entries exist only in tenant c5ae2d0e, so the bubble rendering of the WA chat could not be verified with real messages. To get a chat button, create an entry with POST /anagrafiche/{id}/diario (tipo whatsapp), then PUT /diario/{id} {numero}. The preview date is 2026-11-04. localStorage key pipeline_sinistri_attiva controls the Sinistri gate. Policy 8331031c (RCA) has 7 prodotti for the search test."
+}

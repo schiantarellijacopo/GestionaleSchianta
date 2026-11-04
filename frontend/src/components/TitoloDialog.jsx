@@ -42,7 +42,7 @@ export default function TitoloDialog({ titolo, onClose, onDelete }) {
     const FALLBACK_TIPI = [
         ["quietanza", "Quietanza"], ["nuova", "Polizza nuova"], ["appendice", "Appendice"],
         ["inclusione", "Inclusione"], ["esclusione", "Esclusione"], ["annullo", "Annullo"],
-        ["sostituzione", "Sostituzione"], ["regolazione", "Regolazione premio"], ["storno", "Storno"],
+        ["sostituzione", "Sostituzione"], ["sospensione", "Sospensione"], ["regolazione", "Regolazione premio"], ["storno", "Storno"],
     ];
     const [tipiTitolo, setTipiTitolo] = useState(FALLBACK_TIPI);
     useEffect(() => {

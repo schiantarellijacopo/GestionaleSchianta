@@ -33,6 +33,8 @@ const TIPO_TITOLO_OPTS = [
     { v: "rinnovo", l: "Rinnovo" },
     { v: "nuova", l: "Nuova" },
     { v: "appendice", l: "Appendice" },
+    { v: "sostituzione", l: "Sostituzione" },
+    { v: "sospensione", l: "Sospensione" },
     { v: "regolazione", l: "Regolazione" },
     { v: "storno", l: "Storno" },
 ];

@@ -1,5 +1,14 @@
 # Changelog — Axicura CRM
 
+## 2026-11 — Pipeline (Trattative/Disdette kanban), Disdette module, Sinistri opt-in, Diario chat, fix OCR/Tipo titolo
+- **Pipeline**: aggiunte board builtin **Trattative** e **Disdette** (kanban drag per stato). Move via `/pipeline/{trattative|disdette}/{id}/move`; branches in `pipeline_data`. Testato (iteration_127, 5/5).
+- **Modulo Disdette** (`/disdette` + sidebar): CRUD in `routes/commerciale.py` (collection `disdette`) + pagina `Disdette.jsx` con KPI, badge avviso scadenza (≤15gg / scaduta), create/edit/delete.
+- **Sinistri opt-in**: board Sinistri parte vuota con gate + pulsante "Popola automaticamente" (conferma), scelta persistita in localStorage (`pipeline_sinistri_attiva`).
+- **Diario chat**: voci WhatsApp aprono vista chat a bolle (`WhatsAppChatPreview`) via "Apri chat" (diario-chat-dialog).
+- **FIX Tipo titolo** (`DialogIncassoCopertura.jsx` + `TitoloDialog.jsx`): aggiunti "Sospensione" e "Sostituzione".
+- **FIX barra OCR** (`Polizze.jsx` "Riconoscimento polizza"): `OcrProgressBar` spostato fuori dalla toolbar flex su riga full-width così torna visibile durante l'OCR.
+- **NON implementato (prossimo task)**: alla creazione di polizza NUOVA da importazione o di SOSTITUZIONE, generare automaticamente il titolo con gli stessi importi di Premi (netto/imposte/ssn/lordo) e Provvigioni.
+
 ## 2026-11 — Prima Nota (manuale), Diario documenti, Pipeline cards & Trattative↔Polizza
 - **Prima Nota — registrazione manuale (FIX)**: un nuovo movimento manuale in ENTRATA con categoria "Incasso premio" e NESSUNA polizza/titolo collegato ora popola SOLO la colonna banca/cassa/assegni corrispondente al tipo di pagamento. Prima l'importo compariva duplicato anche in "Totale" e "Saldo". Fix in `server.py::_compute_brogliaccio` (nuovo ramo per entrata/incasso_premio senza polizza/titolo).
   - Aggiunto inoltre un resolver NON distruttivo (`_resolve_conto`) che, se il `conto_cassa_id` del movimento non appartiene al tenant (es. tipo-pagamento con conto_id stantio), rimappa in visualizzazione sul conto del tenant il cui nome compare nell'etichetta del mezzo (es. "BONIFICO BPER SONDRIO" → "BPER Sondrio", "CONTANTI" → "Cassa Contanti"). Risolve il caso in cui l'importo finiva in una colonna invisibile.

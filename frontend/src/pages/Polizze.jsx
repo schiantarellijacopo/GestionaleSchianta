@@ -943,9 +943,9 @@ function NuovaPolizzaDialog({ onClose }) {
                     <ScanLine size={13} className="mr-1" />
                     {ocrLoading ? "Riconoscimento..." : "Carica PDF polizza"}
                 </Button>
-                <div className="w-full">
-                    <OcrProgressBar active={ocrLoading} label="Riconoscimento polizza in corso…" />
-                </div>
+            </div>
+            <div className="w-full">
+                <OcrProgressBar active={ocrLoading} label="Riconoscimento polizza in corso…" />
             </div>
 
             <div className="grid grid-cols-2 gap-4 py-2">
