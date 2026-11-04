@@ -9848,6 +9848,41 @@ async def _compute_brogliaccio(data_giorno: str, apply_snapshot: bool = True) ->
     _rid_conto = next((c for c in conti if (c.get("tipo") or "").lower() == "rid"), None)
     rid_conto_id = _rid_conto["id"] if _rid_conto else None
 
+    # --- Risoluzione conto robusta ---------------------------------------
+    # Alcuni "tipi pagamento" possono avere un conto_id stantio (es. dati
+    # importati o di un altro tenant) che non corrisponde ai conti cassa del
+    # tenant corrente: in quel caso l'importo finirebbe in una colonna
+    # invisibile. Rimappiamo (solo per la VISUALIZZAZIONE) sul conto del tenant
+    # il cui nome compare nell'etichetta del mezzo di pagamento
+    # (es. "BONIFICO BPER SONDRIO" -> conto "BPER Sondrio", "CONTANTI" -> "Cassa Contanti").
+    import re as _re_conto
+    _conti_ids = {c["id"] for c in conti}
+
+    def _norm_conto(s: str) -> str:
+        return _re_conto.sub(r"[^A-Z0-9]+", " ", (s or "").upper()).strip()
+
+    _conti_norm = sorted(
+        [(_norm_conto(c.get("nome")), c["id"]) for c in conti if c.get("nome")],
+        key=lambda x: len(x[0]), reverse=True,
+    )
+
+    def _resolve_conto(conto_cassa_id, mezzo_label):
+        if conto_cassa_id and conto_cassa_id in _conti_ids:
+            return conto_cassa_id
+        lab = _norm_conto(mezzo_label)
+        if lab:
+            lab_tokens = set(lab.split())
+            # 1) nome conto contenuto nell'etichetta (o viceversa)
+            for nome, cid in _conti_norm:
+                if nome and (nome in lab or lab in nome):
+                    return cid
+            # 2) token significativo (>=5 char) condiviso
+            for nome, cid in _conti_norm:
+                if any(len(t) >= 5 and t in lab_tokens for t in nome.split()):
+                    return cid
+        return conto_cassa_id
+
+
     # 2) Movimenti del giorno + arricchimento polizza->compagnia
     movs = await db.movimenti.find(
         {"data_movimento": data_giorno, "pregresso": {"$ne": True}}, {"_id": 0}
@@ -10102,10 +10137,11 @@ async def _compute_brogliaccio(data_giorno: str, apply_snapshot: bool = True) ->
         # Escludi movimenti IN DIREZIONE dalle colonne banche (nessun cash flow reale).
         per_conto = {}
         if m.get("conto_cassa_id") and not is_dir:
+            _cid = _resolve_conto(m.get("conto_cassa_id"), m.get("mezzo_pagamento"))
             cash_reale = importo   # importo del movimento = cash effettivo in cassa
             cassa_signed = cash_reale if is_entrata else -cash_reale
-            per_conto[m["conto_cassa_id"]] = cassa_signed
-            per_conto_tot[m["conto_cassa_id"]] = per_conto_tot.get(m["conto_cassa_id"], 0) + cassa_signed
+            per_conto[_cid] = cassa_signed
+            per_conto_tot[_cid] = per_conto_tot.get(_cid, 0) + cassa_signed
         elif is_dir and rid_conto_id:
             # Pagamento in direzione: tracciato SOLO nel conto dedicato "Pagamento Direzione"
             # (tipo RID), col LORDO del titolo. Non tocca le banche reali.

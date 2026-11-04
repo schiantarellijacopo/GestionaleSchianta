@@ -1,0 +1,53 @@
+{
+  "summary": "Tested the 5 requested areas end to end (backend pytest plus Playwright UI as admin, tenant-principale-schiantarelli). Found and fixed 2 blocking bugs: (a) every allegati upload for entita_tipo=trattativa or pipeline_card returned 500, because the Allegato Pydantic Literal in db_models.py had not been updated to match the new whitelist; (b) opening the Trattativa create/edit dialog crashed the page with a Radix error (<SelectItem value=\"\">, Compagnia target). After both fixes: Trattative (polizza link, attachments, Email/WhatsApp send with graceful error toasts), the Polizza 'Trattative collegate' section (note + document download 200), Diario manual-attachment chips (download 200) and Pipeline rich cards (checklist, links, badge 0/2 -> 1/2 persisted, 'pol.' indicator, AllegatiCell) all work. The Prima Nota backend fix is correct (totale/saldo/provv/crediti = 0 on the manual row, and incassi linked to a policy still populate several columns). BUT in the UI the 0,01 shows up in NO column at all: every tipi_pagamento record (e.g. CONTANTI) has no agenzia_tenant_id and its conto_id points to a conto_cassa of ANOTHER tenant (c5ae2d0e-...). The amount lands in an invisible per_conto key, so the requested 'only in the matching bank/cash column' result is not met.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/allegati (entita_tipo=trattativa|pipeline_card)", "issue": "500 ValidationError: Allegato.entita_tipo Literal lacked 'pipeline_card' and 'trattativa'. FIXED by tester in db_models.py. Note: the file was already uploaded to object storage before validation failed, leaving an orphan file.", "priority": "CRITICAL"},
+      {"endpoint": "GET /api/librerie/tipi-pagamento + POST /api/contabilita/movimenti", "issue": "TENANT DATA LEAK / WRONG CONTO: all 19 tipi_pagamento docs have no agenzia_tenant_id, and their conto_id points to conti_cassa of tenant c5ae2d0e (e.g. CONTANTI -> d31c7578 'Cassa Contanti' @c5ae). In tenant-principale the frontend sends conto_cassa_id = tp.conto_id, and create_movimento stores it without checking that the conto belongs to the current tenant. Result: the manual 'Incasso premio' 0,01 via CONTANTI goes to per_conto[d31c7578], which is not among the brogliaccio conti_cassa columns, so the row shows nothing in any column and Riepilogo Conti does not move. Only PRELIEVO SOCI maps to a conto of this tenant.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/trattative/{tid}/invia", "issue": "A failed WhatsApp send (esito='errore: nessuna istanza...') still writes a Diario/storico entry titled '📤 Preventivo inviato via WHATSAPP' with a green WHATSAPP badge. This is misleading. Either skip the diary entry on error or title it 'Invio fallito'."},
+      {"endpoint": "POST /api/trattative/{tid}/invia (email)", "issue": "_invia_email is a synchronous SMTP call made inside an async handler, so it blocks the event loop. Wrap it in run_in_threadpool."},
+      {"endpoint": "GET /api/whatsapp-evo/messages/{id}/media", "issue": "Media is fetched live from Evolution every time and never stored. The admin-tenant message 7fb5c041 returns 404 'Istanza non trovata', so WhatsApp Diario chips will 404 whenever the instance is missing or the media has expired. Suggest saving media to object storage when it is received."},
+      {"endpoint": "GET /api/anagrafiche/{aid}/diario", "issue": "Runs one whatsapp_messages query per WhatsApp diary entry (N+1). Each entry for the same number lists ALL media in the conversation, so chips are duplicated across entries."},
+      {"endpoint": "DELETE /api/trattative/{tid}, DELETE /api/pipelines/{pid}", "issue": "Linked allegati (entita_tipo trattativa/pipeline_card) are not soft-deleted, leaving orphans. Deleting an allegato also leaves its '📎 Documento caricato' diary entry behind."},
+      {"endpoint": "PUT /api/pipelines/{pid}/cards/{card_id}", "issue": "Takes a raw dict with no Pydantic validation, so any field can be $set (e.g. archiviata, operatore_id, arbitrary keys)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Trattative.jsx TrattativaDialog", "issue": "Uncaught runtime error 'A <Select.Item /> must have a value prop that is not an empty string' (Compagnia target). The New and Edit dialogs could not open at all. FIXED by tester (sentinel '__none__').", "selector": "[data-testid=tr-new]", "priority": "CRITICAL"},
+      {"component": "Contabilita NuovoMovimentoDialog", "issue": "Sends conto_cassa_id = tipiPag.conto_id taken directly from the (cross-tenant) tipo pagamento. See the backend issue: the manual entrata is invisible in the Brogliaccio.", "selector": "[data-testid=mov-tipo-pagamento-select]", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Trattativa invia preventivo", "issue": "The Email/WhatsApp buttons are enabled even when the client has no email/cellulare (the result is a 400 toast, which is acceptable). They also send the SAVED trattativa, so unsaved edits (note, premio) are not included. Consider save-then-send, or disabling with a tooltip.", "affected_selectors": ["[data-testid=tr-invia-email]", "[data-testid=tr-invia-whatsapp]"]},
+      {"flow": "Pipeline card Polizza selector", "issue": "Lists up to 1000 polizze globally in a plain Radix Select with no search, not filtered by the selected Cliente. Hard to use with a real portfolio.", "affected_selectors": ["[data-testid=card-polizza]"]}
+    ],
+    "design_issues": [
+      {"screen": "Nuovo movimento / Trattativa / Pipeline card", "issues": ["Uses the native browser date picker (input type=date, mm/dd/yyyy) instead of the app's DateInputIt or a shadcn calendar. The format is inconsistent with the Italian dd/mm/yyyy used elsewhere."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter_primanota_trattative_pipeline.py", "/app/test_reports/pytest/pytest_iter_pn_tr_pipe.xml"],
+  "action_items": [
+    "HIGH: Scope tipi_pagamento per tenant (add agenzia_tenant_id, then migrate or duplicate per tenant with conto_id remapped to that tenant's conti by name). In create_movimento/update_movimento, check that conto_cassa_id exists in the current tenant's conti_cassa; otherwise re-resolve it with resolve_conto_cassa(mezzo). After this, re-verify that the manual Incasso premio 0,01 via CONTANTI appears ONLY in the 'Cassa Contanti' column.",
+    "Do not log '📤 Preventivo inviato' to the Diario when esito is an error (or label it as failed).",
+    "Run the SMTP send in a threadpool inside /trattative/{tid}/invia.",
+    "Consider saving WhatsApp media to object storage so Diario chips do not depend on a live Evolution instance.",
+    "Soft-delete allegati when a trattativa or pipeline is deleted.",
+    "Pipeline card polizza selector: filter by the selected cliente and/or add search.",
+    "Review the tester fixes (db_models.Allegato Literal; Trattative.jsx compagnia_target SelectItem)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~19.9k lines and PolizzaDetail.jsx >2400 lines. Both should be split.",
+    "The Allegato Literal and the upload_allegato whitelist are two sources of truth. Define them as one shared constant.",
+    "upload_allegato stores the file in object storage before building the Pydantic model, so a validation error leaves an orphan file. Validate first.",
+    "_compute_brogliaccio manual branch: also check that it handles movements with anagrafica_id only (it does, since anagrafica_id is not part of the condition). Behaviour is correct per the spec."
+  ],
+  "updated_files": ["/app/backend/db_models.py", "/app/frontend/src/pages/Trattative.jsx", "/app/backend/tests/test_iter_primanota_trattative_pipeline.py"],
+  "success_rate": {"backend": "86% (6/7 pytest; the failing test detects the cross-tenant tipi_pagamento bug)", "frontend": "80% (4/5 flows pass after fixes; Prima Nota UI shows the amount in no column)"},
+  "seed_data_creation": "None kept. All created test data was deleted: movements, TEST_ trattative, TEST_ pipeline + card, allegati, and the diary entries that the test uploads produced automatically on test anagrafica 27ab1b74 (ARCHUICA37E TESTUI).",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Admin tenant = tenant-principale-schiantarelli. The tipi_pagamento collection has no tenant field and maps to conti of tenant c5ae2d0e. Use GET /contabilita/brogliaccio conti_cassa ids to check that the column is visible. Test client/polizza with no email/cell: anagrafica 27ab1b74 / polizza dbd53c4c (TEST-UI-ca37e, annullata). WhatsApp diary entries exist only in tenant c5ae2d0e. In the admin tenant there are no 'email' diary entries, so Diario email/WA chips could not be verified end to end in the UI; only manual allegato chips were verified (download 200). Email attachment storage URL /api/storage/email/... returns 200. The Brogliaccio date in preview is 2026-11-04.",
+  "rca of the issue": "Prima Nota: the backend branch is correct, but the per_conto key comes from the frontend's tp.conto_id. That value comes from shared, tenant-less tipi_pagamento docs whose conto_id belongs to another tenant, and the brogliaccio only renders the current tenant's conti_cassa columns, so the amount is not displayed anywhere. Reproduce: Contabilita > Nuovo movimento > Incasso premio, 0.01, CONTANTI > Registra. GET /contabilita/brogliaccio then shows the row with per_conto={'d31c7578...':0.01} while conti_cassa contains 9b4505e8 (Cassa Contanti of this tenant). Fix: tenant-scope tipi_pagamento and validate or re-resolve conto_cassa_id on the server."
+}

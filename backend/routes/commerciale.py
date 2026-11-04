@@ -207,13 +207,16 @@ async def invia_preventivo(
         esito = f"errore: {e}"
 
     from shared import log_storico_e_diario
+    _ok = (esito == "inviato")
+    _titolo_diario = (f"📤 Preventivo inviato via {canale.upper()}" if _ok
+                      else f"⚠️ Invio preventivo FALLITO via {canale.upper()}") + f" · {t.get('titolo') or ''}"
     await log_storico_e_diario(
         canale=canale, contraente_id=t.get("anagrafica_id"),
         contraente_nome=t.get("anagrafica_nome"),
         destinatario=dest, messaggio=msg, oggetto=oggetto,
         tipo_avviso="preventivo", importo=float(t.get("premio_proposto") or 0),
         esito=esito, operatore=user,
-        diario_tipo=canale, diario_titolo=f"📤 Preventivo inviato via {canale.upper()} · {t.get('titolo') or ''}",
+        diario_tipo=canale, diario_titolo=_titolo_diario,
     )
     # se inviato con successo e lo stato è ancora 'aperta', avanza a 'proposta_inviata'
     if esito == "inviato" and t.get("stato") == "aperta":

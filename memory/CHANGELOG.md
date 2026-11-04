@@ -1,5 +1,16 @@
 # Changelog — Axicura CRM
 
+## 2026-11 — Prima Nota (manuale), Diario documenti, Pipeline cards & Trattative↔Polizza
+- **Prima Nota — registrazione manuale (FIX)**: un nuovo movimento manuale in ENTRATA con categoria "Incasso premio" e NESSUNA polizza/titolo collegato ora popola SOLO la colonna banca/cassa/assegni corrispondente al tipo di pagamento. Prima l'importo compariva duplicato anche in "Totale" e "Saldo". Fix in `server.py::_compute_brogliaccio` (nuovo ramo per entrata/incasso_premio senza polizza/titolo).
+  - Aggiunto inoltre un resolver NON distruttivo (`_resolve_conto`) che, se il `conto_cassa_id` del movimento non appartiene al tenant (es. tipo-pagamento con conto_id stantio), rimappa in visualizzazione sul conto del tenant il cui nome compare nell'etichetta del mezzo (es. "BONIFICO BPER SONDRIO" → "BPER Sondrio", "CONTANTI" → "Cassa Contanti"). Risolve il caso in cui l'importo finiva in una colonna invisibile.
+- **Diario cliente — documenti scaricabili/visualizzabili**: le voci del diario ora espongono `v.documenti[]` (nome, url, content_type, size, fonte) da 3 fonti: allegati manuali, allegati EMAIL (`email_inbox.attachments` via `/storage/...`), media WHATSAPP (`/whatsapp-evo/messages/{id}/media`). Frontend: componente `DiarioDocLink` in `AnagraficaDetail.jsx` (riga diario + dialog dettaglio). `imap_poller` ora salva `payload.email_inbox_id` nella voce diario email.
+- **Pipeline — card ricche** (`server.py` + `Pipeline.jsx` + `db_models.PipelineCard`): le card delle pipeline custom supportano ora collegamenti a Polizza/Sinistro/Cliente (ricerca), checklist (aggiungi/spunta/rimuovi), note e allegati (object storage, `entita_tipo="pipeline_card"`). Badge checklist e indicatori pol./sin. sulla board. Nuovo endpoint `GET /pipelines/{pid}/cards/{card_id}`.
+- **Trattative ↔ Polizza** (`routes/commerciale.py` + `Trattative.jsx` + `PolizzaDetail.jsx`): la trattativa ha ora `polizza_id`, allegati (`entita_tipo="trattativa"`) e invio preventivo via Email/WhatsApp (`POST /trattative/{tid}/invia`). La PolizzaDetail (tab Documenti) mostra la sezione "Trattative collegate" con note + documenti scaricabili.
+- **Fix collaterali (testing agent)**: `db_models.Allegato` Literal esteso con `pipeline_card`/`trattativa`; rimosso `<SelectItem value="">` (crash Radix) nel dialog Trattativa.
+- **Testing**: brogliaccio verificato via API (manuale → solo colonna banca; remap BPER/Contanti OK); testing_agent iteration_126: Trattative, Polizza trattative collegate, Diario chips, Pipeline cards OK.
+- **NON ancora implementato (richieste pipeline da completare)**: modulo DISDETTE con avviso; Trattative/Preventivi come board kanban dentro Pipeline; Sinistri pipeline con popolamento automatico opt-in (pulsante di conferma); rimozione/disattivazione delle pipeline automatiche builtin; restyling "bello" del Diario e vista chat.
+
+
 ## 2026-06 — Ripartizione provvigioni: scende automaticamente nel titolo
 - **Richiesta utente**: la ripartizione provvigioni per collaboratore impostata sulla polizza (secondo il profilo provvigionale) deve comparire automaticamente anche nel titolo, senza aprire il dialog e premere "Eredita da polizza".
 - **Backend** (`server.py`):

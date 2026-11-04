@@ -229,10 +229,10 @@ function TrattativaDialog({ editing, onClose }) {
                     <Input value={f.compagnia_di_provenienza} onChange={(e) => set("compagnia_di_provenienza", e.target.value)}
                         placeholder="es. UnipolSai, Allianz, …" /></div>
                 <div><Label className="text-xs">Compagnia target (interna)</Label>
-                    <Select value={f.compagnia_target_id} onValueChange={(v) => set("compagnia_target_id", v)}>
+                    <Select value={f.compagnia_target_id || "__none__"} onValueChange={(v) => set("compagnia_target_id", v === "__none__" ? "" : v)}>
                         <SelectTrigger><SelectValue placeholder="—" /></SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="">—</SelectItem>
+                            <SelectItem value="__none__">—</SelectItem>
                             {compagnie.map((c) => <SelectItem key={c.id} value={c.id}>{c.ragione_sociale}</SelectItem>)}
                         </SelectContent>
                     </Select>
