@@ -1,7 +1,7 @@
 # Changelog — Axicura CRM
 
 ## 2026-11 — Ritenute/PNC/Rappel solo mandato diretto, descrizione auto + promemoria disdette + titolo import multi-operatore
-- **Filtro mandato diretto** in Ritenute Compagnia, PNC e **Rappel** (prima Rappel mostrava tutte): i selettori compagnia mostrano solo `tipo_mandato=='diretto'`. Le compagnie in **collaborazione/indirette (es. REDION) spariscono** → vanno marcate come collaborazione (link agenzia partner) in Compagnie/Agenzie.
+- **Filtro mandato diretto** in Ritenute Compagnia, PNC e **Rappel**: helper condiviso `isCompagniaDiretta` (`lib/api.js`). Una compagnia è "diretta" (quindi visibile) SOLO se mandato diretto e NON collegata ad agenzie partner (`agenzia_partner_id`/`agenzie_partner_ids` vuoti). Le compagnie in **collaborazione o legate a un'agenzia partner (es. REDION) spariscono automaticamente**, senza interruttori manuali — gestito dal collegamento agenzia partner. Verificato su dati reali (8 dirette visibili, 5 collaborazione/partner escluse).
 - **Descrizione ritenuta auto-compilata**: "RITENUTA <COMPAGNIA> DEL <GG-MM-AAAA>" da compagnia+data selezionate, ma **sempre modificabile** (una volta editata a mano non viene più sovrascritta). `RitenuteCompagnia.jsx`.
 - **Promemoria disdette (solo agenzia)**: cron `POST /api/cron/disdette-reminder` (protetto WEBHOOK_CRON_SECRET) + `.emergent/crons.yml` daily 08:00. Avvisa SOLO gli utenti admin del tenant (mai il cliente) per le disdette da_inviare in scadenza entro 5 gg (notifica in-app, dedup giornaliero via `ultimo_promemoria`).
 - **Titolo da import, multi-operatore**: il titolo auto-generato in import eredita anche `provvigioni_operatori` dalla polizza (prima solo totale).

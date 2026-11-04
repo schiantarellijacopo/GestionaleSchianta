@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, Trash2, Pencil, TrendingDown, Wallet, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { api, fmtEur, fmtDate, promptDataIt } from "@/lib/api";
+import { api, fmtEur, fmtDate, promptDataIt, isCompagniaDiretta } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
@@ -43,7 +43,7 @@ export default function RitenuteCompagnia() {
     useEffect(() => {
         // mostriamo solo compagnie con mandato diretto
         api.get("/compagnie").then((r) =>
-            setCompagnie((r.data || []).filter((c) => c.attiva !== false && (c.tipo_mandato || "diretto") === "diretto")));
+            setCompagnie((r.data || []).filter(isCompagniaDiretta)));
     }, []);
 
     const apriNuovo = () => { setEditing(null); setDialogOpen(true); };

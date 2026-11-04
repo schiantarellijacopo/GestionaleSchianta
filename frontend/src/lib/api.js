@@ -101,3 +101,12 @@ export async function sendWhatsApp(numero, messaggio, extra = {}) {
         return { ok: false };
     }
 }
+
+// Compagnia "diretta" = mandato diretto, NON collaborazione e NON collegata ad
+// agenzie partner. Solo le dirette compaiono in Ritenute / PNC / Rappel.
+export const isCompagniaDiretta = (c) =>
+    !!c
+    && c.attiva !== false
+    && (c.tipo_mandato || "diretto") === "diretto"
+    && !c.agenzia_partner_id
+    && !(Array.isArray(c.agenzie_partner_ids) && c.agenzie_partner_ids.length > 0);

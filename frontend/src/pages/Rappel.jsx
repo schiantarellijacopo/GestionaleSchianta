@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { Plus, Trash2, Pencil, Gift, TrendingUp, ChevronDown, ChevronRight, Wallet, Printer, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { api, fmtEur, fmtDate, API_BASE, promptDataIt } from "@/lib/api";
+import { api, fmtEur, fmtDate, API_BASE, promptDataIt, isCompagniaDiretta } from "@/lib/api";
 import AllegatiCell from "@/components/AllegatiCell";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import RicercaDateBar, { applyRicercaData } from "@/components/RicercaDateBar";
@@ -46,7 +46,7 @@ export default function RappelPage() {
         // Solo compagnie con mandato DIRETTO (le collaborazioni/indirette, es. REDION,
         // non danno rappel/ritenute/PNC alla nostra agenzia).
         api.get("/compagnie")
-            .then((r) => setCompagnie((r.data || []).filter((c) => c.attiva !== false && (c.tipo_mandato || "diretto") === "diretto")));
+            .then((r) => setCompagnie((r.data || []).filter(isCompagniaDiretta)));
     }, []);
 
     const apriNuovo = () => { setEditing(null); setDialogOpen(true); };
