@@ -782,6 +782,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                             desc[:250],
                             (body_text or "")[:2000],
                             autore=None,  # System
+                            payload={"email_inbox_id": doc["id"]},
                         )
                     except Exception:
                         logger.exception("Errore log diario cliente per email %s", uid)

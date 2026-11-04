@@ -9955,6 +9955,13 @@ async def _compute_brogliaccio(data_giorno: str, apply_snapshot: bool = True) ->
             # Nessun cash reale, nessuna Entrata/Uscita. Importo firmato:
             # positivo = a debito verso compagnia, negativo = a credito.
             c_saldo = signed
+        elif is_entrata and cat == "incasso_premio" and not is_dir and not m.get("polizza_id") and not m.get("titolo_id"):
+            # REGISTRAZIONE MANUALE LIBERA (nessuna polizza/titolo collegato):
+            # è una semplice entrata di cassa → deve popolare SOLO la colonna
+            # banca/cassa/assegni (per_conto, gestita sotto). Nessuna colonna
+            # contabile (Totale/Provvigioni/Saldo/Sospesi) viene valorizzata,
+            # altrimenti l'importo comparirebbe duplicato in più colonne.
+            pass
         elif is_entrata and cat == "incasso_premio" and not is_dir:
             # Premio lordo polizza (path normale, NO direzione)
             # REGOLA CONTABILE (utente):
@@ -14018,6 +14025,11 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
                     "tags": c.get("tags", []),
                     "priorita": c.get("priorita"),
                     "card_id": c["id"],
+                    "checklist_total": len(c.get("checklist") or []),
+                    "checklist_done": len([x for x in (c.get("checklist") or []) if x.get("done")]),
+                    "has_polizza": bool(c.get("polizza_id")),
+                    "has_sinistro": bool(c.get("sinistro_id")),
+                    "has_titolo": bool(c.get("titolo_id")),
                 } for c in col_cards[:50]],
             })
         return {
@@ -14213,6 +14225,22 @@ async def crea_card(pid: str, body: dict, user=Depends(require_user("admin", "co
     await db.pipeline_cards.insert_one(obj.model_dump())
     await log_attivita(user, "create", "pipeline_card", obj.id, obj.titolo)
     return obj.model_dump()
+
+
+@api.get("/pipelines/{pid}/cards/{card_id}")
+async def get_card(pid: str, card_id: str, user=Depends(current_user)):
+    """Dettaglio completo di una card (checklist, collegamenti entità, ecc.)."""
+    card = await db.pipeline_cards.find_one({"id": card_id, "pipeline_id": pid}, {"_id": 0})
+    if not card:
+        raise HTTPException(404, "Card non trovata")
+    # arricchimento nomi entità collegate
+    if card.get("polizza_id"):
+        p = await db.polizze.find_one({"id": card["polizza_id"]}, {"_id": 0, "numero_polizza": 1}) or {}
+        card["polizza_numero"] = p.get("numero_polizza")
+    if card.get("sinistro_id"):
+        s = await db.sinistri.find_one({"id": card["sinistro_id"]}, {"_id": 0, "numero_sinistro": 1}) or {}
+        card["sinistro_numero"] = s.get("numero_sinistro")
+    return card
 
 
 @api.put("/pipelines/{pid}/cards/{card_id}")
@@ -16898,9 +16926,21 @@ async def list_diario_anagrafica(aid: str, user=Depends(current_user)):
         if a.get("nome_file"):
             alleg_by_name.setdefault(a["nome_file"], meta)
 
+    # Precarico le email del cliente con allegati (per collegarle alle voci "email").
+    email_by_id: dict = {}
+    email_by_subject: dict = {}
+    async for em in db.email_inbox.find(
+        {"anagrafica_id": aid, "has_attachments": True},
+        {"_id": 0, "id": 1, "subject": 1, "attachments": 1},
+    ):
+        email_by_id[em["id"]] = em
+        if em.get("subject"):
+            email_by_subject.setdefault(em["subject"].strip().lower(), em)
+
     import re as _re
     for v in items:
         found = None
+        documenti: list = []
         pay = v.get("payload") or {}
         if pay.get("allegato_id") and pay["allegato_id"] in alleg_by_id:
             found = alleg_by_id[pay["allegato_id"]]
@@ -16918,6 +16958,52 @@ async def list_diario_anagrafica(aid: str, user=Depends(current_user)):
                 found = alleg_by_name[nome]
         if found:
             v["allegato"] = found
+            documenti.append({
+                "nome": found.get("nome_file") or "Allegato",
+                "url": f"/allegati/{found['id']}/download",
+                "content_type": found.get("content_type"),
+                "size": found.get("size"), "fonte": "allegato",
+            })
+
+        # --- Documenti dentro le EMAIL ricevute ---
+        if v.get("tipo") == "email":
+            em = email_by_id.get(pay.get("email_inbox_id")) if pay.get("email_inbox_id") else None
+            if not em:
+                # legacy: estraggo l'oggetto dal titolo "Email ricevuta da X: OGGETTO"
+                mt = _re.search(r":\s*(.+)$", v.get("titolo") or "")
+                if mt:
+                    em = email_by_subject.get(mt.group(1).strip().lower())
+            if em:
+                v["email_inbox_id"] = em["id"]
+                for att in (em.get("attachments") or []):
+                    url = att.get("url") or (f"/api/storage/{att['storage_path']}" if att.get("storage_path") else None)
+                    if not url:
+                        continue
+                    url = url[4:] if url.startswith("/api/") else url  # relativo alla baseURL (/api)
+                    documenti.append({
+                        "nome": att.get("filename") or "Allegato email",
+                        "url": url, "content_type": att.get("content_type"),
+                        "size": att.get("size"), "fonte": "email",
+                    })
+
+        # --- Documenti/media dentro le conversazioni WHATSAPP ---
+        if v.get("tipo") == "whatsapp" and v.get("numero"):
+            q = {"number": v["numero"], "has_media": True}
+            if v.get("instance_name"):
+                q["instance_name"] = v["instance_name"]
+            async for wm in db.whatsapp_messages.find(
+                q, {"_id": 0, "id": 1, "attachment_name": 1, "attachment_mimetype": 1,
+                    "attachment_size": 1, "message_type": 1},
+            ).sort("created_at", 1):
+                documenti.append({
+                    "nome": wm.get("attachment_name") or (wm.get("message_type") or "Media WhatsApp"),
+                    "url": f"/whatsapp-evo/messages/{wm['id']}/media",
+                    "content_type": wm.get("attachment_mimetype"),
+                    "size": wm.get("attachment_size"), "fonte": "whatsapp",
+                })
+
+        if documenti:
+            v["documenti"] = documenti
     return items
 
 
@@ -17085,7 +17171,7 @@ async def upload_allegato(
     file: UploadFile = File(...),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo"):
+    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo", "pipeline_card", "trattativa"):
         raise HTTPException(400, "Tipo entità non valido")
     data = await file.read()
     if len(data) > 25 * 1024 * 1024:

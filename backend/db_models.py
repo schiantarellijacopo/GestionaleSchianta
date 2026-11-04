@@ -1482,6 +1482,9 @@ class PipelineCard(BaseDoc):
     anagrafica_id: Optional[str] = None
     polizza_id: Optional[str] = None
     sinistro_id: Optional[str] = None
+    titolo_id: Optional[str] = None
+    # checklist interna: [{id, testo, done}]
+    checklist: List[dict] = Field(default_factory=list)
     # assegnazione
     operatore_id: Optional[str] = None
     # ordinamento all'interno della colonna

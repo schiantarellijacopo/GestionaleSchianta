@@ -1243,6 +1243,7 @@ export default function PolizzaDetail() {
                 )}
 
                 <TabsContent value="documenti">
+                    <TrattativeCollegate polizzaId={pol.id} />
                     {canEdit && (
                         <div className="mb-3 flex items-center justify-between flex-wrap gap-2 bg-blue-50 border border-blue-200 rounded-lg p-3">
                             <div className="text-xs text-blue-900">
@@ -2419,3 +2420,72 @@ function ProvvigioniTotaleCell({ polizzaId, current, canEdit, onSaved }) {
     );
 }
 
+
+
+const TR_STATI = {
+    aperta: { l: "Aperta", c: "bg-sky-100 text-sky-800" },
+    proposta_inviata: { l: "Proposta inviata", c: "bg-amber-100 text-amber-800" },
+    in_attesa: { l: "In attesa", c: "bg-violet-100 text-violet-800" },
+    vinta: { l: "Vinta", c: "bg-emerald-100 text-emerald-800" },
+    persa: { l: "Persa", c: "bg-rose-100 text-rose-800" },
+};
+
+function TrattativeCollegate({ polizzaId }) {
+    const [list, setList] = useState(null);
+    useEffect(() => {
+        api.get("/trattative", { params: { polizza_id: polizzaId } })
+            .then((r) => setList(r.data))
+            .catch(() => setList([]));
+    }, [polizzaId]);
+
+    if (!list || list.length === 0) return null;
+    return (
+        <div className="mb-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-4" data-testid="polizza-trattative-collegate">
+            <div className="text-xs font-semibold uppercase tracking-wide text-indigo-800 mb-3 flex items-center gap-1.5">
+                <FileText size={14} /> Trattative collegate ({list.length})
+            </div>
+            <div className="space-y-3">
+                {list.map((t) => {
+                    const st = TR_STATI[t.stato] || TR_STATI.aperta;
+                    return (
+                        <div key={t.id} className="rounded-md border border-slate-200 bg-white p-3" data-testid={`polizza-trattativa-${t.id}`}>
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <Link to="/trattative" className="font-medium text-sm text-slate-900 hover:text-sky-700 hover:underline">
+                                    {t.titolo}
+                                </Link>
+                                <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${st.c}`}>{st.l}</span>
+                            </div>
+                            {t.note && (
+                                <div className="mt-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-0.5">Note</div>
+                                    <div className="text-xs text-slate-700 whitespace-pre-wrap bg-slate-50 rounded p-2 border border-slate-100">{t.note}</div>
+                                </div>
+                            )}
+                            {t.allegati && t.allegati.length > 0 && (
+                                <div className="mt-2">
+                                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">
+                                        Documenti ({t.allegati.length})
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {t.allegati.map((a) => (
+                                            <a key={a.id}
+                                                href={`${api.defaults.baseURL}/allegati/${a.id}/download`}
+                                                target="_blank" rel="noreferrer"
+                                                className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                                                data-testid={`polizza-trattativa-doc-${a.id}`}
+                                                title={a.nome_file}
+                                            >
+                                                <FileText size={12} />
+                                                <span className="max-w-[170px] truncate">{a.nome_file}</span>
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}

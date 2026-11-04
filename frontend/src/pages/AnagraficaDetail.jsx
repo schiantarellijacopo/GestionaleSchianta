@@ -1574,6 +1574,32 @@ function DiarioFiltroChip({ active, onClick, label, icon = null, count, testid }
     );
 }
 
+function DiarioDocLink({ doc, testid }) {
+    const fonte = doc.fonte || "allegato";
+    const Icon = fonte === "email" ? Mail : fonte === "whatsapp" ? MessageCircle : Paperclip;
+    const cls = fonte === "email"
+        ? "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100"
+        : fonte === "whatsapp"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+            : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100";
+    const kb = doc.size ? `${(doc.size / 1024).toFixed(0)} KB` : null;
+    return (
+        <a
+            href={`${api.defaults.baseURL}${doc.url}`}
+            target="_blank" rel="noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={`inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md border transition-colors ${cls}`}
+            data-testid={testid}
+            title={doc.nome}
+        >
+            <Icon size={12} className="shrink-0" />
+            <span className="max-w-[170px] truncate">{doc.nome}</span>
+            {kb && <span className="opacity-70">({kb})</span>}
+        </a>
+    );
+}
+
+
 function DiarioTab({ anagrafica_id, canEdit }) {
     const [list, setList] = useState(null);
     const [open, setOpen] = useState(false);
@@ -1646,17 +1672,16 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                                 👁 Apri
                             </button>
                         )}
-                        {v.allegato && (
-                            <a
-                                href={`${api.defaults.baseURL}/allegati/${v.allegato.id}/download`}
-                                target="_blank" rel="noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-emerald-700 hover:text-emerald-900 underline text-[11px] font-medium inline-flex items-center gap-1"
-                                data-testid={`diario-allegato-${v.id}`}
-                            >
-                                📎 Scarica allegato
-                            </a>
-                        )}
+                        {(v.documenti && v.documenti.length > 0) ? (
+                            v.documenti.map((d, i) => (
+                                <DiarioDocLink key={i} doc={d} testid={`diario-doc-${v.id}-${i}`} />
+                            ))
+                        ) : v.allegato ? (
+                            <DiarioDocLink
+                                doc={{ nome: v.allegato.nome_file || "Scarica allegato", url: `/allegati/${v.allegato.id}/download`, size: v.allegato.size, fonte: "allegato" }}
+                                testid={`diario-allegato-${v.id}`}
+                            />
+                        ) : null}
                     </div>
                 </div>
                 <RowActions onEdit={canEdit ? () => setEditing(v) : null} onDelete={() => elimina(v.id)} label="voce" />
@@ -1723,16 +1748,20 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                         <div className="text-sm text-slate-800 whitespace-pre-wrap bg-slate-50 rounded-md p-3 border border-slate-100" data-testid="diario-voce-content">
                             {viewVoce.descrizione || "—"}
                         </div>
-                        {viewVoce.allegato && (
-                            <a
-                                href={`${api.defaults.baseURL}/allegati/${viewVoce.allegato.id}/download`}
-                                target="_blank" rel="noreferrer"
-                                className="mt-3 inline-flex items-center gap-2 text-sm px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                data-testid="diario-voce-allegato"
-                            >
-                                📎 {viewVoce.allegato.nome_file || "Scarica allegato"}
-                                {viewVoce.allegato.size ? <span className="text-[11px] text-emerald-600">({(viewVoce.allegato.size / 1024).toFixed(0)} KB)</span> : null}
-                            </a>
+                        {(viewVoce.documenti?.length > 0 || viewVoce.allegato) && (
+                            <div className="mt-3">
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mb-1.5">
+                                    Documenti ({viewVoce.documenti?.length || 1})
+                                </div>
+                                <div className="flex flex-wrap gap-2" data-testid="diario-voce-documenti">
+                                    {(viewVoce.documenti?.length > 0
+                                        ? viewVoce.documenti
+                                        : [{ nome: viewVoce.allegato.nome_file || "Scarica allegato", url: `/allegati/${viewVoce.allegato.id}/download`, size: viewVoce.allegato.size, fonte: "allegato" }]
+                                    ).map((d, i) => (
+                                        <DiarioDocLink key={i} doc={d} testid={`diario-voce-doc-${i}`} />
+                                    ))}
+                                </div>
+                            </div>
                         )}
                         <DialogFooter><Button variant="outline" onClick={() => setViewVoce(null)}>Chiudi</Button></DialogFooter>
                     </DialogContent>

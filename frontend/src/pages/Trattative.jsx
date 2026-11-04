@@ -15,8 +15,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, Briefcase, ArrowRight } from "lucide-react";
+import { Plus, Edit, Trash2, Briefcase, ArrowRight, Paperclip, Mail, MessageCircle, Link2, Send } from "lucide-react";
 import { toast } from "sonner";
+import AllegatiCell from "@/components/AllegatiCell";
 
 const STATI = [
     { v: "aperta", l: "Aperta", color: "sky" },
@@ -157,16 +158,25 @@ export default function Trattative() {
 function TrattativaDialog({ editing, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [compagnie, setCompagnie] = useState([]);
+    const [polizze, setPolizze] = useState([]);
+    const [invio, setInvio] = useState(null); // "email" | "whatsapp"
     const [f, setF] = useState(editing || {
         anagrafica_id: "", titolo: "", descrizione: "",
         ramo: "", compagnia_di_provenienza: "", compagnia_target_id: "",
         data_scadenza_corrente: "", premio_corrente: 0, premio_proposto: 0,
-        stato: "aperta", note: "", visibili_cliente: false,
+        stato: "aperta", note: "", polizza_id: "", visibili_cliente: false,
     });
     useEffect(() => {
         api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data));
         api.get("/compagnie").then((r) => setCompagnie(r.data));
     }, []);
+    useEffect(() => {
+        if (f.anagrafica_id) {
+            api.get("/polizze", { params: { contraente_id: f.anagrafica_id, limit: 500 } })
+                .then((r) => setPolizze(Array.isArray(r.data) ? r.data : (r.data?.items || [])))
+                .catch(() => setPolizze([]));
+        } else { setPolizze([]); }
+    }, [f.anagrafica_id]);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
     const save = async () => {
         if (!f.anagrafica_id || !f.titolo) { toast.error("Cliente e titolo obbligatori"); return; }
@@ -175,6 +185,15 @@ function TrattativaDialog({ editing, onClose }) {
             else await api.post("/trattative", f);
             toast.success("Salvata"); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const invia = async (canale) => {
+        setInvio(canale);
+        try {
+            const r = await api.post(`/trattative/${editing.id}/invia`, { canale });
+            if (r.data.ok) toast.success(`Preventivo inviato via ${canale.toUpperCase()} a ${r.data.destinatario}`);
+            else toast.error(`Invio non riuscito: ${r.data.esito}`);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore invio"); }
+        finally { setInvio(null); }
     };
     return (
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -224,6 +243,19 @@ function TrattativaDialog({ editing, onClose }) {
                     <Input type="number" step="0.01" value={f.premio_corrente} onChange={(e) => set("premio_corrente", parseFloat(e.target.value) || 0)} /></div>
                 <div><Label className="text-xs">Premio proposto da noi €</Label>
                     <Input type="number" step="0.01" value={f.premio_proposto} onChange={(e) => set("premio_proposto", parseFloat(e.target.value) || 0)} /></div>
+                <div className="col-span-2">
+                    <Label className="text-xs flex items-center gap-1"><Link2 size={12} /> Polizza collegata (post-vendita)</Label>
+                    <Select value={f.polizza_id || "__none__"} onValueChange={(v) => set("polizza_id", v === "__none__" ? "" : v)}>
+                        <SelectTrigger data-testid="tr-polizza"><SelectValue placeholder="— nessuna polizza —" /></SelectTrigger>
+                        <SelectContent className="max-h-80">
+                            <SelectItem value="__none__">— nessuna —</SelectItem>
+                            {polizze.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>{p.numero_polizza} · {p.ramo || ""}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <p className="text-[10px] text-slate-400 mt-1">Collegando una polizza, note e documenti di questa trattativa saranno visibili nella polizza.</p>
+                </div>
                 <div className="col-span-2"><Label className="text-xs">Descrizione</Label>
                     <Textarea rows={2} value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
                 <div className="col-span-2"><Label className="text-xs">Note interne</Label>
@@ -232,6 +264,27 @@ function TrattativaDialog({ editing, onClose }) {
                     <Checkbox checked={!!f.visibili_cliente} onCheckedChange={(v) => set("visibili_cliente", !!v)} id="tr-vis" />
                     <Label htmlFor="tr-vis" className="text-xs">📂 Trattativa visibile al cliente (nel suo portale)</Label>
                 </div>
+                {editing?.id && (
+                    <div className="col-span-2 mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3" data-testid="tr-azioni-extra">
+                        <div className="flex items-center justify-between">
+                            <div className="text-xs font-semibold uppercase tracking-wide text-slate-600 flex items-center gap-1.5">
+                                <Paperclip size={13} /> Documenti / Preventivo
+                            </div>
+                            <AllegatiCell entita_tipo="trattativa" entita_id={editing.id} compact={false} hint="Allega preventivo/doc" />
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">Invia preventivo:</span>
+                            <Button type="button" size="sm" variant="outline" disabled={invio === "email"}
+                                onClick={() => invia("email")} className="text-sky-700 border-sky-200" data-testid="tr-invia-email">
+                                <Mail size={13} className="mr-1" /> {invio === "email" ? "Invio…" : "Email"}
+                            </Button>
+                            <Button type="button" size="sm" variant="outline" disabled={invio === "whatsapp"}
+                                onClick={() => invia("whatsapp")} className="text-emerald-700 border-emerald-200" data-testid="tr-invia-whatsapp">
+                                <MessageCircle size={13} className="mr-1" /> {invio === "whatsapp" ? "Invio…" : "WhatsApp"}
+                            </Button>
+                        </div>
+                    </div>
+                )}
             </div>
             <DialogFooter>
                 <Button onClick={save} className="bg-sky-700 hover:bg-sky-800" data-testid="tr-save">

@@ -44,6 +44,7 @@ class TrattativaBody(BaseModel):
     premio_proposto: float = 0
     stato: str = "aperta"  # aperta | proposta_inviata | in_attesa | vinta | persa
     note: Optional[str] = None
+    polizza_id: Optional[str] = None  # polizza collegata (post-vendita)
     visibili_cliente: bool = False
 
 
@@ -51,14 +52,26 @@ async def _enrich_trattativa(t: dict) -> dict:
     if t.get("anagrafica_id"):
         a = await db.anagrafiche.find_one(
             {"id": t["anagrafica_id"]},
-            {"_id": 0, "ragione_sociale": 1, "cognome": 1, "nome": 1},
+            {"_id": 0, "ragione_sociale": 1, "cognome": 1, "nome": 1, "email": 1, "cellulare": 1},
         ) or {}
         t["anagrafica_nome"] = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+        t["anagrafica_email"] = a.get("email")
+        t["anagrafica_cellulare"] = a.get("cellulare")
     if t.get("compagnia_target_id"):
         c = await db.compagnie.find_one(
             {"id": t["compagnia_target_id"]}, {"_id": 0, "ragione_sociale": 1},
         ) or {}
         t["compagnia_target_nome"] = c.get("ragione_sociale")
+    if t.get("polizza_id"):
+        p = await db.polizze.find_one(
+            {"id": t["polizza_id"]}, {"_id": 0, "numero_polizza": 1},
+        ) or {}
+        t["polizza_numero"] = p.get("numero_polizza")
+    # documenti allegati alla trattativa (object storage, entita_tipo="trattativa")
+    t["allegati"] = await db.allegati.find(
+        {"entita_tipo": "trattativa", "entita_id": t["id"], "is_deleted": False},
+        {"_id": 0, "id": 1, "nome_file": 1, "content_type": 1, "size": 1, "created_at": 1},
+    ).sort("created_at", -1).to_list(100)
     return t
 
 
@@ -66,11 +79,13 @@ async def _enrich_trattativa(t: dict) -> dict:
 async def list_trattative(
     stato: Optional[str] = None,
     anagrafica_id: Optional[str] = None,
+    polizza_id: Optional[str] = None,
     user=Depends(current_user),
 ) -> list[dict]:
     flt: dict = {}
     if stato: flt["stato"] = stato
     if anagrafica_id: flt["anagrafica_id"] = anagrafica_id
+    if polizza_id: flt["polizza_id"] = polizza_id
     # visibility: collaboratore vede solo i propri
     if user.get("role") == "collaboratore":
         flt["collaboratore_id"] = user.get("id")
@@ -130,6 +145,80 @@ async def delete_trattativa(
     if res.deleted_count == 0:
         raise HTTPException(404, "Trattativa non trovata")
     return {"ok": True}
+
+
+class InviaPreventivoBody(BaseModel):
+    canale: str  # email | whatsapp
+    destinatario: Optional[str] = None
+    oggetto: Optional[str] = None
+    messaggio: Optional[str] = None
+
+
+@router.post("/trattative/{tid}/invia")
+async def invia_preventivo(
+    tid: str, body: InviaPreventivoBody,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Invia il preventivo/proposta della trattativa via email o WhatsApp direttamente
+    dal modulo trattative. Registra l'invio in storico + diario cliente."""
+    t = await db.trattative.find_one({"id": tid}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Trattativa non trovata")
+    await _enrich_trattativa(t)
+    canale = (body.canale or "").lower()
+    if canale not in ("email", "whatsapp"):
+        raise HTTPException(400, "Canale non valido (email | whatsapp)")
+    dest = (body.destinatario or (t.get("anagrafica_email") if canale == "email" else t.get("anagrafica_cellulare")) or "").strip()
+    if not dest:
+        raise HTTPException(400, f"Destinatario {canale} mancante sull'anagrafica")
+    oggetto = body.oggetto or f"Preventivo · {t.get('titolo') or 'Proposta assicurativa'}"
+    if body.messaggio:
+        msg = body.messaggio
+    else:
+        righe = [f"Gentile {t.get('anagrafica_nome') or 'Cliente'},",
+                 f"in allegato la nostra proposta: {t.get('titolo') or ''}."]
+        if t.get("premio_proposto"):
+            righe.append(f"Premio proposto: € {float(t['premio_proposto']):.2f}")
+        if t.get("ramo"):
+            righe.append(f"Ramo: {t['ramo']}")
+        if t.get("note"):
+            righe.append("")
+            righe.append(t["note"])
+        righe.append("")
+        righe.append("Restiamo a disposizione per qualsiasi chiarimento.")
+        msg = "\n".join(righe)
+
+    esito = "inviato"
+    try:
+        if canale == "whatsapp":
+            from routes.whatsapp_evo import send_text_via_evolution
+            r = await send_text_via_evolution(dest, msg)
+            if not r.get("ok"):
+                esito = f"errore: {r.get('error')}"
+        else:
+            az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+            if not az.get("smtp_host"):
+                raise HTTPException(503, "SMTP non configurato in Librerie/Azienda")
+            from avvisi_scadenze import _invia_email as _send_mail
+            _send_mail(az, dest, oggetto, msg, msg.replace("\n", "<br/>"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        esito = f"errore: {e}"
+
+    from shared import log_storico_e_diario
+    await log_storico_e_diario(
+        canale=canale, contraente_id=t.get("anagrafica_id"),
+        contraente_nome=t.get("anagrafica_nome"),
+        destinatario=dest, messaggio=msg, oggetto=oggetto,
+        tipo_avviso="preventivo", importo=float(t.get("premio_proposto") or 0),
+        esito=esito, operatore=user,
+        diario_tipo=canale, diario_titolo=f"📤 Preventivo inviato via {canale.upper()} · {t.get('titolo') or ''}",
+    )
+    # se inviato con successo e lo stato è ancora 'aperta', avanza a 'proposta_inviata'
+    if esito == "inviato" and t.get("stato") == "aperta":
+        await db.trattative.update_one({"id": tid}, {"$set": {"stato": "proposta_inviata", "updated_at": _now_iso()}})
+    return {"ok": esito == "inviato", "esito": esito, "destinatario": dest}
 
 
 # ===========================================================

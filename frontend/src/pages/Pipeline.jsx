@@ -12,8 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogT
 import { toast } from "sonner";
 import {
     GripVertical, Lock, Plus, Settings, Trash2, Edit2, Megaphone,
-    HeartHandshake, Headphones, ShoppingBag, X,
+    HeartHandshake, Headphones, ShoppingBag, X, Paperclip, CheckSquare, Square, Link2, FileText, ShieldAlert,
 } from "lucide-react";
+import AllegatiCell from "@/components/AllegatiCell";
 
 const BUILTIN = [
     { key: "polizze", label: "Polizze", editable: true, builtin: true },
@@ -260,6 +261,17 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
                                                     {c.extra && <span className="text-[11px] text-slate-600 num">{c.extra}</span>}
                                                     {c.date && <span className="text-[10px] text-slate-400 num">{c.date}</span>}
                                                 </div>
+                                                {(c.checklist_total > 0 || c.has_polizza || c.has_sinistro) && (
+                                                    <div className="flex items-center gap-2 mt-1.5 text-[10px] text-slate-500">
+                                                        {c.checklist_total > 0 && (
+                                                            <span className={`inline-flex items-center gap-0.5 ${c.checklist_done === c.checklist_total ? "text-emerald-600" : ""}`} data-testid={`card-checklist-badge-${c.id}`}>
+                                                                <CheckSquare size={11} /> {c.checklist_done}/{c.checklist_total}
+                                                            </span>
+                                                        )}
+                                                        {c.has_polizza && <span className="inline-flex items-center gap-0.5 text-sky-600"><FileText size={11} /> pol.</span>}
+                                                        {c.has_sinistro && <span className="inline-flex items-center gap-0.5 text-amber-600"><ShieldAlert size={11} /> sin.</span>}
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     </Card>
@@ -476,14 +488,19 @@ function SettingsColonne({ pipeline, colonne, onClose }) {
 function NuovaCardDialog({ pipeline, colonna_key, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [operatori, setOperatori] = useState([]);
+    const [polizze, setPolizze] = useState([]);
+    const [sinistri, setSinistri] = useState([]);
     const [f, setF] = useState({
         titolo: "", descrizione: "",
         colonna_key, anagrafica_id: "", operatore_id: "",
+        polizza_id: "", sinistro_id: "", checklist: [],
         valore_stimato: 0, priorita: "media", scadenza: "",
     });
     useEffect(() => {
         api.get("/anagrafiche").then((r) => setAnagrafiche(r.data));
         api.get("/collaboratori").then((r) => setOperatori(r.data));
+        api.get("/polizze", { params: { limit: 1000, escludi_annullate: true } }).then((r) => setPolizze(Array.isArray(r.data) ? r.data : (r.data?.items || []))).catch(() => {});
+        api.get("/sinistri").then((r) => setSinistri(Array.isArray(r.data) ? r.data : (r.data?.items || []))).catch(() => {});
     }, []);
 
     const salva = async () => {
@@ -493,6 +510,8 @@ function NuovaCardDialog({ pipeline, colonna_key, onClose }) {
                 ...f,
                 anagrafica_id: f.anagrafica_id || null,
                 operatore_id: f.operatore_id || null,
+                polizza_id: f.polizza_id || null,
+                sinistro_id: f.sinistro_id || null,
                 scadenza: f.scadenza || null,
             });
             toast.success("Card creata");
@@ -500,9 +519,9 @@ function NuovaCardDialog({ pipeline, colonna_key, onClose }) {
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
     return (
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle>Nuova card</DialogTitle></DialogHeader>
-            <CardFields f={f} setF={setF} anagrafiche={anagrafiche} operatori={operatori} />
+            <CardFields f={f} setF={setF} anagrafiche={anagrafiche} operatori={operatori} polizze={polizze} sinistri={sinistri} />
             <DialogFooter>
                 <Button onClick={salva} className="bg-sky-700 hover:bg-sky-800" data-testid="card-salva">Crea</Button>
             </DialogFooter>
@@ -513,23 +532,31 @@ function NuovaCardDialog({ pipeline, colonna_key, onClose }) {
 function EditCardDialog({ pipeline, card, colonne, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [operatori, setOperatori] = useState([]);
+    const [polizze, setPolizze] = useState([]);
+    const [sinistri, setSinistri] = useState([]);
     const [f, setF] = useState(null);
 
     useEffect(() => {
         api.get("/anagrafiche").then((r) => setAnagrafiche(r.data));
         api.get("/collaboratori").then((r) => setOperatori(r.data));
-        // ricarica i campi completi dalla card
-        api.get(`/pipelines/${pipeline.id}`).then(() => {
-            // i dati base ci sono già nella card semplificata; usa quelli
+        api.get("/polizze", { params: { limit: 1000, escludi_annullate: true } }).then((r) => setPolizze(Array.isArray(r.data) ? r.data : (r.data?.items || []))).catch(() => {});
+        api.get("/sinistri").then((r) => setSinistri(Array.isArray(r.data) ? r.data : (r.data?.items || []))).catch(() => {});
+        // carica il dettaglio COMPLETO della card (checklist, collegamenti)
+        api.get(`/pipelines/${pipeline.id}/cards/${card.id}`).then((r) => {
+            const c = r.data;
             setF({
-                titolo: card.title, descrizione: card.subtitle || "",
-                colonna_key: colonne.find((c) => c.cards.some((x) => x.id === card.id))?.key || colonne[0]?.key,
-                valore_stimato: parseFloat((card.extra || "0").replace(/[^\d.]/g, "")) || 0,
-                priorita: card.priorita || "media",
-                scadenza: card.date || "",
-                anagrafica_id: "", operatore_id: "",
+                titolo: c.titolo || "", descrizione: c.descrizione || "",
+                colonna_key: c.colonna_key || colonne[0]?.key,
+                valore_stimato: c.valore_stimato || 0,
+                priorita: c.priorita || "media",
+                scadenza: c.scadenza || "",
+                anagrafica_id: c.anagrafica_id || "",
+                operatore_id: c.operatore_id || "",
+                polizza_id: c.polizza_id || "",
+                sinistro_id: c.sinistro_id || "",
+                checklist: c.checklist || [],
             });
-        });
+        }).catch(() => toast.error("Errore caricamento card"));
     }, [card.id, pipeline.id, colonne]); // eslint-disable-line
 
     if (!f) return <DialogContent className="max-w-lg"><Loading /></DialogContent>;
@@ -541,6 +568,9 @@ function EditCardDialog({ pipeline, card, colonne, onClose }) {
                 colonna_key: f.colonna_key,
                 anagrafica_id: f.anagrafica_id || null,
                 operatore_id: f.operatore_id || null,
+                polizza_id: f.polizza_id || null,
+                sinistro_id: f.sinistro_id || null,
+                checklist: f.checklist || [],
                 valore_stimato: parseFloat(f.valore_stimato) || 0,
                 priorita: f.priorita,
                 scadenza: f.scadenza || null,
@@ -558,9 +588,17 @@ function EditCardDialog({ pipeline, card, colonne, onClose }) {
         } catch (e) { toast.error("Errore"); }
     };
     return (
-        <DialogContent className="max-w-lg">
-            <DialogHeader><DialogTitle>Modifica card</DialogTitle></DialogHeader>
-            <CardFields f={f} setF={setF} anagrafiche={anagrafiche} operatori={operatori} colonne={colonne} />
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+                <DialogTitle className="flex items-center justify-between pr-6">
+                    <span>Modifica card</span>
+                    <span className="flex items-center gap-1 text-xs font-normal text-slate-500">
+                        <Paperclip size={13} /> Allegati
+                        <AllegatiCell entita_tipo="pipeline_card" entita_id={card.id} compact hint="Carica documento" />
+                    </span>
+                </DialogTitle>
+            </DialogHeader>
+            <CardFields f={f} setF={setF} anagrafiche={anagrafiche} operatori={operatori} polizze={polizze} sinistri={sinistri} colonne={colonne} />
             <DialogFooter>
                 <Button variant="outline" onClick={elimina} className="text-red-600 mr-auto" data-testid="card-elimina">
                     <Trash2 size={13} className="mr-1" /> Elimina
@@ -571,7 +609,46 @@ function EditCardDialog({ pipeline, card, colonne, onClose }) {
     );
 }
 
-function CardFields({ f, setF, anagrafiche, operatori, colonne }) {
+function ChecklistEditor({ items, onChange }) {
+    const [txt, setTxt] = useState("");
+    const add = () => {
+        if (!txt.trim()) return;
+        onChange([...(items || []), { id: `${Date.now()}`, testo: txt.trim(), done: false }]);
+        setTxt("");
+    };
+    const toggle = (id) => onChange(items.map((x) => x.id === id ? { ...x, done: !x.done } : x));
+    const remove = (id) => onChange(items.filter((x) => x.id !== id));
+    const done = (items || []).filter((x) => x.done).length;
+    return (
+        <div data-testid="card-checklist">
+            <Label className="flex items-center justify-between">
+                <span>Checklist</span>
+                {items?.length > 0 && <span className="text-[11px] text-slate-400 num">{done}/{items.length}</span>}
+            </Label>
+            <div className="space-y-1 mt-1">
+                {(items || []).map((it) => (
+                    <div key={it.id} className="flex items-center gap-2 text-sm group">
+                        <button type="button" onClick={() => toggle(it.id)} className="text-sky-600 shrink-0" data-testid={`checklist-toggle-${it.id}`}>
+                            {it.done ? <CheckSquare size={16} /> : <Square size={16} className="text-slate-400" />}
+                        </button>
+                        <span className={`flex-1 ${it.done ? "line-through text-slate-400" : "text-slate-700"}`}>{it.testo}</span>
+                        <button type="button" onClick={() => remove(it.id)} className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100">
+                            <X size={13} />
+                        </button>
+                    </div>
+                ))}
+            </div>
+            <div className="flex gap-2 mt-2">
+                <Input value={txt} onChange={(e) => setTxt(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+                    placeholder="Aggiungi voce checklist…" className="h-8 text-sm" data-testid="checklist-input" />
+                <Button type="button" size="sm" variant="outline" onClick={add} data-testid="checklist-add"><Plus size={13} /></Button>
+            </div>
+        </div>
+    );
+}
+
+function CardFields({ f, setF, anagrafiche, operatori, colonne, polizze = [], sinistri = [] }) {
     const set = (k, v) => setF({ ...f, [k]: v });
     return (
         <div className="space-y-3 py-2">
@@ -580,14 +657,16 @@ function CardFields({ f, setF, anagrafiche, operatori, colonne }) {
                 <Input value={f.titolo} onChange={(e) => set("titolo", e.target.value)} data-testid="card-titolo" />
             </div>
             <div>
-                <Label>Descrizione</Label>
+                <Label>Note / descrizione</Label>
                 <textarea
                     className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
                     rows={2}
                     value={f.descrizione || ""}
                     onChange={(e) => set("descrizione", e.target.value)}
+                    data-testid="card-note"
                 />
             </div>
+            <ChecklistEditor items={f.checklist || []} onChange={(v) => set("checklist", v)} />
             {colonne && (
                 <div>
                     <Label>Colonna</Label>
@@ -621,15 +700,38 @@ function CardFields({ f, setF, anagrafiche, operatori, colonne }) {
                 <Label>Scadenza</Label>
                 <Input type="date" value={f.scadenza || ""} onChange={(e) => set("scadenza", e.target.value)} />
             </div>
-            <div>
-                <Label>Cliente collegato</Label>
-                <Select value={f.anagrafica_id || "__none__"} onValueChange={(v) => set("anagrafica_id", v === "__none__" ? "" : v)}>
-                    <SelectTrigger data-testid="card-anag"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="__none__">— nessuno —</SelectItem>
-                        {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale}</SelectItem>)}
-                    </SelectContent>
-                </Select>
+            <div className="rounded-md border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 flex items-center gap-1"><Link2 size={12} /> Collegamenti</div>
+                <div>
+                    <Label className="text-xs">Cliente collegato</Label>
+                    <Select value={f.anagrafica_id || "__none__"} onValueChange={(v) => set("anagrafica_id", v === "__none__" ? "" : v)}>
+                        <SelectTrigger data-testid="card-anag"><SelectValue /></SelectTrigger>
+                        <SelectContent className="max-h-72">
+                            <SelectItem value="__none__">— nessuno —</SelectItem>
+                            {anagrafiche.map((a) => <SelectItem key={a.id} value={a.id}>{a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label className="text-xs">Polizza collegata</Label>
+                    <Select value={f.polizza_id || "__none__"} onValueChange={(v) => set("polizza_id", v === "__none__" ? "" : v)}>
+                        <SelectTrigger data-testid="card-polizza"><SelectValue placeholder="— nessuna —" /></SelectTrigger>
+                        <SelectContent className="max-h-72">
+                            <SelectItem value="__none__">— nessuna —</SelectItem>
+                            {polizze.map((p) => <SelectItem key={p.id} value={p.id}>{p.numero_polizza} · {p.ramo || ""}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div>
+                    <Label className="text-xs">Sinistro collegato</Label>
+                    <Select value={f.sinistro_id || "__none__"} onValueChange={(v) => set("sinistro_id", v === "__none__" ? "" : v)}>
+                        <SelectTrigger data-testid="card-sinistro"><SelectValue placeholder="— nessuno —" /></SelectTrigger>
+                        <SelectContent className="max-h-72">
+                            <SelectItem value="__none__">— nessuno —</SelectItem>
+                            {sinistri.map((s) => <SelectItem key={s.id} value={s.id}>{s.numero_sinistro || s.id}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
             <div>
                 <Label>Operatore assegnato</Label>
