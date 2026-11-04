@@ -66,7 +66,7 @@ export default function Trattative() {
                                 <Plus size={14} className="mr-1" /> Nuova trattativa
                             </Button>
                         </DialogTrigger>
-                        <TrattativaDialog editing={editing}
+                        <TrattativaDialog key={editing?.id || "new"} editing={editing}
                             onClose={() => { setOpen(false); setEditing(null); load(); }} />
                     </Dialog>
                 }

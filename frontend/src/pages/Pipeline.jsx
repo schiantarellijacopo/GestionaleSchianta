@@ -268,7 +268,7 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
                                     <div className="font-medium text-sm text-slate-800">{col.label}</div>
                                     {typeof col.valore === "number" && (
                                         <div className="text-[11px] font-semibold text-emerald-700 num" data-testid={`col-valore-${col.key}`}>
-                                            € {col.valore.toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                            € {col.valore.toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </div>
                                     )}
                                 </div>

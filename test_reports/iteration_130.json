@@ -1,0 +1,27 @@
+{
+  "summary": "Focused frontend retest of 3 fixes from iteration_129, logged in as jacopo@schiantarelli.it (tenant c5ae2d0e). All 3 requested fixes work. While testing I found a new HIGH bug: the 'Modifica trattativa' dialog never loads the saved trattativa's data and always shows a blank form. (1) Server-side client search works: 'EMMECI LOGISTICA' returns 'EMMECI LOGISTICA SRL' and it can be selected; 'ROSSI' returns 24 matches across ragione_sociale/cognome/nome/email. (2) Kanban drag-move: after dragging TEST_A (premio 1000) from aperta to vinta, col-valore-aperta went from €1000 to €0, col-valore-vinta from €0 to €1000, riepilogo aperte from €1500,00 to €500,00 and vinte from €0,00 to €1000,00, all without a page reload (POST move, then GET /pipeline/trattative). The second drag (B, 500) from proposta_inviata to persa updated correctly as well. (3) Send confirmation: clicking tr-invia-email showed the confirm 'Inviare il preventivo via EMAIL a silvia.gaiani@maganetti.com?'. Cancelling it sent no POST to /invia. Clicking tr-invia-whatsapp on a client with no cellulare showed the error toast \"Nessun numero cellulare sull'anagrafica\" and sent nothing. No real email or WhatsApp was sent.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Trattative.jsx TrattativaDialog (edit mode)", "issue": "The edit form is never filled with the existing trattativa. After opening tr-edit-{id} on a fresh page, titolo is empty, cliente shows 'Seleziona cliente', premio_proposto is 0 and stato is 'Aperta', even though the record is 'TEST_Trattativa A', EMMECI, 1000 and 'vinta'. Cause: <TrattativaDialog editing={editing}/> stays mounted inside <Dialog> (only DialogContent unmounts), so useState(editing || blank) is set once on first render (editing=null) and never re-syncs. The form also keeps leftover values from the previous dialog: a client picked in 'Nuova trattativa' showed up in the next 'Modifica' form. Data-loss risk: if a user fills in titolo and cliente and saves, the PUT overwrites premio, stato, note, etc. with blank or default values.", "selector": "[data-testid^='tr-edit-'] -> [data-testid='tr-titolo']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Pipeline > Trattative", "issues": ["At 1920px the 5th column 'Perse' is cut off at the right edge and needs horizontal scrolling", "Inconsistent currency formatting: the riepilogo shows '€ 1500,00' while column totals show '€ 1000' with no decimals or thousands separator"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "HIGH: Fix the TrattativaDialog edit form so it loads the selected trattativa. Either render <TrattativaDialog key={editing?.id || 'new'} ... /> or add useEffect(() => { setF(editing || BLANK); setClienteSearch(''); }, [editing]). Then check that the edit form shows titolo, cliente, premio and stato, and that saving does not wipe any fields."
+  ],
+  "critical_code_review_comments": [
+    "Trattative.jsx: useState(editing || {...}) inside a component that stays mounted is a stale-state bug (see above).",
+    "Trattative.jsx invia(): the recipient comes from editing.anagrafica_email/anagrafica_cellulare; the backend should pick the same field so the address shown in the confirm matches the one actually used."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "3/3 requested fixes pass; 1 new HIGH bug found"},
+  "seed_data_creation": "Created 2 TEST_ trattative (TEST_Trattativa A, premio 1000, aperta; TEST_Trattativa B, premio 500, proposta_inviata) for client EMMECI LOGISTICA SRL. Both deleted by id afterwards; the board is back to empty.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The Trattative board in tenant c5ae2d0e is empty by default; create TEST_ deals through POST /api/trattative to exercise it. EMMECI LOGISTICA SRL (id 5dd2e7f4-6e42-455b-a328-562f0118ec19) has an email but no cellulare, which makes it handy for testing the WhatsApp no-number toast. Always dismiss the window.confirm dialogs so no real message is sent. Retest the edit-dialog prefill once it is fixed."
+}

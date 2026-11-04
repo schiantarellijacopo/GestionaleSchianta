@@ -516,3 +516,12 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Pipeline: board builtin che rispecchiano dati (polizze, sinistri, titoli, regolazione, clienti) partono VUOTE con gate opt-in "Popola automaticamente"; checklist nelle card.
 - Diario: download documenti allegati (manuali, email, whatsapp, pdf_storage_path); fix "NaN KB"; chat WhatsApp apre la conversazione del numero esatto della voce diario.
 - FIX immagini rotte: le <img> (logo agenzia, avatar) andavano in 401 quando il cookie di sessione scadeva mentre l'app restava attiva via token Bearer. Aggiunto supporto auth via query param ?token= (auth.py) + helper imgUrl() applicato a logo/avatar. Documenti privati restano protetti (401 senza token).
+
+## 2026-06 — Collaudo + fix post-testing (iter 129/130)
+- Confermato: invio preventivo Trattative usa servizi REALI (SMTP via smtplib + WhatsApp Evolution API /message/sendText), nessun mock.
+- FIX kanban Trattative: i totali per colonna e il riepilogo si aggiornano subito dopo il drag-move (load() post-move).
+- FIX ricerca cliente Trattative: ora server-side (GET /anagrafiche?q=... con debounce 300ms) → tutti i 5600+ clienti ricercabili; q-search estesa a cognome/nome; cliente selezionato sempre mostrato in modifica.
+- FIX dialog Modifica trattativa: ora carica i dati esistenti (key di remount) — eliminato rischio perdita dati su PUT.
+- Aggiunta conferma destinatario prima dell'invio reale Email/WhatsApp.
+- Allineato formato valuta totali colonna (2 decimali it-IT).
+- Backend 13/13, frontend fix 3/3 + dialog modifica verificato a video.
