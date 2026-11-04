@@ -87,11 +87,12 @@ async def _seed_modelli_default() -> None:
             continue
         body = ModelloBody(
             tipo=spec.get("tipo", "pdf_altro"), nome=spec["nome"], corpo=spec.get("corpo", ""),
+            oggetto=spec.get("oggetto"),
             sezioni_visibili=spec.get("sezioni_visibili", []), categoria=spec.get("categoria", "default_sezione"),
             default=spec.get("default", False),
         )
         doc = TemplateModello(
-            tipo=body.tipo, nome=body.nome, corpo=body.corpo, sezioni=body.sezioni,
+            tipo=body.tipo, nome=body.nome, corpo=body.corpo, oggetto=body.oggetto, sezioni=body.sezioni,
             sezioni_visibili=body.sezioni_visibili, categoria=body.categoria, default=body.default,
             placeholders=_autodetect_placeholders(body),
         ).model_dump()

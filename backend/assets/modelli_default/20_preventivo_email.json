@@ -1,0 +1,8 @@
+{
+  "nome": "Preventivo / Proposta (Email)",
+  "tipo": "email",
+  "categoria": "preventivo",
+  "default": false,
+  "oggetto": "Preventivo {titolo} — {agenzia}",
+  "corpo": "Gentile {cliente},\n\ncome richiesto le inviamo la nostra proposta: {titolo}.\n\nPremio proposto: € {premio}\nRamo: {ramo}\n\n{note}\n\nRestiamo a disposizione per qualsiasi chiarimento o per fissare un appuntamento.\n\nCordiali saluti,\n{agenzia}"
+}

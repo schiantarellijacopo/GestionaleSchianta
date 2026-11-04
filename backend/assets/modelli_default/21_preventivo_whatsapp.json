@@ -1,0 +1,7 @@
+{
+  "nome": "Preventivo / Proposta (WhatsApp)",
+  "tipo": "whatsapp",
+  "categoria": "preventivo",
+  "default": false,
+  "corpo": "Gentile {cliente}, 👋\nle inviamo la nostra proposta *{titolo}*.\n\nPremio proposto: € {premio}\nRamo: {ramo}\n\nPer qualsiasi informazione siamo a disposizione.\n\n{agenzia}"
+}

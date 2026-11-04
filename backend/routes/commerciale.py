@@ -172,9 +172,37 @@ async def invia_preventivo(
     dest = (body.destinatario or (t.get("anagrafica_email") if canale == "email" else t.get("anagrafica_cellulare")) or "").strip()
     if not dest:
         raise HTTPException(400, f"Destinatario {canale} mancante sull'anagrafica")
-    oggetto = body.oggetto or f"Preventivo · {t.get('titolo') or 'Proposta assicurativa'}"
+    # Modello preventivo personalizzabile (Librerie → Gestione Modelli, categoria "preventivo")
+    az_cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    agenzia_nome = az_cfg.get("ragione_sociale") or az_cfg.get("nome") or "la nostra agenzia"
+
+    def _subst(txt: str) -> str:
+        repl = {
+            "{cliente}": t.get("anagrafica_nome") or "Cliente",
+            "{titolo}": t.get("titolo") or "",
+            "{premio}": (f"{float(t['premio_proposto']):.2f}" if t.get("premio_proposto") else "—"),
+            "{ramo}": t.get("ramo") or "",
+            "{note}": t.get("note") or "",
+            "{compagnia_provenienza}": t.get("compagnia_di_provenienza") or "",
+            "{agenzia}": agenzia_nome,
+        }
+        for k, v in repl.items():
+            txt = txt.replace(k, str(v))
+        return txt
+
+    tpl = await db.template_modelli.find_one(
+        {"tipo": ("whatsapp" if canale == "whatsapp" else "email"),
+         "categoria": "preventivo", "attivo": True},
+        {"_id": 0},
+    )
+    oggetto = body.oggetto or (
+        _subst(tpl["oggetto"]) if (tpl and tpl.get("oggetto"))
+        else f"Preventivo · {t.get('titolo') or 'Proposta assicurativa'}"
+    )
     if body.messaggio:
         msg = body.messaggio
+    elif tpl and tpl.get("corpo"):
+        msg = _subst(tpl["corpo"])
     else:
         righe = [f"Gentile {t.get('anagrafica_nome') or 'Cliente'},",
                  f"in allegato la nostra proposta: {t.get('titolo') or ''}."]

@@ -530,3 +530,10 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Trattative: campo "Scadenza polizza concorrente" ora usa DateInputIt (gg/mm/aaaa) invece del date picker nativo US — verificato a video (15/09/2026).
 - Trattative: all'invio preventivo via Email/WhatsApp vengono allegati automaticamente i documenti caricati sulla trattativa (sezione DOCUMENTI/PREVENTIVO → AllegatiCell). Email via msg.add_attachment; WhatsApp via nuovo helper send_media_via_evolution (/message/sendMedia). Il caricamento del PDF è già disponibile nel dialog; aggiunta nota esplicativa.
 - NB: l'invio reale con allegato non è stato lanciato a video per non messaggiare un cliente reale; path verificato sintatticamente e basato sull'endpoint send-media già funzionante.
+
+## 2026-06 — Modello preventivo personalizzabile (Gestione Modelli)
+- Creati 2 modelli in Librerie → Gestione Modelli (categoria "preventivo"): "Preventivo / Proposta (Email)" e "(WhatsApp)", seedati automaticamente e modificabili dall'utente (saluto + firma agenzia).
+- Placeholder supportati: {cliente} {titolo} {premio} {ramo} {note} {compagnia_provenienza} {agenzia}.
+- invia_preventivo (routes/commerciale.py) ora usa il modello preventivo del canale (email/whatsapp) con sostituzione placeholder + nome agenzia da azienda_config; fallback al testo di default se il modello manca; body.messaggio esplicito ha priorità.
+- Seed modelli (_seed_modelli_default) esteso per includere il campo "oggetto".
+- Verificato a video: modello visibile e popolato nella sezione Email di Gestione Modelli.
