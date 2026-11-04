@@ -1,6 +1,13 @@
 # Changelog — Axicura CRM
 
-## 2026-11 — Trattative: valore aperte/vinte + Titolo automatico (import/sostituzione)
+## 2026-11 — Ritenute/PNC/Rappel solo mandato diretto, descrizione auto + promemoria disdette + titolo import multi-operatore
+- **Filtro mandato diretto** in Ritenute Compagnia, PNC e **Rappel** (prima Rappel mostrava tutte): i selettori compagnia mostrano solo `tipo_mandato=='diretto'`. Le compagnie in **collaborazione/indirette (es. REDION) spariscono** → vanno marcate come collaborazione (link agenzia partner) in Compagnie/Agenzie.
+- **Descrizione ritenuta auto-compilata**: "RITENUTA <COMPAGNIA> DEL <GG-MM-AAAA>" da compagnia+data selezionate, ma **sempre modificabile** (una volta editata a mano non viene più sovrascritta). `RitenuteCompagnia.jsx`.
+- **Promemoria disdette (solo agenzia)**: cron `POST /api/cron/disdette-reminder` (protetto WEBHOOK_CRON_SECRET) + `.emergent/crons.yml` daily 08:00. Avvisa SOLO gli utenti admin del tenant (mai il cliente) per le disdette da_inviare in scadenza entro 5 gg (notifica in-app, dedup giornaliero via `ultimo_promemoria`).
+- **Titolo da import, multi-operatore**: il titolo auto-generato in import eredita anche `provvigioni_operatori` dalla polizza (prima solo totale).
+- Testing iteration_128: 4/4 feature PASS (banner Trattative, auto-titolo update/import, descrizione auto+editabile, filtro mandato diretto).
+
+
 - **Trattative board, riepilogo valore**: la board Trattative in /pipeline mostra in cima due card "Trattative aperte" (somma premio_proposto di aperta/proposta_inviata/in_attesa) e "Trattative vinte". Backend: `riepilogo` nel branch trattative di `pipeline_data`; frontend: banner in `Pipeline.jsx` (data-testid trattative-riepilogo).
 - **Titolo automatico con gli stessi importi**:
   - `update_polizza` (`server.py`): se si compilano Premi/Provvigioni su una polizza SENZA titolo (tipico di polizze importate o di sostituzione i cui dati economici si inseriscono dopo), genera il primo titolo con gli stessi importi (lordo/netto/imposte=tasse+imposte/ssn/accessori/provvigioni + ripartizione operatori). Guardie: premio_lordo>0, nessun titolo esistente, stato attivo. Verificato via API.

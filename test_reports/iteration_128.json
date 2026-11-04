@@ -1,0 +1,25 @@
+{
+  "summary": "Iter128 validation of 4 features. All PASS. (A) Trattative riepilogo: API /api/pipeline/trattative riepilogo matches column counts and sum of premio_proposto from /api/trattative (8240 aperte/13, 0 vinte/0); UI banner trattative-riepilogo shows 'TRATTATIVE APERTE € 8240,00 13 in corso' and 'TRATTATIVE VINTE € 0,00 0 vinte'. (B) Auto-titolo on update: created TEST_ policy, removed its initial titolo to emulate an imported policy, PUT premi (lordo 340, netto 270.01, tasse 60+imposte 5, ssn 4.99, provv 50, effetto 2026-02-01) -> exactly 1 titolo da_incassare with importo_lordo 340, netto 270.01, imposte 65, ssn 4.99, provvigioni 50, effetto 2026-02-01; 2nd PUT (lordo 400/provv 60) updated the same titolo, no duplicate. Cleaned up (0 leftovers). (C) Ritenute dialog: descrizione empty initially, auto-fills 'RITENUTA Allianz S.p.A. DEL 04-11-2026' on company select, updates to 'DEL 15-03-2026' on date change, accepts manual edit, and stays 'TEST_DESCRIZIONE MANUALE' after changing company AND date afterwards. (D) Mandato filter: DB already has collaborazione companies (Generali Italia S.p.A., UnipolSai Assicurazioni, one TEST_Compagnia QA) so no DB modification was needed; they are ABSENT from ritc-comp, pnc-comp and rappel-dlg-comp; Allianz (tipo_mandato unset) is present in all three.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "GET /api/titoli (list)", "issue": "List projection omits imposte/ssn fields (only available via GET /api/titoli/{id}); not a regression, just note for consumers."},
+    {"endpoint": "GET /api/pipeline/trattative", "issue": "float(premio_proposto) would 500 if a trattativa stores a non-numeric string (e.g. '1.200,00'); consider safe parse."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Pipeline > Trattative", "issues": ["5th column 'Perse' is clipped at the right edge at 1920 width (horizontal overflow)"]},
+      {"screen": "Ritenute Compagnia", "issues": ["Data field uses native browser date input instead of shadcn calendar", "Existing ritenute of now-collaborazione companies (Generali Italia) still listed under filter 'Tutte (mandato diretto)' - legacy data, consider labelling", "Description uses ragione_sociale as-is (not uppercased) e.g. 'RITENUTA Allianz S.p.A. DEL ...' - confirm with user if uppercase expected"]},
+      {"screen": "Ritenute/PNC/Rappel company dropdowns", "issues": ["Two entries both named 'TEST_Compagnia QA' (test data pollution from earlier runs) - indistinguishable to user"]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter128_riepilogo_autotitolo.py", "/app/test_reports/pytest/iter128.xml"],
+  "action_items": ["Optional: make Pipeline kanban columns fit or show horizontal scroll hint", "Optional: safe float parse of premio_proposto in riepilogo"],
+  "critical_code_review_comments": ["update_polizza else-branch only triggers when NO titoli exist at all (count_documents polizza_id) - a policy with only stornati/annullati titoli won't get a new one; intended?", "update_polizza does $set of raw body dict without validation (pre-existing)", "server.py is 20k lines - should be split"],
+  "updated_files": ["/app/backend/tests/test_iter128_riepilogo_autotitolo.py"],
+  "success_rate": {"backend": "100% (3/3)", "frontend": "100% (4/4 features)"},
+  "seed_data_creation": "Temporary policy TEST_AUTOTIT_128 created and deleted (verified 0 polizze/titoli left). No company tipo_mandato changes were made.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Collaborazione companies in DB: Generali Italia S.p.A. (38f7681e...), UnipolSai Assicurazioni, TEST_Compagnia QA (c097448b...). Dropdown testids: ritc-new/ritc-comp/ritc-data/ritc-descrizione, pnc-new/pnc-comp, rappel-new-btn/rappel-dlg-comp. Pipeline tab: pipeline-tab-trattative. Login returns access_token usable as Bearer. POST /polizze requires effetto+scadenza."
+}
