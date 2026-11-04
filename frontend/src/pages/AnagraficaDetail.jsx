@@ -1582,7 +1582,7 @@ function DiarioDocLink({ doc, testid }) {
         : fonte === "whatsapp"
             ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
             : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100";
-    const kb = doc.size ? `${(doc.size / 1024).toFixed(0)} KB` : null;
+    const kb = (typeof doc.size === "number" && doc.size > 0) ? `${(doc.size / 1024).toFixed(0)} KB` : null;
     return (
         <a
             href={`${api.defaults.baseURL}${doc.url}`}
@@ -1787,7 +1787,7 @@ function DiarioTab({ anagrafica_id, canEdit }) {
                                 {chatVoce.numero && <span className="text-xs font-normal text-slate-400 num">+{chatVoce.numero}</span>}
                             </DialogTitle>
                         </DialogHeader>
-                        <WhatsAppChatPreview anagrafica_id={anagrafica_id} />
+                        <WhatsAppChatPreview anagrafica_id={anagrafica_id} numero={chatVoce.numero} />
                         <DialogFooter><Button variant="outline" onClick={() => setChatVoce(null)}>Chiudi</Button></DialogFooter>
                     </DialogContent>
                 </Dialog>

@@ -1430,14 +1430,16 @@ async def upload_avatar(
 
 
 @router.get("/anagrafiche/{aid}/whatsapp-chat")
-async def whatsapp_chat_anagrafica(aid: str, limit: int = 300, user: dict = Depends(current_user)):
+async def whatsapp_chat_anagrafica(aid: str, limit: int = 300, numero: str = None, user: dict = Depends(current_user)):
     """Ritorna la conversazione WhatsApp del cliente (match sul numero di telefono),
-    ordinata cronologicamente, per l'anteprima stile chat."""
+    ordinata cronologicamente, per l'anteprima stile chat.
+    Se `numero` è passato (es. dal diario), usa QUEL numero invece del cellulare
+    dell'anagrafica — così la chat carica anche se il numero salvato differisce."""
     ana = await db.anagrafiche.find_one(
         {"id": aid}, {"_id": 0, "cellulare": 1, "telefono": 1, "ragione_sociale": 1})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
-    raw = (ana.get("cellulare") or ana.get("telefono") or "")
+    raw = numero or (ana.get("cellulare") or ana.get("telefono") or "")
     digits = re.sub(r"\D", "", raw)
     if len(digits) < 6:
         return {"number": None, "messages": [], "nome": ana.get("ragione_sociale")}

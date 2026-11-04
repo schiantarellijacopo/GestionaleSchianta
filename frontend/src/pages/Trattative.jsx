@@ -160,6 +160,8 @@ function TrattativaDialog({ editing, onClose }) {
     const [compagnie, setCompagnie] = useState([]);
     const [polizze, setPolizze] = useState([]);
     const [invio, setInvio] = useState(null); // "email" | "whatsapp"
+    const [clienteSearch, setClienteSearch] = useState("");
+    const [chkTxt, setChkTxt] = useState("");
     const [f, setF] = useState(editing || {
         anagrafica_id: "", titolo: "", descrizione: "",
         ramo: "", compagnia_di_provenienza: "", compagnia_target_id: "",
@@ -204,11 +206,23 @@ function TrattativaDialog({ editing, onClose }) {
                     <Select value={f.anagrafica_id} onValueChange={(v) => set("anagrafica_id", v)}>
                         <SelectTrigger data-testid="tr-cliente"><SelectValue placeholder="Seleziona cliente" /></SelectTrigger>
                         <SelectContent className="max-h-80">
-                            {anagrafiche.map((a) => (
-                                <SelectItem key={a.id} value={a.id}>
-                                    {a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}
-                                </SelectItem>
-                            ))}
+                            <div className="sticky top-0 bg-white z-10 p-1.5 border-b border-slate-100">
+                                <Input autoFocus placeholder="Cerca cliente…" value={clienteSearch}
+                                    onChange={(e) => setClienteSearch(e.target.value)}
+                                    onKeyDown={(e) => e.stopPropagation()}
+                                    className="h-8 text-sm" data-testid="tr-cliente-search" />
+                            </div>
+                            {anagrafiche
+                                .filter((a) => {
+                                    const n = (a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`).toLowerCase();
+                                    return n.includes(clienteSearch.toLowerCase());
+                                })
+                                .slice(0, 100)
+                                .map((a) => (
+                                    <SelectItem key={a.id} value={a.id}>
+                                        {a.ragione_sociale || `${a.cognome || ""} ${a.nome || ""}`}
+                                    </SelectItem>
+                                ))}
                         </SelectContent>
                     </Select>
                 </div>
@@ -260,6 +274,23 @@ function TrattativaDialog({ editing, onClose }) {
                     <Textarea rows={2} value={f.descrizione || ""} onChange={(e) => set("descrizione", e.target.value)} /></div>
                 <div className="col-span-2"><Label className="text-xs">Note interne</Label>
                     <Textarea rows={2} value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+                <div className="col-span-2">
+                    <Label className="text-xs">Checklist</Label>
+                    <div className="space-y-1 mt-1" data-testid="tr-checklist">
+                        {(f.checklist || []).map((it, i) => (
+                            <div key={it.id || i} className="flex items-center gap-2 text-sm group">
+                                <input type="checkbox" checked={!!it.done}
+                                    onChange={() => set("checklist", (f.checklist || []).map((x, j) => j === i ? { ...x, done: !x.done } : x))} />
+                                <span className={`flex-1 ${it.done ? "line-through text-slate-400" : "text-slate-700"}`}>{it.testo}</span>
+                                <button type="button" onClick={() => set("checklist", (f.checklist || []).filter((_, j) => j !== i))}
+                                    className="text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100">×</button>
+                            </div>
+                        ))}
+                        <Input value={chkTxt} onChange={(e) => setChkTxt(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (chkTxt.trim()) { set("checklist", [...(f.checklist || []), { id: `${Date.now()}`, testo: chkTxt.trim(), done: false }]); setChkTxt(""); } } }}
+                            placeholder="Aggiungi voce e premi Invio…" className="h-8 text-sm" data-testid="tr-checklist-input" />
+                    </div>
+                </div>
                 <div className="col-span-2 flex items-center gap-2 mt-2">
                     <Checkbox checked={!!f.visibili_cliente} onCheckedChange={(v) => set("visibili_cliente", !!v)} id="tr-vis" />
                     <Label htmlFor="tr-vis" className="text-xs">📂 Trattativa visibile al cliente (nel suo portale)</Label>

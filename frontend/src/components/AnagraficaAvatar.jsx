@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { api, imgUrl } from "@/lib/api";
 import { User, Building2, Home, Church, Camera, Trash2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -74,7 +74,7 @@ export default function AnagraficaAvatar({ ana, size = "md", editable = false, o
         <div className="relative inline-block group" style={{ width: s.px, height: s.px }}
             data-testid={`anagrafica-avatar-${ana?.id || "unknown"}`}>
             {ana?.avatar_url ? (
-                <img src={ana.avatar_url} alt=""
+                <img src={imgUrl(ana.avatar_url)} alt=""
                     className={`w-full h-full object-cover rounded-full ${s.ring} ${style.ring} ring-offset-2 ring-offset-white`} />
             ) : (
                 <div className={`w-full h-full rounded-full ${style.bg} ${style.color} ${s.ring} ${style.ring} ring-offset-2 ring-offset-white flex items-center justify-center font-bold`}>

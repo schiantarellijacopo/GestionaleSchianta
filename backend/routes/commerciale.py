@@ -44,6 +44,7 @@ class TrattativaBody(BaseModel):
     premio_proposto: float = 0
     stato: str = "aperta"  # aperta | proposta_inviata | in_attesa | vinta | persa
     note: Optional[str] = None
+    checklist: list = []  # [{id, testo, done}]
     polizza_id: Optional[str] = None  # polizza collegata (post-vendita)
     visibili_cliente: bool = False
 

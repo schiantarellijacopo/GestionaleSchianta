@@ -14088,7 +14088,9 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
         cols = []
         for stato, label in stages:
             cards = [t for t in items if (t.get("stato") or "aperta") == stato]
-            cols.append({"key": stato, "label": label, "count": len(cards), "cards": [{
+            cols.append({"key": stato, "label": label, "count": len(cards),
+                         "valore": round(sum(float(t.get("premio_proposto") or 0) for t in cards), 2),
+                         "cards": [{
                 "id": t["id"], "title": t.get("titolo") or "—",
                 "subtitle": anas.get(t.get("anagrafica_id", ""), ""),
                 "footer": t.get("ramo") or t.get("compagnia_di_provenienza") or "",
@@ -17152,6 +17154,17 @@ async def list_diario_anagrafica(aid: str, user=Depends(current_user)):
         found = None
         documenti: list = []
         pay = v.get("payload") or {}
+        # PDF generato salvato direttamente sulla voce (es. quietanza/ricevuta incasso)
+        _pdf_path = v.get("pdf_storage_path") or pay.get("pdf_storage_path")
+        if _pdf_path:
+            _p = _pdf_path[4:] if str(_pdf_path).startswith("/api/") else str(_pdf_path)
+            if not _p.startswith("/"):
+                _p = "/storage/" + _p
+            documenti.append({
+                "nome": (v.get("pdf_nome") or "Documento.pdf"),
+                "url": _p, "content_type": "application/pdf",
+                "size": None, "fonte": "allegato",
+            })
         if pay.get("allegato_id") and pay["allegato_id"] in alleg_by_id:
             found = alleg_by_id[pay["allegato_id"]]
         if not found:

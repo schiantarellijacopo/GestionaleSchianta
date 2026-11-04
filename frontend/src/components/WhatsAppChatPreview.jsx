@@ -40,18 +40,18 @@ function fmtOra(iso) {
     catch { return ""; }
 }
 
-export default function WhatsAppChatPreview({ anagrafica_id }) {
+export default function WhatsAppChatPreview({ anagrafica_id, numero }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(false);
 
     const load = () => {
         setLoading(true);
-        api.get(`/anagrafiche/${anagrafica_id}/whatsapp-chat`)
+        api.get(`/anagrafiche/${anagrafica_id}/whatsapp-chat`, { params: numero ? { numero } : {} })
             .then((r) => setData(r.data))
             .catch(() => setData({ messages: [] }))
             .finally(() => setLoading(false));
     };
-    useEffect(load, [anagrafica_id]);
+    useEffect(load, [anagrafica_id, numero]);
 
     const msgs = data?.messages || [];
 

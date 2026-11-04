@@ -115,24 +115,25 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
     const [newCardCol, setNewCardCol] = useState(null);
     const [editingCard, setEditingCard] = useState(null);
     const nav = useNavigate();
-    const SINI_LS = "pipeline_sinistri_attiva";
-    const [siniActive, setSiniActive] = useState(() => {
-        try { return localStorage.getItem(SINI_LS) === "1"; } catch { return false; }
+    const AUTO_BOARDS = ["polizze", "sinistri", "titoli", "regolazione", "clienti"];
+    const LS_KEY = `pipeline_attiva_${entita}`;
+    const [boardActive, setBoardActive] = useState(() => {
+        try { return localStorage.getItem(LS_KEY) === "1"; } catch { return false; }
     });
-    const gated = entita === "sinistri" && !siniActive;
+    const gated = AUTO_BOARDS.includes(entita) && !boardActive;
 
     const load = useCallback(() => {
-        if (entita === "sinistri" && localStorage.getItem(SINI_LS) !== "1") { setData(null); return; }
+        if (AUTO_BOARDS.includes(entita) && localStorage.getItem(`pipeline_attiva_${entita}`) !== "1") { setData(null); return; }
         setData(null);
         api.get(`/pipeline/${entita}`).then((r) => setData(r.data));
     }, [entita]);
 
     useEffect(() => { load(); }, [load]);
 
-    const attivaSinistri = () => {
-        if (!window.confirm("Vuoi popolare automaticamente la pipeline Sinistri con i sinistri esistenti?")) return;
-        try { localStorage.setItem(SINI_LS, "1"); } catch { /* noop */ }
-        setSiniActive(true);
+    const attivaBoard = () => {
+        if (!window.confirm("Vuoi popolare automaticamente questa pipeline con i dati esistenti?")) return;
+        try { localStorage.setItem(LS_KEY, "1"); } catch { /* noop */ }
+        setBoardActive(true);
         setData(null);
         api.get(`/pipeline/${entita}`).then((r) => setData(r.data));
     };
@@ -185,16 +186,17 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
     };
 
     if (gated) {
+        const lbl = { polizze: "Polizze", sinistri: "Sinistri", titoli: "Titoli", regolazione: "Regolazione Premio", clienti: "Clienti" }[entita] || entita;
         return (
-            <div data-testid="board-sinistri-gate" className="flex flex-col items-center justify-center text-center py-16 px-4 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/60">
+            <div data-testid={`board-${entita}-gate`} className="flex flex-col items-center justify-center text-center py-16 px-4 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/60">
                 <ShieldAlert size={40} className="text-amber-500 mb-3" />
-                <div className="font-semibold text-slate-800 mb-1">Pipeline Sinistri vuota</div>
+                <div className="font-semibold text-slate-800 mb-1">Pipeline {lbl} vuota</div>
                 <p className="text-sm text-slate-500 max-w-md mb-5">
-                    Questa pipeline parte vuota. Puoi popolarla automaticamente con i sinistri già presenti,
-                    organizzati per stato (Aperti, In istruttoria, Liquidati…).
+                    Questa pipeline parte vuota: nessun dato viene caricato automaticamente.
+                    Puoi popolarla con i dati esistenti, organizzati per stato.
                 </p>
-                <Button onClick={attivaSinistri} className="bg-amber-600 hover:bg-amber-700" data-testid="sinistri-popola-btn">
-                    <Plus size={14} className="mr-1.5" /> Popola automaticamente dai sinistri
+                <Button onClick={attivaBoard} className="bg-amber-600 hover:bg-amber-700" data-testid={`${entita}-popola-btn`}>
+                    <Plus size={14} className="mr-1.5" /> Popola automaticamente
                 </Button>
             </div>
         );
@@ -261,7 +263,14 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
                                     borderLeft: `3px solid ${colColor}`,
                                 }}
                             >
-                                <div className="font-medium text-sm text-slate-800">{col.label}</div>
+                                <div>
+                                    <div className="font-medium text-sm text-slate-800">{col.label}</div>
+                                    {typeof col.valore === "number" && (
+                                        <div className="text-[11px] font-semibold text-emerald-700 num" data-testid={`col-valore-${col.key}`}>
+                                            € {col.valore.toLocaleString("it-IT", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                                        </div>
+                                    )}
+                                </div>
                                 <div className="flex items-center gap-1">
                                     {isCustom && (
                                         <button

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "@/lib/api";
+import { api, imgUrl } from "@/lib/api";
 import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon, ShoppingCart, Headphones } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
@@ -86,7 +86,7 @@ export default function TopBar() {
                 title="Profilo utente"
             >
                 {user?.avatar_url ? (
-                    <img src={user.avatar_url} alt={user.name}
+                    <img src={imgUrl(user.avatar_url)} alt={user.name}
                         className="w-8 h-8 rounded-full object-cover border-2 border-slate-200" />
                 ) : (
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-500 to-violet-600 text-white flex items-center justify-center text-xs font-semibold">
@@ -220,7 +220,7 @@ export default function TopBar() {
             {/* Logo agenzia — alto a destra */}
             {azienda?.logo_url && (
                 <img
-                    src={azienda.logo_url}
+                    src={imgUrl(azienda.logo_url)}
                     alt={azienda.ragione_sociale || "Logo"}
                     className="h-9 max-w-[140px] object-contain hidden md:block"
                     title={azienda.ragione_sociale}

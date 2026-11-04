@@ -110,3 +110,13 @@ export const isCompagniaDiretta = (c) =>
     && (c.tipo_mandato || "diretto") === "diretto"
     && !c.agenzia_partner_id
     && !(Array.isArray(c.agenzie_partner_ids) && c.agenzie_partner_ids.length > 0);
+
+// URL immagine autenticata: i tag <img> non inviano header/cookie affidabilmente,
+// quindi accodiamo il token come query param (il backend lo accetta come fallback).
+export const imgUrl = (path) => {
+    if (!path) return path;
+    const token = localStorage.getItem("token");
+    if (!token) return path;
+    const sep = path.includes("?") ? "&" : "?";
+    return `${path}${sep}token=${encodeURIComponent(token)}`;
+};

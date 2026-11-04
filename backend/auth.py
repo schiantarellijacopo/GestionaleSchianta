@@ -66,6 +66,10 @@ def get_token_from_request(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         return auth[7:]
+    # Fallback per i tag <img>/<a> (non possono inviare header): token via query param.
+    qp = request.query_params.get("token")
+    if qp:
+        return qp
     return None
 
 
