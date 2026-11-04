@@ -1289,6 +1289,42 @@ async def _run_commit_inner(sid: str, plan: List[dict], user: dict):
         await _flush()
 
     await _flush()
+    # AUTO-TITOLO: per le polizze NUOVE DA IMPORTAZIONE / SOSTITUZIONE di questo batch
+    # che hanno premi ma NESSUN titolo (file con sole righe polizza, senza righe titolo),
+    # genera il primo titolo con gli stessi importi (lordo/netto/imposte/ssn/provvigioni).
+    # Se il file conteneva già righe titolo, la polizza ha già titoli → saltata (no duplicati).
+    titoli_auto_generati = 0
+    for _pid in {v for v in pol_cache.values() if v}:
+        _pol = await db.polizze.find_one({"id": _pid}, {"_id": 0})
+        if not _pol:
+            continue
+        _lordo = round(float(_pol.get("premio_lordo") or 0), 2)
+        _stato = (_pol.get("stato") or "").lower()
+        if _lordo <= 0 or _stato in ("annullata", "disdetta", "sostituita"):
+            continue
+        if await db.titoli.count_documents({"polizza_id": _pid}) > 0:
+            continue
+        _eff = _pol.get("effetto") or _pol.get("scadenza") or now_iso[:10]
+        _fraz = (_pol.get("frazionamento") or "annuale").lower()
+        _scad = calcola_scadenza_titolo(_eff, _fraz) or _eff
+        _tdoc = {
+            "polizza_id": _pid,
+            "tipo": "sostituzione" if _pol.get("sostituisce_polizza") else "nuova",
+            "effetto": _eff, "scadenza": _scad,
+            "importo_lordo": _lordo,
+            "importo_netto": round(float(_pol.get("premio_netto") or 0), 2),
+            "imposte": round(float(_pol.get("premio_tasse") or 0) + float(_pol.get("premio_imposte") or 0), 2),
+            "ssn": round(float(_pol.get("premio_ssn") or 0), 2),
+            "accessori": round(float(_pol.get("premio_accessori") or 0), 2),
+            "provvigioni": round(float(_pol.get("provvigioni") or 0), 2),
+            "collaboratore_id": _pol.get("collaboratore_id"),
+            "stato": "da_incassare",
+        }
+        _tobj = Titolo(**{k: v for k, v in _tdoc.items() if k in Titolo.model_fields})
+        await db.titoli.insert_one(_tobj.model_dump())
+        titoli_auto_generati += 1
+    if titoli_auto_generati:
+        stats["titoli_auto_generati"] = titoli_auto_generati
     # STORNO automatico SOLO dei titoli arretrati (da_incassare) e NON coperti delle
     # polizze SOSTITUITE in questo import. Regola: coperto/sospeso/incassato sono in
     # Prima Nota e NON vanno MAI toccati da nessuna importazione.

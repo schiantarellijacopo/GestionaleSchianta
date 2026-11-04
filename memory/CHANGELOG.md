@@ -1,6 +1,12 @@
 # Changelog — Axicura CRM
 
-## 2026-11 — Pipeline (Trattative/Disdette kanban), Disdette module, Sinistri opt-in, Diario chat, fix OCR/Tipo titolo
+## 2026-11 — Trattative: valore aperte/vinte + Titolo automatico (import/sostituzione)
+- **Trattative board, riepilogo valore**: la board Trattative in /pipeline mostra in cima due card "Trattative aperte" (somma premio_proposto di aperta/proposta_inviata/in_attesa) e "Trattative vinte". Backend: `riepilogo` nel branch trattative di `pipeline_data`; frontend: banner in `Pipeline.jsx` (data-testid trattative-riepilogo).
+- **Titolo automatico con gli stessi importi**:
+  - `update_polizza` (`server.py`): se si compilano Premi/Provvigioni su una polizza SENZA titolo (tipico di polizze importate o di sostituzione i cui dati economici si inseriscono dopo), genera il primo titolo con gli stessi importi (lordo/netto/imposte=tasse+imposte/ssn/accessori/provvigioni + ripartizione operatori). Guardie: premio_lordo>0, nessun titolo esistente, stato attivo. Verificato via API.
+  - Import massivo (`routes/import_massivo.py`): pass post-import che, per le polizze del batch con premi ma ZERO titoli (file con sole righe polizza), genera il titolo con gli stessi importi. Se il file conteneva già righe titolo → nessun duplicato. (`stats.titoli_auto_generati`).
+
+
 - **Pipeline**: aggiunte board builtin **Trattative** e **Disdette** (kanban drag per stato). Move via `/pipeline/{trattative|disdette}/{id}/move`; branches in `pipeline_data`. Testato (iteration_127, 5/5).
 - **Modulo Disdette** (`/disdette` + sidebar): CRUD in `routes/commerciale.py` (collection `disdette`) + pagina `Disdette.jsx` con KPI, badge avviso scadenza (≤15gg / scaduta), create/edit/delete.
 - **Sinistri opt-in**: board Sinistri parte vuota con gate + pulsante "Popola automaticamente" (conferma), scelta persistita in localStorage (`pipeline_sinistri_attiva`).

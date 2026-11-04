@@ -219,6 +219,29 @@ function PipelineBoard({ entita, editable, builtin, onPipelineChange }) {
                 </div>
             )}
 
+            {data.riepilogo && (
+                <div className="flex flex-wrap gap-3 mb-3" data-testid="trattative-riepilogo">
+                    <div className="flex-1 min-w-[180px] rounded-lg border border-sky-200 bg-sky-50 px-4 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wider text-sky-700 font-semibold">Trattative aperte</div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-xl font-bold text-sky-800 num" data-testid="riepilogo-valore-aperte">
+                                € {(data.riepilogo.valore_aperte || 0).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-xs text-sky-600">{data.riepilogo.n_aperte} in corso</span>
+                        </div>
+                    </div>
+                    <div className="flex-1 min-w-[180px] rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+                        <div className="text-[10px] uppercase tracking-wider text-emerald-700 font-semibold">Trattative vinte</div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="text-xl font-bold text-emerald-800 num" data-testid="riepilogo-valore-vinte">
+                                € {(data.riepilogo.valore_vinte || 0).toLocaleString("it-IT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </span>
+                            <span className="text-xs text-emerald-600">{data.riepilogo.n_vinte} vinte</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="flex gap-4 overflow-x-auto pb-4">
                 {data.colonne.map((col) => {
                     const isDropTarget = dragOverCol === col.key && draggedCard && draggedCard.fromCol !== col.key;

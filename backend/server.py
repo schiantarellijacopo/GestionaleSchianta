@@ -4612,6 +4612,41 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
                 {"$set": _set_tit},
             )
             await ricalcola_premio_annuo_polizza(db, pid)
+        else:
+            # Nessun titolo iniziale collegato: tipico delle polizze NUOVE DA
+            # IMPORTAZIONE o di SOSTITUZIONE i cui dati economici (Premi/Provvigioni)
+            # vengono compilati dopo la creazione. Se ci sono premi, la polizza è
+            # attiva e NON esiste ancora alcun titolo, generane uno con gli stessi importi.
+            _lordo = round(float(doc.get("premio_lordo") or 0), 2)
+            _stato_pol = (doc.get("stato") or "").lower()
+            _esistenti = await db.titoli.count_documents({"polizza_id": pid})
+            if _lordo > 0 and _esistenti == 0 and _stato_pol not in ("annullata", "disdetta", "sostituita"):
+                from db_models import add_months as _am_upd
+                _eff_t = doc.get("effetto") or doc.get("scadenza") or _now_iso()[:10]
+                _mesi_t = {"annuale": 12, "semestrale": 6, "quadrimestrale": 4,
+                           "trimestrale": 3, "mensile": 1, "unica": 12}.get((doc.get("frazionamento") or "annuale").lower(), 12)
+                _provv_tit = round(float(doc.get("provvigioni") or 0), 2)
+                _nuovo_tit = Titolo(
+                    polizza_id=pid,
+                    tipo="sostituzione" if doc.get("sostituisce_polizza") else "nuova",
+                    effetto=_eff_t,
+                    scadenza=_am_upd(_eff_t, _mesi_t),
+                    importo_lordo=_lordo,
+                    importo_netto=round(float(doc.get("premio_netto") or 0), 2),
+                    imposte=round(float(doc.get("premio_tasse") or 0) + float(doc.get("premio_imposte") or 0), 2),
+                    ssn=round(float(doc.get("premio_ssn") or 0), 2),
+                    accessori=round(float(doc.get("premio_accessori") or 0), 2),
+                    provvigioni=_provv_tit,
+                    collaboratore_id=doc.get("collaboratore_id"),
+                    stato="da_incassare",
+                )
+                _rip = _ripartizione_titolo_da_polizza(doc, _provv_tit)
+                if _rip:
+                    _nuovo_tit.provvigioni_operatori = _rip
+                await db.titoli.insert_one(_nuovo_tit.model_dump())
+                await ricalcola_premio_annuo_polizza(db, pid)
+                await log_attivita(user, "create", "titolo", _nuovo_tit.id,
+                                   f"Titolo auto-generato da polizza {doc.get('numero_polizza','')}")
     # Se è cambiato un dato veicolo/contratto (o la targa), propaga alle altre polizze
     # con la stessa targa (ultima info vince).
     if doc and doc.get("targa") and (set(body) & (set(_VEICOLO_SYNC_FIELDS) | {"targa"})):
@@ -14060,7 +14095,15 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
                 "extra": (f"€{float(t.get('premio_proposto') or 0):.0f}" if t.get("premio_proposto") else ""),
                 "date": t.get("data_scadenza_corrente"), "link": "/trattative",
             } for t in cards[:50]]})
-        return {"entita": "trattative", "colonne": cols}
+        _aperte = [t for t in items if (t.get("stato") or "aperta") in ("aperta", "proposta_inviata", "in_attesa")]
+        _vinte = [t for t in items if (t.get("stato") or "") == "vinta"]
+        riepilogo = {
+            "valore_aperte": round(sum(float(t.get("premio_proposto") or 0) for t in _aperte), 2),
+            "n_aperte": len(_aperte),
+            "valore_vinte": round(sum(float(t.get("premio_proposto") or 0) for t in _vinte), 2),
+            "n_vinte": len(_vinte),
+        }
+        return {"entita": "trattative", "colonne": cols, "riepilogo": riepilogo}
 
     if entita == "disdette":
         stages = [("da_inviare", "Da inviare"), ("inviata", "Inviata"),
