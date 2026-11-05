@@ -407,6 +407,12 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
     await db.cloud_connections.update_one(
         {"tenant_id": st["tenant_id"], "provider": provider},
         {"$set": {
+            # Il callback OAuth NON ha contesto utente, quindi il wrapper multi-tenant
+            # non inietterebbe agenzia_tenant_id: lo impostiamo ESPLICITAMENTE, altrimenti
+            # un'agenzia non-principale non ritroverebbe mai la propria connessione
+            # (status/set-folder filtrano per agenzia_tenant_id).
+            "tenant_id": st["tenant_id"],
+            "agenzia_tenant_id": st["tenant_id"],
             "refresh_token": _enc(refresh),
             "scopes": t.get("scope", cfg["scope"]),
             "connected_at": _now().isoformat(),
@@ -477,6 +483,10 @@ async def _fresh_access_token(provider: str, connection: dict) -> str:
 async def status(user=Depends(current_user)):
     """Ritorna le connessioni attive dell'agenzia (1 max per provider)."""
     tenant = _tenant_id(user)
+    # Ripara eventuali connessioni prive di agenzia_tenant_id (create dal callback OAuth
+    # senza contesto) così compaiono correttamente per l'agenzia che le possiede.
+    for prov in ("google_drive", "onedrive"):
+        await _backfill_agenzia_label(prov, tenant)
     rows = db.cloud_connections.find(
         {"tenant_id": tenant},
         {"_id": 0, "provider": 1, "folder_id": 1, "folder_name": 1,
@@ -522,6 +532,10 @@ async def set_folder(
     """Salva la cartella di destinazione (o root se folder_id=None) e ricrea la
     struttura (sottocartelle + INBOX) DENTRO la cartella scelta. Per l'intera agenzia."""
     tenant = _tenant_id(user)
+    # Etichetta eventuali connessioni già esistenti per questo tenant che non hanno
+    # agenzia_tenant_id (create dal callback OAuth senza contesto utente): operazione
+    # sicura, mai cross-tenant (filtra per lo stesso tenant_id).
+    await _backfill_agenzia_label(provider, tenant)
     # Split-tenant: se la connessione è ancora intestata al tenant legacy della stessa
     # agenzia, adottala PRIMA sul tenant attivo. Senza questo, l'update qui sotto non
     # troverebbe il documento e solleverebbe 404 "Account non collegato" (è il motivo
@@ -531,6 +545,7 @@ async def set_folder(
     r = await db.cloud_connections.update_one(
         {"tenant_id": tenant, "provider": provider},
         {"$set": {
+            "agenzia_tenant_id": tenant,
             "folder_id": folder_id or None,
             "folder_name": folder_name or None,
             "root_is_custom": bool(folder_id),
@@ -853,7 +868,8 @@ async def _ensure_folder_path(provider: str, token: str, segments: list,
     if parent:
         await db.cloud_folder_cache.update_one(
             {"tenant_id": tenant_id, "provider": provider, "path": cache_key},
-            {"$set": {"folder_id": parent, "created_at": _now().isoformat()}},
+            {"$set": {"agenzia_tenant_id": tenant_id, "folder_id": parent,
+                      "created_at": _now().isoformat()}},
             upsert=True,
         )
     return parent or ""
@@ -872,6 +888,20 @@ async def _resolve_category_path(category: str, context: dict) -> list:
         "mese": f"{int(context.get('mese') or _now().month):02d}",
     }
     return [seg.format(**ctx) if "{" in seg else seg for seg in template]
+
+
+async def _backfill_agenzia_label(provider: str, tenant: str) -> None:
+    """Etichetta i doc esistenti (connessione + cache) che hanno tenant_id corretto ma
+    agenzia_tenant_id mancante — successo tipico delle connessioni create dal callback
+    OAuth, che gira senza contesto utente e quindi non iniettava agenzia_tenant_id.
+    Operazione idempotente e SEMPRE intra-tenant (mai cross-tenant)."""
+    from database import raw_db
+    for coll in ("cloud_connections", "cloud_folder_cache", "cloud_scan_history"):
+        await getattr(raw_db, coll).update_many(
+            {"tenant_id": tenant, "provider": provider,
+             "agenzia_tenant_id": {"$exists": False}},
+            {"$set": {"agenzia_tenant_id": tenant}},
+        )
 
 
 async def _adopt_legacy_connection(provider: str, target_tenant: str) -> Optional[dict]:
@@ -935,6 +965,9 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
     Riutilizzata dall'endpoint manuale /init-structure E dal callback OAuth
     (così appena l'agenzia collega il Drive la struttura e l'INBOX esistono subito).
     """
+    # Ripara eventuali connessioni prive di agenzia_tenant_id (create dal callback OAuth
+    # senza contesto) così la find scoped le trova per l'agenzia che le possiede.
+    await _backfill_agenzia_label(provider, tenant)
     conn = await db.cloud_connections.find_one({
         "tenant_id": tenant, "provider": provider,
     })
@@ -989,13 +1022,15 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
         # La cartella scelta dall'agenzia È la radice: non sovrascrivere nome/id.
         await db.cloud_connections.update_one(
             {"tenant_id": tenant, "provider": provider},
-            {"$set": {"structure_initialized_at": _now().isoformat()}},
+            {"$set": {"agenzia_tenant_id": tenant,
+                      "structure_initialized_at": _now().isoformat()}},
         )
     else:
         root_id = created_paths[0]["folder_id"]
         await db.cloud_connections.update_one(
             {"tenant_id": tenant, "provider": provider},
             {"$set": {
+                "agenzia_tenant_id": tenant,
                 "folder_id": root_id,
                 "folder_name": "Assicura CRM",
                 "structure_initialized_at": _now().isoformat(),

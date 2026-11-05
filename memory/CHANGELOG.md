@@ -670,3 +670,13 @@ un salvataggio da "Modifica premi" rende permanente la correzione sul record leg
 
 ## 2026-11-05 — Pulizia istanze WhatsApp orfane (auto-repair webhook)
 - **Istanze orfane 404**: in `auto_repair_webhooks()` (routes/whatsapp_evo.py), quando `/webhook/set/{name}` risponde 404 (istanza non più esistente su Evolution, es. `agenzia-prova-0342706000`, `agenzia-jacopoooo`), il record locale in `whatsapp_instances` viene ora eliminato automaticamente così non viene più richiamato a vuoto a ogni avvio. Aggiunto `removed[]` all'output e log dedicato in server.py. Verificato con istanze sintetiche + mock 404 (orfane rimosse, istanza valida mantenuta).
+
+## 2026-11-05 — Fix GENERALE multi-tenant Google Drive (ogni agenzia collega il proprio Drive)
+- **Root cause**: il callback OAuth (`routes/cloud_storage.py` `oauth_callback`) salvava solo `tenant_id` nel doc `cloud_connections`, MAI `agenzia_tenant_id`. Poiché `cloud_connections`/`cloud_folder_cache` sono tenant-scoped e il wrapper Mongo filtra per `agenzia_tenant_id`, una connessione creata da un'agenzia NON-principale risultava invisibile a `status`, `set-folder` e alle sincronizzazioni → root non salvabile ("resta Assicura CRM") e INBOX non elaborata.
+- **Fix**:
+  1. `oauth_callback` ora imposta ESPLICITAMENTE `tenant_id` + `agenzia_tenant_id = st["tenant_id"]` (il tenant dell'agenzia che collega, da `_tenant_id(user)`).
+  2. Nuovo helper idempotente `_backfill_agenzia_label(provider, tenant)` che etichetta le connessioni/cache/scan già esistenti prive di `agenzia_tenant_id` — SEMPRE intra-tenant, mai cross-tenant. Chiamato all'inizio di `status`, `set_folder` e `_init_structure_for_tenant`.
+  3. Tutte le scritture rilevanti (`set_folder`, cache path, update struttura/root) ora persistono `agenzia_tenant_id`.
+  4. Mantenuto il self-heal `_adopt_legacy_connection` per la migrazione split-tenant di Jacopo (tenant legacy → c5ae2d0e).
+- **Verificato in preview**: bug riprodotto (scoped find NON trova la connessione senza `agenzia_tenant_id`) → dopo backfill la connessione dell'agenzia non-principale diventa visibile. Self-heal legacy già verificato end-to-end in precedenza (VISION360 salvata + INBOX/Archivio creati).
+- **IMPORTANTE deploy**: la produzione reale è **Railway** (`gestionaleschianta-production.up.railway.app`), che builda dal repo GitHub. Questo fix è nel codebase preview/Emergent: va pubblicato su GitHub perché Railway lo ricompili. Nessuna migrazione manuale DB necessaria — backfill/adopt riparano i dati esistenti al primo accesso.
