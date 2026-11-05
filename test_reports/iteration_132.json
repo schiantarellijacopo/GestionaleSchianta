@@ -1,0 +1,43 @@
+{
+  "summary": "Cloud-only document storage (Google Drive real connection, tenant-principale-schiantarelli). Backend: 7/7 pytest pass (anagrafica card upload->Drive with doc_id/cloud_sync/path 'Assicura CRM/Anagrafiche/ANALISIC33FC4 TEST_DEL/Mandato SDD', storage_provider=google_drive, pending_sync=false, NO storage_path; download from cloud returns exact bytes; replace gives new doc_id + new file_id; delete ok + 404 afterwards; polizza allegato -> 'Assicura CRM/Polizze/TTEST-001/Condizioni', download 200, delete ok; custom card 'Bonus Malus' -> subfolder '/Bonus Malus' then cleaned; sync-pending -> {ok:true, moved:0, failed:0}). Verified DIRECTLY on Google Drive API that after replace the old file_id returns 404 and after delete the current file_id returns 404, and file name is 'Mandato SDD [<doc_id>].pdf'. Frontend: upload in Mandato SDD card shows ID badge ('ID a420191e') and '☁️ Su Drive' badge (title = cloud path), no pending badge; file link (relative /api/.../download) returns 200 via cookie; Sostituisci changes ID badge and content; Elimina (confirm) restores upload area, download -> 404. Remaining issues are in adjacent code paths (see critical_code_review_comments).",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "portale_cliente.py:586 (client portal allegato download), routes/esignature_it.py:280 (/esignature/invia), server.py:19640 & portale_cliente.py:1060 (chat portale allegati)", "issue": "These read obj_storage.get_object(al['storage_path']) directly. Cloud-only allegati now have storage_path='' -> client portal download returns 503 and e-signature of a cloud-only polizza/anagrafica allegato returns 502. ~30 call sites read allegati storage_path directly; they need a shared helper (e.g. cloud_doc_sync.read_allegato_bytes) that falls back to download_cloud_file when cloud_sync.file_id is set.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "cloud_doc_sync.sync_pending_for_tenant", "issue": "For pending allegati uses doc_label_text=al['categoria'] (raw key) instead of server._card_label_for -> after sync, folders are named 'condizioni' / 'custom_bonus_malus' instead of real card name ('Condizioni', 'Bonus Malus'). Violates user choice (5)."},
+      {"endpoint": "cloud_doc_sync.sync_pending_for_tenant (anagrafiche)", "issue": "Query {documenti: {$exists:true}}.limit(500) is not filtered on pending_sync -> on high-volume tenants pending docs beyond the first 500 anagrafiche are never synced. Filter on pending entries or iterate without limit."},
+      {"endpoint": "POST /api/librerie/cloud-storage/sync-pending", "issue": "Uses Depends(current_user) (any role incl. cliente) although described as admin-only; 'provider' form param is ignored."},
+      {"endpoint": "OCR CI (server.py ~3363 / ~3530)", "issue": "Front uses save_anag_card_document (OK) but the RETRO image is always saved to internal storage (url_retro=/api/storage/...) -> physical copy in CRM, contrary to cloud-only choice."},
+      {"endpoint": "POST /api/anagrafiche/{aid}/documenti/{tipo}/prepara-firma", "issue": "Materializes the PDF from cloud into internal storage and never cleans it up -> permanent internal copy."},
+      {"endpoint": "cloud_doc_sync.ALLEGATO_LABELS / alleg_label", "issue": "Dead code (unused), and labels differ from CARD_DEFS (e.g. 'Condizioni di polizza' vs real 'Condizioni'). Remove to avoid confusion."},
+      {"endpoint": "POST /api/allegati", "issue": "Cloud-only allegati store storage_path='' (key present, empty) instead of absent; acceptable but inconsistent with anagrafica card entries."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "AnagraficaDetail > Documenti card", "issues": ["ID badge shows only first 8 chars of doc_id while the cloud filename contains the full 36-char uuid; acceptable (prefix is searchable) but consider showing full ID in tooltip/copy button."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter132_cloud_only_docs.py", "/app/backend/tests/cc_drive_verify_replace.py", "/app/test_reports/pytest/iter132.xml"],
+  "action_items": [
+    "Create a shared helper to read allegato bytes (cloud_sync -> download_cloud_file, else storage_path) and use it in portale_cliente download, esignature_it invia, chat portale downloads and other allegati get_object(storage_path) call sites",
+    "sync_pending_for_tenant: use _card_label_for(entita_tipo, categoria) for folder label; filter anagrafiche on pending docs instead of limit(500) over all",
+    "Restrict /sync-pending to admin (require_user('admin'))",
+    "OCR CI retro: upload retro to cloud too (or document exception)",
+    "prepara-firma: clean up materialized internal PDF after signing or stream bytes directly"
+  ],
+  "critical_code_review_comments": [
+    "mirror_document deletes the previous cloud file BEFORE uploading the new one; if the upload then fails the doc falls back to internal storage (no data loss) but the cloud loses the old version — consider delete-after-success.",
+    "sync_pending_for_tenant uses sync obj_storage.get_object/delete_object inside async loop (blocking); wrap with run_in_threadpool.",
+    "server.py is >20k lines; new cloud logic duplicated between routes/anagrafiche.upload_documento_anagrafica and cloud_doc_sync.save_anag_card_document (~40 lines) — upload endpoint should call save_anag_card_document."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter132_cloud_only_docs.py", "/app/backend/tests/cc_drive_verify_replace.py"],
+  "success_rate": {"backend": "100% (7/7 requested flows); adjacent critical regression found in portal/esignature readers", "frontend": "100%"},
+  "seed_data_creation": "None persistent. Test docs (mandato_sdd on anagrafica 42a86341..., allegati on TTEST-POL-05ea5b and anagrafica, custom card custom_bonus_malus) were all deleted after tests; anagrafica documenti was empty before and is empty after.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Drive is really connected for tenant-principale-schiantarelli. Run pytest tests/test_iter132_cloud_only_docs.py -p no:xdist -o addopts=''. cc_drive_verify_replace.py checks file existence directly on Drive via routes.cloud_storage._fresh_access_token (needs single event loop). Polizza 'condizioni' card label is 'Condizioni' (CARD_DEFS), not 'Condizioni di polizza'. Next: verify fix for portale cliente/esignature reading cloud-only allegati."
+}

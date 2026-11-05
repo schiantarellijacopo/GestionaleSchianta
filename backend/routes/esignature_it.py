@@ -277,7 +277,8 @@ async def invia_per_firma(body: dict, user=Depends(current_user)) -> dict:
         raise HTTPException(400, "La firma è disponibile solo su documenti PDF")
 
     try:
-        pdf_bytes, _ct = obj_storage.get_object(al["storage_path"])
+        import cloud_doc_sync
+        pdf_bytes, _ct = await cloud_doc_sync.read_allegato_bytes(al)
     except Exception as e:
         raise HTTPException(502, f"Impossibile leggere il documento: {e}")
 

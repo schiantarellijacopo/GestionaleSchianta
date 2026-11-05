@@ -33,7 +33,7 @@ from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import RedirectResponse
 
-from auth import current_user
+from auth import current_user, require_user
 from database import db
 
 router = APIRouter(prefix="/librerie/cloud-storage", tags=["cloud-storage"])
@@ -771,7 +771,7 @@ async def init_structure(
 @router.post("/sync-pending")
 async def sync_pending(
     provider: str = Form("google_drive", regex="^(google_drive|onedrive)$"),
-    user=Depends(current_user),
+    user=Depends(require_user("admin")),
 ):
     """Sposta sul cloud i documenti rimasti nel CRM in attesa (caricati prima del
     collegamento del cloud). Eseguito nel contesto utente → scope per-agenzia garantito."""

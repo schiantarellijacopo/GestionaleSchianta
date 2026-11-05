@@ -281,3 +281,19 @@ Architettura carry-forward implementata e verificata (dettagli in CHANGELOG.md):
 - Fase 2: checkpoint giornalieri nelle chiusure (`riepilogo.checkpoint`) con resume dall'ultimo giorno chiuso valido + guard auto-verificante (count + max updated_at) → self-healing su modifiche passate; "Riallinea saldi" ricostruisce/backfilla i checkpoint e ora rileva davvero snapshot stantii.
 - Invariante verificata: resume == full-scan (identico). Guard verificato con insert/delete passato.
 - Backlog: ottimizzare `_compute_saldi_compagnie` (ancora full recompute) se diventa collo di bottiglia.
+
+---
+## 2026-11-05 — Archiviazione documenti CLOUD-ONLY (Google Drive)
+Scelte utente: documenti vivono SOLO sul cloud collegato (niente copia fisica nel CRM); se nessun cloud collegato → salva internamente con `pending_sync=True` e sincronizza dopo (endpoint admin `/api/librerie/cloud-storage/sync-pending`); struttura `Assicura CRM/{Anagrafiche|Polizze|Sinistri}/{NOME|N°}/{Tipo card}/file`; ogni documento ha `doc_id` univoco visibile + nel nome file cloud `Etichetta [doc_id].ext`; le card custom create in Librerie→Visibilità documenti generano la sottocartella col loro nome reale.
+
+Implementazione:
+- Nuovo `/app/backend/cloud_doc_sync.py`: `mirror_document` (upload+struttura+replace delete-after-success), `connected_providers`, `delete_cloud_file`, `download_cloud_file`, `read_allegato_bytes` (shared: cloud o interno), `save_anag_card_document`, `sync_pending_for_tenant`.
+- `routes/anagrafiche.py`: upload card cloud-only+fallback, nuovo `GET .../documenti/{tipo}/download` (proxy da Drive), delete elimina da cloud, prepara-firma materializza il PDF dal cloud.
+- `server.py`: `upload_allegato` cloud-only (polizze/sinistri), `download_allegato`/`delete_allegato` cloud-aware, `_card_label_for` (risolve label card incl. custom), 2 blocchi OCR CI ora usano `save_anag_card_document`.
+- `routes/cloud_storage.py`: `STANDARD_FOLDER_STRUCTURE` sezioni Anagrafiche/Polizze/Sinistri; `/sync-pending` (admin).
+- `portale_cliente.py` + `esignature_it.py`: download/firma ora usano `read_allegato_bytes` (compatibili cloud-only).
+- Frontend `AnagraficaDetail.jsx` DocumentiTab: badge ID + "☁️ Su Drive" / "⏳ Da sincronizzare".
+- Multi-provider ready: S3 si aggiungerà con le stesse firme (oggi solo Google Drive attivo; OneDrive supportato nel codice).
+
+Verifica: iteration_132.json → backend 7/7 pass + frontend OK, testato su Google Drive REALE (tenant-principale-schiantarelli). Confermato su Drive API: replace cancella il vecchio file_id, delete rimuove, nome file `Etichetta [doc_id].ext`.
+Backlog (non bloccante): `sync_pending_for_tenant` usa get/delete sincroni in loop async (wrap run_in_threadpool); OCR CI retro resta interno; prepara-firma lascia un PDF materializzato interno (cleanup post-firma); S3 driver da implementare quando l'utente fornirà le chiavi AWS.

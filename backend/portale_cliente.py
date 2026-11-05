@@ -583,7 +583,8 @@ async def portale_allegato_download(allegato_id: str, cliente=Depends(current_cl
     if not authorized:
         raise HTTPException(403, "Non autorizzato")
     try:
-        data, _ct = obj_storage.get_object(al["storage_path"])
+        import cloud_doc_sync
+        data, _ct = await cloud_doc_sync.read_allegato_bytes(al)
     except Exception as e:
         raise HTTPException(503, f"Errore download: {e}")
     return StreamingResponse(
@@ -1057,7 +1058,8 @@ async def portale_chat_download_allegato(allegato_id: str, cliente=Depends(curre
     if not al:
         raise HTTPException(404, "File non trovato")
     try:
-        data, _ct = obj_storage.get_object(al["storage_path"])
+        import cloud_doc_sync
+        data, _ct = await cloud_doc_sync.read_allegato_bytes(al)
     except Exception as e:
         raise HTTPException(503, f"Errore download: {e}")
     return StreamingResponse(

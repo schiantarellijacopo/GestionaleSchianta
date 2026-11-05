@@ -199,13 +199,13 @@ async def mirror_document(
         if not folder_id:
             return None
 
-        # Sostituzione: elimina la versione precedente (stesso documento della card).
-        if replace_file_id:
-            await delete_cloud_file(tenant_id, prov, replace_file_id)
-
+        # Sostituzione: NON eliminiamo subito la versione precedente. Prima carichiamo
+        # la nuova, poi (solo se l'upload riesce) eliminiamo la vecchia → niente perdita dati.
         ext = _ext(filename)
         name = f"{label} [{doc_id}].{ext}"
         res = await _put_file(prov, token, folder_id, name, data, mime)
+        if replace_file_id and res.get("id") and res["id"] != replace_file_id:
+            await delete_cloud_file(tenant_id, prov, replace_file_id)
         out = {
             "provider": prov,
             "file_id": res.get("id"),
@@ -366,6 +366,22 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500) -> dict:
                 failed += 1
 
     return {"ok": True, "moved": moved, "failed": failed}
+
+
+async def read_allegato_bytes(al: dict) -> tuple[bytes, str]:
+    """Legge i byte di un allegato: dal cloud se cloud-only, altrimenti dallo storage interno.
+
+    Usato da portale cliente, firma elettronica e altri punti di download.
+    """
+    import storage as obj_storage
+    cloud = (al or {}).get("cloud_sync") or {}
+    if cloud.get("file_id") and not al.get("pending_sync"):
+        tenant_id = al.get("agenzia_tenant_id") or al.get("tenant_id") or "default"
+        res = await download_cloud_file(tenant_id, cloud.get("provider", "google_drive"),
+                                        cloud["file_id"])
+        if res:
+            return res
+    return obj_storage.get_object(al["storage_path"])
 
 
 def al_id_fallback() -> str:
