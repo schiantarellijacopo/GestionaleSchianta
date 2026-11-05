@@ -498,6 +498,28 @@ async def _find_sinistro(db, tenant_id: str, data: dict) -> Optional[dict]:
 # ============================================================
 # ROUTING: mappa tipo_documento → (category, context builder)
 # ============================================================
+# Etichetta sottocartella per tipo documento (coerente con l'upload manuale).
+_OCR_SUBFOLDER = {
+    "carta_identita": "Carta d'identità",
+    "patente": "Patente di guida",
+    "passaporto": "Passaporto",
+    "codice_fiscale": "Tessera codice fiscale",
+    "privacy": "Privacy firmata",
+    "visura_camerale": "Visura camerale",
+    "libretto_circolazione": "Libretto di circolazione",
+    "polizza_frontespizio": "Polizza",
+    "quietanza": "Quietanze",
+    "denuncia_sinistro": "Denuncia sinistro",
+}
+# Categorie cartella che rappresentano documenti di una specifica entità
+# (cliente/polizza/sinistro) e che quindi ricevono la sottocartella per tipo.
+_PER_ENTITY_CATEGORIES = {
+    "contraente_identita", "contraente_codice_fiscale", "contraente_privacy",
+    "contraente_altri", "polizza_documenti", "polizza_condizioni",
+    "sinistro_specifico",
+}
+
+
 def _route_document(classification: dict, ana: Optional[dict],
                     pol: Optional[dict], sin: Optional[dict]) -> tuple:
     """Ritorna (category, context_dict, related_entity) per il routing.
@@ -842,6 +864,11 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     # Routing
     category, ctx, related = _route_document(classification, ana, pol, sin)
 
+    # Sottocartella per tipo di card (coerente con l'upload manuale cloud-only):
+    # es. Anagrafiche/{cliente}/Carta d'identità/, Polizze/{n°}/Condizioni/
+    _tipo_cls = (classification.get("tipo_documento") or "").lower()
+    subfolder_label = _OCR_SUBFOLDER.get(_tipo_cls)
+
     # Origine per il move: se il file veniva da una sottocartella, usiamo quella.
     # Altrimenti la root INBOX.
     if src_parent_id:
@@ -850,11 +877,15 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         inbox_segments = await _resolve_category_path("inbox", {})
         src_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
     dest_segments = await _resolve_category_path(category, ctx)
+    if category in _PER_ENTITY_CATEGORIES and subfolder_label:
+        dest_segments = dest_segments + [subfolder_label]
     dest_id = await _ensure_folder_path(provider, token, dest_segments, tenant_id)
 
+    moved_ok = True
     try:
         await _move_file(provider, token, file_id, dest_id, src_id)
     except Exception as e:
+        moved_ok = False
         logger.warning("Errore move file %s: %s", name, e)
 
     # Log nella collection dei documenti smistati
@@ -882,6 +913,8 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
             await _create_crm_attachment(
                 db, tenant_id, name, file_bytes, mime,
                 classification, ana, pol, sin,
+                cloud_ref=({"provider": provider, "file_id": file_id,
+                            "path": "/".join(dest_segments)} if moved_ok else None),
             )
         except Exception as e:
             logger.warning("Creazione allegato CRM fallita per %s: %s", name, e)
@@ -959,7 +992,7 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
 async def _create_crm_attachment(
     db, tenant_id: str, filename: str, file_bytes: bytes, mime: str,
     classification: dict, ana: Optional[dict], pol: Optional[dict],
-    sin: Optional[dict],
+    sin: Optional[dict], cloud_ref: Optional[dict] = None,
 ) -> None:
     """Crea record `allegati` nel CRM collegato all'entità corretta così il file
     appare nella tab Documenti dell'anagrafica/polizza/sinistro.
@@ -1077,12 +1110,29 @@ async def _create_crm_attachment(
         logger.info("Allegato già presente, skip duplicato: %s", filename)
         return
     ext = (filename or "doc").rsplit(".", 1)[-1].lower() or "bin"
-    storage_path = f"{_os.environ.get('APP_NAME', 'assicura')}/allegati/{allegato_id}.{ext}"
-    try:
-        obj_storage.put_object(storage_path, file_bytes, mime)
-    except Exception as e:
-        logger.warning("put_object per allegato %s fallito: %s", allegato_id, e)
-        return
+    # CLOUD-ONLY: se il file è già stato spostato su Drive (cloud_ref), l'allegato
+    # referenzia quel file (nessuna copia interna). Altrimenti fallback su storage interno.
+    storage_path = ""
+    cloud_sync = None
+    pending_sync = False
+    if cloud_ref and cloud_ref.get("file_id"):
+        prov = cloud_ref.get("provider", "google_drive")
+        fid = cloud_ref["file_id"]
+        link = (f"https://drive.google.com/file/d/{fid}/view"
+                if prov == "google_drive" else None)
+        cloud_sync = {
+            "provider": prov, "file_id": fid, "name": filename,
+            "link": link, "path": cloud_ref.get("path"),
+            "doc_id": allegato_id,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }
+    else:
+        storage_path = f"{_os.environ.get('APP_NAME', 'assicura')}/allegati/{allegato_id}.{ext}"
+        try:
+            obj_storage.put_object(storage_path, file_bytes, mime)
+        except Exception as e:
+            logger.warning("put_object per allegato %s fallito: %s", allegato_id, e)
+            return
 
     allegato = {
         "id": allegato_id,
@@ -1094,6 +1144,9 @@ async def _create_crm_attachment(
         "content_type": mime,
         "size": len(file_bytes),
         "storage_path": storage_path,
+        "storage_provider": (cloud_sync["provider"] if cloud_sync else "emergent"),
+        "cloud_sync": cloud_sync,
+        "pending_sync": pending_sync,
         "descrizione": f"Importato automaticamente da Google Drive OCR ({tipo_doc})",
         "fonte": "cloud_ocr_scan",
         # Se il file è collegato a una specifica applicazione di libro matricola

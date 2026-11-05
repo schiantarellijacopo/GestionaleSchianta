@@ -3361,15 +3361,34 @@ async def ocr_documento_identita(
             )
             documento_url = doc_entry.get("url")
             if contents_retro:
-                # salva retro come file secondario interno
                 ext_r = (file_retro.filename or "retro.jpg").rsplit(".", 1)[-1].lower() or "jpg"
-                path_r = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_retro_{_uid()}.{ext_r}"
-                try:
-                    res_r = obj_storage.put_object(path_r, contents_retro, ct_retro)
-                    doc_entry["url_retro"] = f"/api/storage/{res_r['path']}"
+                retro_doc_id = _uid()
+                retro_sync = None
+                if await cloud_doc_sync.connected_providers(tenant_id):
+                    # Retro sul cloud, stessa sottocartella della card, file "(retro)"
+                    prev_retro = (doc_entry.get("cloud_sync_retro") or {})
+                    retro_sync = await cloud_doc_sync.mirror_document(
+                        tenant_id=tenant_id, entita_tipo="anagrafica", entita_id=anagrafica_id,
+                        doc_label_text=cloud_doc_sync.doc_label(tipo),
+                        file_label=f"{cloud_doc_sync.doc_label(tipo)} (retro)",
+                        doc_id=retro_doc_id, data=contents_retro, mime=ct_retro,
+                        filename=file_retro.filename or f"{tipo}_retro.{ext_r}",
+                        replace_file_id=prev_retro.get("file_id"),
+                    )
+                if retro_sync:
+                    doc_entry["cloud_sync_retro"] = retro_sync
                     doc_entry["nome_file_retro"] = file_retro.filename
-                except Exception:
-                    pass
+                    doc_entry["url_retro"] = f"/api/anagrafiche/{anagrafica_id}/documenti/{tipo}/download?lato=retro"
+                else:
+                    # Fallback interno
+                    path_r = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_retro_{retro_doc_id}.{ext_r}"
+                    try:
+                        res_r = obj_storage.put_object(path_r, contents_retro, ct_retro)
+                        doc_entry["url_retro"] = f"/api/storage/{res_r['path']}"
+                        doc_entry["storage_path_retro"] = res_r["path"]
+                        doc_entry["nome_file_retro"] = file_retro.filename
+                    except Exception:
+                        pass
             await db.anagrafiche.update_one(
                 {"id": anagrafica_id},
                 {"$set": {f"documenti.{tipo}": doc_entry, "updated_at": _now_iso()}},

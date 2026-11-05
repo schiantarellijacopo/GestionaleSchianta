@@ -163,8 +163,13 @@ async def mirror_document(
     *, tenant_id: str, entita_tipo: str, entita_id: str,
     doc_label_text: str, doc_id: str, data: bytes, mime: str, filename: str,
     replace_file_id: Optional[str] = None, provider: Optional[str] = None,
+    file_label: Optional[str] = None,
 ) -> Optional[dict]:
     """Carica un documento sul cloud nella sottocartella del tipo. Best-effort.
+
+    `doc_label_text` nomina la SOTTOCARTELLA (tipo card); `file_label`, se passato,
+    nomina il FILE (per varianti nella stessa cartella, es. retro CI). Default: usa
+    `doc_label_text` anche per il file.
 
     Ritorna {provider, file_id, name, link, path, doc_id, synced_at} oppure None se
     nessun cloud è collegato / in caso di errore (non solleva mai).
@@ -192,7 +197,8 @@ async def mirror_document(
             return None
 
         label = _sanitize_folder_name(doc_label_text or filename or "documento")
-        # Cartella: Sezione/{entità}/{Tipo documento}
+        file_lbl = _sanitize_folder_name(file_label) if file_label else label
+        # Cartella: Sezione/{entità}/{Tipo documento} (dal label cartella)
         segments = await _resolve_category_path(category, {ctx_key: entity_name})
         segments = segments + [label]
         folder_id = await _ensure_folder_path(prov, token, segments, tenant_id)
@@ -202,7 +208,7 @@ async def mirror_document(
         # Sostituzione: NON eliminiamo subito la versione precedente. Prima carichiamo
         # la nuova, poi (solo se l'upload riesce) eliminiamo la vecchia → niente perdita dati.
         ext = _ext(filename)
-        name = f"{label} [{doc_id}].{ext}"
+        name = f"{file_lbl} [{doc_id}].{ext}"
         res = await _put_file(prov, token, folder_id, name, data, mime)
         if replace_file_id and res.get("id") and res["id"] != replace_file_id:
             await delete_cloud_file(tenant_id, prov, replace_file_id)

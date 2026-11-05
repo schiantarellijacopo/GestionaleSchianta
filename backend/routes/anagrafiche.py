@@ -1292,9 +1292,10 @@ async def upload_documento_anagrafica(
 
 
 @router.get("/anagrafiche/{aid}/documenti/{tipo}/download")
-async def download_documento_anagrafica(aid: str, tipo: str,
+async def download_documento_anagrafica(aid: str, tipo: str, lato: str = "fronte",
                                         user: dict = Depends(current_user)):
-    """Scarica/visualizza un documento della card: dal cloud se è lì, altrimenti dallo storage interno."""
+    """Scarica/visualizza un documento della card: dal cloud se è lì, altrimenti dallo storage interno.
+    `lato=retro` serve il retro (per CI fronte/retro)."""
     if tipo not in ANAGRAFICA_DOC_TIPI:
         raise HTTPException(400, "Tipo non valido")
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, f"documenti.{tipo}": 1})
@@ -1304,29 +1305,30 @@ async def download_documento_anagrafica(aid: str, tipo: str,
     # ACL cliente: solo la propria anagrafica
     if user.get("role") == "cliente" and user.get("anagrafica_id") != aid:
         raise HTTPException(403, "Permesso negato")
-    nome = entry.get("nome_file") or f"{tipo}.pdf"
+    is_retro = lato == "retro"
+    nome = (entry.get("nome_file_retro") if is_retro else entry.get("nome_file")) or f"{tipo}.pdf"
     mime = entry.get("mime") or "application/octet-stream"
-    cloud = entry.get("cloud_sync") or {}
-    if cloud.get("file_id") and not entry.get("pending_sync"):
+    cloud = (entry.get("cloud_sync_retro") if is_retro else entry.get("cloud_sync")) or {}
+    sp = entry.get("storage_path_retro") if is_retro else entry.get("storage_path")
+    if cloud.get("file_id"):
         import cloud_doc_sync
         tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
         res = await cloud_doc_sync.download_cloud_file(
             tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
         if not res:
             raise HTTPException(503, "Impossibile scaricare il documento dal cloud")
-        data, ctype = res
+        ddata, ctype = res
         return StreamingResponse(
-            _io.BytesIO(data), media_type=mime or ctype,
+            _io.BytesIO(ddata), media_type=mime or ctype,
             headers={"Content-Disposition": f'inline; filename="{nome}"'})
-    sp = entry.get("storage_path")
     if not sp:
         raise HTTPException(404, "File non disponibile")
     try:
-        data, ctype = obj_storage.get_object(sp)
+        ddata, ctype = obj_storage.get_object(sp)
     except Exception as e:
         raise HTTPException(503, f"Errore download: {e}")
     return StreamingResponse(
-        _io.BytesIO(data), media_type=mime or ctype,
+        _io.BytesIO(ddata), media_type=mime or ctype,
         headers={"Content-Disposition": f'inline; filename="{nome}"'})
 
 
@@ -1338,17 +1340,19 @@ async def delete_documento_anagrafica(aid: str, tipo: str,
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, f"documenti.{tipo}": 1})
     entry = ((ana or {}).get("documenti") or {}).get(tipo) if ana else None
     if entry:
-        cloud = entry.get("cloud_sync") or {}
-        if cloud.get("file_id"):
-            import cloud_doc_sync
-            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
-            await cloud_doc_sync.delete_cloud_file(
-                tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
-        elif entry.get("storage_path"):
-            try:
-                obj_storage.delete_object(entry["storage_path"])
-            except Exception:
-                pass
+        import cloud_doc_sync
+        tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+        for ck in ("cloud_sync", "cloud_sync_retro"):
+            c = entry.get(ck) or {}
+            if c.get("file_id"):
+                await cloud_doc_sync.delete_cloud_file(
+                    tenant_id, c.get("provider", "google_drive"), c["file_id"])
+        for spk in ("storage_path", "storage_path_retro"):
+            if entry.get(spk):
+                try:
+                    obj_storage.delete_object(entry[spk])
+                except Exception:
+                    pass
     await db.anagrafiche.update_one(
         {"id": aid},
         {"$unset": {f"documenti.{tipo}": ""}, "$set": {"updated_at": _now_iso()}},

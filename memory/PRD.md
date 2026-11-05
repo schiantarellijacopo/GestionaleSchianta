@@ -297,3 +297,9 @@ Implementazione:
 
 Verifica: iteration_132.json → backend 7/7 pass + frontend OK, testato su Google Drive REALE (tenant-principale-schiantarelli). Confermato su Drive API: replace cancella il vecchio file_id, delete rimuove, nome file `Etichetta [doc_id].ext`.
 Backlog (non bloccante): `sync_pending_for_tenant` usa get/delete sincroni in loop async (wrap run_in_threadpool); OCR CI retro resta interno; prepara-firma lascia un PDF materializzato interno (cleanup post-firma); S3 driver da implementare quando l'utente fornirà le chiavi AWS.
+
+### 2026-11-05 (follow-up) — INBOX/OCR allineata + retro CI su cloud
+- INBOX OCR (`cloud_ocr_scanner._process_file`) ora sposta il file su Drive nella stessa struttura con SOTTOCARTELLA per tipo card: `Anagrafiche/{cliente}/{Tipo}/`, `Polizze/{n°}/{Tipo}/`, `Sinistri/{n°}/{Tipo}/` (mappa `_OCR_SUBFOLDER` + `_PER_ENTITY_CATEGORIES`; quietanze restano per anno).
+- `_create_crm_attachment` ora crea allegati CLOUD-ONLY: se il file è stato spostato su Drive (cloud_ref) l'allegato referenzia quel file (`cloud_sync`, storage_path=''), niente copia interna duplicata. Fallback interno solo se il move fallisce.
+- Retro CI (endpoint OCR `/api/utility/ocr-documento-identita`): il retro ora va su Drive nella stessa sottocartella del fronte, file `… (retro) [id].ext`; campo `cloud_sync_retro` + `url_retro` = `…/download?lato=retro`. Delete rimuove fronte+retro dal cloud. `mirror_document` ha nuovo param `file_label` (nome file diverso dal nome cartella).
+- Verificato su Drive reale: path/nome fronte e retro, allegato OCR cloud-only (storage_path='').
