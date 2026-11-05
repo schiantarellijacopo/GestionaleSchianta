@@ -209,7 +209,7 @@ export default function DocumentiInbox() {
                         onClick={async () => {
                             try {
                                 const r = await api.post("/documenti-inbox/retry-auto-archive");
-                                toast.success(`Auto-archiviati ${r.data.archived} · falliti ${r.data.failed}`);
+                                toast.success(`Auto-archiviati ${r.data.archived} · ri-abbinati ${r.data.rematched || 0} · falliti ${r.data.failed}`);
                                 load();
                             } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
                         }} data-testid="di-retry-auto">

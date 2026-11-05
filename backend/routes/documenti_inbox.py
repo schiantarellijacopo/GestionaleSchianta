@@ -735,14 +735,69 @@ async def elimina_inbox(
     return {"ok": True}
 
 
+async def _rematch_pending_targets(inb: dict) -> tuple:
+    """Ri-cerca anagrafica/polizza nel DB ATTUALE usando i dati OCR salvati.
+    Necessario quando la polizza/anagrafica/targa è stata creata DOPO l'ingest
+    del documento (il primo scan non la trovava e l'aveva lasciata senza target).
+    Ritorna (target_anagrafica | None, target_polizza | None)."""
+    dati = inb.get("dati") or {}
+    target_a = inb.get("target_anagrafica") or None
+    target_p = inb.get("target_polizza") or None
+
+    # Anagrafica: per CF, poi fallback cognome + nome
+    if not (target_a or {}).get("id"):
+        cf = (dati.get("codice_fiscale") or "").upper().strip()
+        if cf:
+            anag = await db.anagrafiche.find_one(
+                {"codice_fiscale": cf},
+                {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
+            if anag:
+                target_a = anag
+        if not (target_a or {}).get("id") and dati.get("cognome") and dati.get("nome"):
+            anag = await db.anagrafiche.find_one(
+                {"cognome": {"$regex": f"^{re.escape(dati['cognome'])}$", "$options": "i"},
+                 "nome": {"$regex": f"^{re.escape(dati['nome'])}$", "$options": "i"}},
+                {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
+            if anag:
+                target_a = anag
+
+    # Polizza: per numero_polizza/numero, poi per targa
+    if not (target_p or {}).get("id"):
+        nump = (dati.get("numero_polizza") or dati.get("numero") or "").strip()
+        pol = None
+        if nump:
+            pol = await db.polizze.find_one(
+                {"$or": [{"numero_polizza": nump}, {"numero": nump}]},
+                {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1})
+        if not pol:
+            targa = (dati.get("targa") or "").upper().strip()
+            if targa:
+                pol = await db.polizze.find_one(
+                    {"targa": targa},
+                    {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1})
+        if pol:
+            target_p = pol
+            if not (target_a or {}).get("id") and pol.get("contraente_id"):
+                anag = await db.anagrafiche.find_one(
+                    {"id": pol["contraente_id"]},
+                    {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
+                if anag:
+                    target_a = anag
+
+    return target_a, target_p
+
+
 @router.post("/documenti-inbox/retry-auto-archive")
 async def retry_auto_archive(
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ) -> dict:
     """Riprocessa tutti i documenti pending che sono eleggibili per auto-archiviazione
-    (confidenza alta + tipo riconosciuto + anagrafica trovata)."""
+    (confidenza alta + tipo riconosciuto + anagrafica/polizza trovata).
+    Ri-cerca ogni volta nel DB attuale, così recupera i documenti arrivati PRIMA
+    che la relativa polizza/anagrafica/targa fosse creata."""
     archived = 0
     failed = 0
+    rematched = 0
     errors = []
     async for inb in db.documenti_inbox.find({"stato": "pending"}, {"_id": 0}):
         if inb.get("confidenza") != "alta":
@@ -753,8 +808,20 @@ async def retry_auto_archive(
         routed_entita, _ = DOC_ROUTING.get(tipo, ("anagrafica", "altro"))
         if routed_entita == "sinistro":
             continue  # sinistro → solo manuale
-        target_a = inb.get("target_anagrafica") or {}
-        target_p = inb.get("target_polizza") or {}
+
+        # 🔄 Ri-match contro il DB attuale (polizze/targhe/anagrafiche create dopo l'ingest)
+        new_a, new_p = await _rematch_pending_targets(inb)
+        persist = {}
+        if (new_a or {}).get("id") and not (inb.get("target_anagrafica") or {}).get("id"):
+            persist["target_anagrafica"] = new_a
+        if (new_p or {}).get("id") and not (inb.get("target_polizza") or {}).get("id"):
+            persist["target_polizza"] = new_p
+        if persist:
+            await db.documenti_inbox.update_one({"id": inb["id"]}, {"$set": persist})
+            rematched += 1
+
+        target_a = new_a or (inb.get("target_anagrafica") or {}) or {}
+        target_p = new_p or (inb.get("target_polizza") or {}) or {}
         if routed_entita == "anagrafica" and not target_a.get("id"):
             continue
         if routed_entita == "polizza" and not target_p.get("id"):
@@ -775,4 +842,4 @@ async def retry_auto_archive(
             await db.documenti_inbox.update_one({"id": inb["id"]}, {"$set": {
                 "auto_archive_errore": str(e)[:300],
             }})
-    return {"archived": archived, "failed": failed, "errors": errors}
+    return {"archived": archived, "failed": failed, "rematched": rematched, "errors": errors}

@@ -681,7 +681,16 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
 
     # 1) Trova (o crea) la cartella INBOX, rispettando l'eventuale cartella radice
     #    custom scelta dall'agenzia (connection.folder_id + root_is_custom).
+    #    Invalidiamo la cache INBOX così lo scan punta SEMPRE alla cartella live
+    #    (evita di leggere una vecchia INBOX orfana/vuota dopo un cambio cartella).
     inbox_segments = await _resolve_category_path("inbox", {})
+    try:
+        await db.cloud_folder_cache.delete_many({
+            "tenant_id": tenant_id, "provider": provider,
+            "path": {"$regex": "INBOX"},
+        })
+    except Exception as e:
+        logger.debug("Invalidazione cache INBOX fallita: %s", e)
     try:
         inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
     except Exception as e:
@@ -702,12 +711,16 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
     files = await _list_inbox_all_files(provider, token, inbox_id)
     if not files:
         return {"letti": 0, "abbinati": 0, "in_attesa": 0, "entries": [],
-                "provider": provider}
+                "provider": provider, "inbox_folder_id": inbox_id,
+                "reason": "INBOX trovata ma vuota: nessun file da elaborare "
+                          "(controlla di aver trascinato i file nella cartella INBOX "
+                          "corretta, dentro la cartella collegata al gestionale)."}
 
     report = {
         "letti": len(files), "abbinati": 0, "in_attesa": 0,
         "anagrafiche_create": 0, "campi_aggiornati_tot": 0,
         "errori": [], "entries": [], "provider": provider,
+        "inbox_folder_id": inbox_id,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
