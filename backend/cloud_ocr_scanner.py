@@ -739,6 +739,14 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
             logger.exception("Errore processing file %s", f.get("name"))
             report["errori"].append({"file": f.get("name"), "error": str(e)[:200]})
             report["in_attesa"] += 1
+            # Fallback: anche se l'elaborazione fallisce, mettiamo COMUNQUE il file
+            # nella Inbox del CRM ("da associare manualmente") così non va perso, poi
+            # si prosegue con il file successivo.
+            try:
+                await _push_failed_to_manual_inbox(db, provider, token, tenant_id, f, str(e))
+            except Exception as e2:
+                logger.warning("Push errore→inbox CRM fallito per %s: %s",
+                               f.get("name"), e2)
 
     report["ended_at"] = datetime.now(timezone.utc).isoformat()
     report["manual"] = manual
@@ -1306,6 +1314,35 @@ async def _create_crm_attachment(
                 "descrizione": f"Quietanza (collegata al titolo) — OCR automatico",
             }
             await db.allegati.insert_one(allegato_titolo)
+
+
+async def _push_failed_to_manual_inbox(
+    db, provider: str, token: str, tenant_id: str, f: dict, error_msg: str,
+) -> Optional[str]:
+    """Fallback: un file la cui elaborazione OCR è fallita viene comunque inserito
+    nella Inbox del CRM ('da associare manualmente'), così l'utente lo ritrova e lo
+    gestisce a mano. Best-effort sul download; evita duplicati sullo stesso file Drive."""
+    file_id = f.get("id")
+    name = f.get("name", "documento")
+    mime = f.get("mimeType", "application/octet-stream")
+    # Dedup: se esiste già un doc inbox pending per questo file Drive, non ricrearlo.
+    existing = await db.documenti_inbox.find_one({
+        "cloud_file_id": file_id, "stato": "pending",
+    })
+    if existing:
+        return existing.get("id")
+    try:
+        file_bytes = await _download_file(provider, token, file_id)
+    except Exception:
+        file_bytes = b""
+    classification = {
+        "tipo_documento": "altro", "confidenza": "bassa",
+        "dati_estratti": {}, "scan_error": (error_msg or "")[:200],
+    }
+    return await _push_to_manual_inbox(
+        db, tenant_id, name, file_bytes, mime,
+        classification, None, None, None, file_id, provider,
+    )
 
 
 async def _push_to_manual_inbox(
