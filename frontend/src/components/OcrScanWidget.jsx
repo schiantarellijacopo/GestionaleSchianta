@@ -47,18 +47,53 @@ export default function OcrScanWidget({ variant = "full", onClickPending }) {
         try {
             const fd = new FormData();
             fd.append("provider", "google_drive");
-            const r = await api.post("/librerie/cloud-storage/scan-now", fd, {
-                timeout: 900_000,
-            });
+            // Timestamp dell'ultimo run PRIMA di avviare: serve per capire quando ne arriva uno nuovo.
+            const prevRunAt = summary?.latest_run?.created_at || summary?.latest_run?.ended_at || null;
+            const r = await api.post("/librerie/cloud-storage/scan-now", fd);
+
+            // Nuovo flusso asincrono: lo scan parte in background, facciamo polling del riepilogo.
+            if (r.data.started) {
+                toast.info(r.data.message || "Scansione avviata in background…");
+                let attempts = 0;
+                const maxAttempts = 60; // ~5 min (5s * 60)
+                const poll = async () => {
+                    attempts += 1;
+                    try {
+                        const s = await api.get("/librerie/cloud-storage/scan-summary");
+                        const run = s.data?.latest_run;
+                        const runAt = run?.created_at || run?.ended_at || null;
+                        const isNew = run && runAt && runAt !== prevRunAt;
+                        if (isNew) {
+                            setSummary(s.data);
+                            toast.success(`Scan completato: ${run.letti ?? 0} letti, ${run.abbinati ?? 0} abbinati, ${run.in_attesa ?? 0} in attesa`);
+                            setScanning(false);
+                            return;
+                        }
+                    } catch (_) { /* riprova */ }
+                    if (attempts >= maxAttempts) {
+                        setScanning(false);
+                        load();
+                        toast.info("Scansione ancora in corso: l'esito comparirà appena pronto.");
+                        return;
+                    }
+                    setTimeout(poll, 5000);
+                };
+                setTimeout(poll, 5000);
+                return;
+            }
+
+            // Compatibilità con la vecchia risposta sincrona.
             if (r.data.skipped) {
                 toast.info(r.data.reason || "Scan saltato");
             } else {
                 toast.success(`Scan completato: ${r.data.letti} letti, ${r.data.abbinati} abbinati, ${r.data.in_attesa} in attesa` + (r.data.campi_aggiornati_tot ? `, ${r.data.campi_aggiornati_tot} campi aggiornati` : ""));
             }
             load();
+            setScanning(false);
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore scan");
-        } finally { setScanning(false); }
+            setScanning(false);
+        }
     };
 
     if (!summary || summary.error) {

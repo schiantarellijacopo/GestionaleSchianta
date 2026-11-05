@@ -1310,12 +1310,38 @@ async def scan_inbox_now(
 ):
     """Trigger MANUALE dello scan OCR della cartella INBOX (per test o urgenze).
 
-    In produzione lo scan gira automaticamente ogni ora dalle 22:00 alle 06:00 UTC.
+    Lo scan gira in BACKGROUND e la risposta torna subito: con molti file l'OCR+LLM
+    richiede diversi minuti e il proxy ingress chiuderebbe la richiesta sincrona
+    (timeout ~30-60s) facendo apparire un "Errore scan" pur avendo lo scan in corso.
+    La UI fa polling di /scan-summary per mostrare l'esito appena pronto.
+    In produzione lo scan gira anche automaticamente dalle 22:00 alle 06:00 UTC.
     """
     tenant = _tenant_id(user)
     from cloud_ocr_scanner import scan_tenant_inbox
-    report = await scan_tenant_inbox(db, tenant, provider, manual=True)
-    return report
+    import asyncio
+    from database import set_current_user, reset_current_user
+
+    # Pre-check leggero: se non c'è connessione, rispondi subito con un messaggio chiaro
+    # (così l'utente non resta in attesa di un background che verrebbe saltato).
+    await _backfill_agenzia_label(provider, tenant)
+    if not await db.cloud_connections.find_one({"tenant_id": tenant, "provider": provider}):
+        await _adopt_legacy_connection(provider, tenant)
+    if not await db.cloud_connections.find_one({"tenant_id": tenant, "provider": provider}):
+        raise HTTPException(409, "Account cloud non collegato per questa agenzia")
+
+    async def _run_scan():
+        token = set_current_user(user)
+        try:
+            await scan_tenant_inbox(db, tenant, provider, manual=True)
+        except Exception as e:
+            log.exception("Scan manuale in background fallito (tenant=%s): %s",
+                          tenant, str(e)[:300])
+        finally:
+            reset_current_user(token)
+
+    asyncio.create_task(_run_scan())
+    return {"started": True,
+            "message": "Scansione avviata in background: i risultati compariranno tra qualche istante."}
 
 
 @router.get("/scan-history")
