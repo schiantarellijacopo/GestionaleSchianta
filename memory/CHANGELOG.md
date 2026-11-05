@@ -1,6 +1,11 @@
 # Changelog — Axicura CRM
 
-## 2026-06 — Estratto conto collaboratore: "porta la provvigione del titolo"
+## 2026-06 — Voci manuali collaboratore: CRUD libero a Prima Nota chiusa
+- **Richiesta utente**: creare/modificare/eliminare una voce manuale nell'Estratto conto collaboratore anche con Prima Nota chiusa (la voce entra in Prima Nota solo col pagamento dell'estratto).
+- **Backend** (`server.py`): rimosso `assert_giornata_aperta` da `delete_voce_manuale_collab`; nuovo endpoint `PUT /collaboratori/{cid}/voci-manuali/{vid}` (data/causale/importo/note) senza blocco giornata. Entrambi restano bloccati solo se la voce è già `pagata`.
+- **Frontend** (`Provvigioni.jsx`): pulsante Modifica (matita, `edit-voce-{id}`) accanto a Elimina; `NuovaVoceDialog` ora supporta la modalità modifica (prefill + PUT).
+- **Verifica**: API create/edit/delete su data 2026-11-03 (Prima Nota chiusa) OK; smoke UI → dialog "Modifica voce manuale" precompilato correttamente.
+
 - **Bug utente**: modificando la provvigione del collaboratore nel titolo (ripartizione `provvigioni_operatori`), l'Estratto conto collaboratore NON la mostrava: ricalcolava sempre la quota dallo schema provvigionale (es. 4,5%), ignorando il valore salvato sul titolo.
 - **Scelta utente**: l'estratto deve mostrare ESATTAMENTE la provvigione riportata sul titolo (a mano o da schema, non cambia), **ma solo per i titoli modificati d'ora in avanti** (lo storico importato resta calcolato da schema).
 - **Fix** (`server.py`, `db_models.py`):

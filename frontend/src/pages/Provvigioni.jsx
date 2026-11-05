@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown, FileSpreadsheet, FileText, Search, ListPlus } from "lucide-react";
+import { Printer, Wallet, Users, Plus, Trash2, Pencil, ChevronRight, ChevronDown, FileSpreadsheet, FileText, Search, ListPlus } from "lucide-react";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
@@ -28,6 +28,7 @@ export default function Provvigioni() {
     const [selectedTitoli, setSelectedTitoli] = useState(new Set());
     const [selectedVoci, setSelectedVoci] = useState(new Set());
     const [voceOpen, setVoceOpen] = useState(false);
+    const [voceEdit, setVoceEdit] = useState(null);
     const [base, setBase] = useState("incasso");
     const [bozze, setBozze] = useState([]);
     const [payBozza, setPayBozza] = useState(null);
@@ -435,7 +436,15 @@ export default function Provvigioni() {
                                                     <td className={`num text-right font-semibold ${v.importo >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                                                         {v.importo >= 0 ? "+" : ""}{fmtEur(v.importo)}
                                                     </td>
-                                                    <td>
+                                                    <td className="flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => setVoceEdit(v)}
+                                                            className="text-slate-500 hover:text-sky-700"
+                                                            data-testid={`edit-voce-${v.id}`}
+                                                            title="Modifica"
+                                                        >
+                                                            <Pencil size={14} />
+                                                        </button>
                                                         <button
                                                             onClick={() => rimuoviVoce(v.id)}
                                                             className="text-rose-600 hover:text-rose-800"
@@ -464,6 +473,14 @@ export default function Provvigioni() {
                 <NuovaVoceDialog
                     collab={sel}
                     onClose={() => { setVoceOpen(false); load(); }}
+                />
+            )}
+
+            {voceEdit && sel && (
+                <NuovaVoceDialog
+                    collab={sel}
+                    voce={voceEdit}
+                    onClose={() => { setVoceEdit(null); load(); }}
                 />
             )}
 
@@ -550,23 +567,28 @@ function Stat({ label, value, accent }) {
     );
 }
 
-function NuovaVoceDialog({ collab, onClose }) {
+function NuovaVoceDialog({ collab, voce, onClose }) {
+    const isEdit = !!voce;
     const today = new Date().toISOString().slice(0, 10);
-    const [data, setData] = useState(today);
-    const [causale, setCausale] = useState("");
-    const [segno, setSegno] = useState("+");
-    const [importo, setImporto] = useState("");
-    const [note, setNote] = useState("");
+    const [data, setData] = useState(voce?.data || today);
+    const [causale, setCausale] = useState(voce?.causale || "");
+    const [segno, setSegno] = useState(voce && voce.importo < 0 ? "-" : "+");
+    const [importo, setImporto] = useState(voce != null ? String(Math.abs(voce.importo)) : "");
+    const [note, setNote] = useState(voce?.note || "");
 
     const submit = async () => {
         if (!causale.trim()) { toast.error("Inserisci la causale"); return; }
         const imp = parseFloat(importo);
         if (isNaN(imp) || imp <= 0) { toast.error("Inserisci un importo valido (in valore assoluto)"); return; }
+        const payload = { data, causale, importo: segno === "-" ? -imp : imp, note };
         try {
-            await api.post(`/collaboratori/${collab.id}/voci-manuali`, {
-                data, causale, importo: segno === "-" ? -imp : imp, note,
-            });
-            toast.success("Voce manuale aggiunta");
+            if (isEdit) {
+                await api.put(`/collaboratori/${collab.id}/voci-manuali/${voce.id}`, payload);
+                toast.success("Voce manuale aggiornata");
+            } else {
+                await api.post(`/collaboratori/${collab.id}/voci-manuali`, payload);
+                toast.success("Voce manuale aggiunta");
+            }
             onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
@@ -574,7 +596,7 @@ function NuovaVoceDialog({ collab, onClose }) {
     return (
         <Dialog open onOpenChange={(o) => !o && onClose()}>
             <DialogContent className="max-w-md">
-                <DialogHeader><DialogTitle>Nuova voce manuale per {collab.name}</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>{isEdit ? "Modifica voce manuale" : "Nuova voce manuale"} per {collab.name}</DialogTitle></DialogHeader>
                 <div className="space-y-3 py-2">
                     <div className="bg-amber-50 border border-amber-200 rounded p-3 text-xs text-amber-900">
                         Inserisci un <b>bonus (+)</b> o una <b>trattenuta/acconto (−)</b>. Verrà aggiunta al netto da pagare al collaboratore.
@@ -618,7 +640,7 @@ function NuovaVoceDialog({ collab, onClose }) {
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Annulla</Button>
-                    <Button onClick={submit} className="bg-sky-700 hover:bg-sky-800" data-testid="voce-save">Salva voce</Button>
+                    <Button onClick={submit} className="bg-sky-700 hover:bg-sky-800" data-testid="voce-save">{isEdit ? "Salva modifiche" : "Salva voce"}</Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>

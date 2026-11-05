@@ -989,11 +989,42 @@ async def delete_voce_manuale_collab(
         raise HTTPException(404, "Voce non trovata")
     if v.get("pagata"):
         raise HTTPException(400, "Voce già pagata: non eliminabile")
-    # blocco se la data della voce ricade in una giornata di prima nota chiusa
-    await assert_giornata_aperta(v.get("data"), azione="eliminare la voce manuale")
+    # NB: niente blocco "Prima Nota chiusa". Una voce manuale NON tocca la Prima Nota
+    # finché non viene PAGATA (il movimento nasce solo col pagamento dell'estratto).
+    # Quindi crearla/modificarla/eliminarla è sempre consentito se non è ancora pagata.
     await db.voci_manuali_collab.delete_one({"id": vid})
     await log_attivita(user, "delete", "voce_manuale_collab", vid)
     return {"ok": True}
+
+
+@api.put("/collaboratori/{cid}/voci-manuali/{vid}")
+async def update_voce_manuale_collab(
+    cid: str, vid: str, body: dict, user=Depends(require_user("admin")),
+):
+    v = await db.voci_manuali_collab.find_one({"id": vid, "collaboratore_id": cid}, {"_id": 0})
+    if not v:
+        raise HTTPException(404, "Voce non trovata")
+    if v.get("pagata"):
+        raise HTTPException(400, "Voce già pagata: non modificabile")
+    upd: dict = {}
+    if "data" in body:
+        upd["data"] = body.get("data") or _now_iso()[:10]
+    if "causale" in body:
+        if not str(body.get("causale") or "").strip():
+            raise HTTPException(400, "Causale obbligatoria")
+        upd["causale"] = str(body["causale"]).strip()
+    if "importo" in body:
+        if body.get("importo") in (None, ""):
+            raise HTTPException(400, "Importo obbligatorio (positivo = bonus, negativo = trattenuta)")
+        upd["importo"] = float(body["importo"])
+    if "note" in body:
+        upd["note"] = body.get("note")
+    if not upd:
+        return v
+    # NB: nessun blocco "Prima Nota chiusa" (vedi delete): la voce non è ancora pagata.
+    await db.voci_manuali_collab.update_one({"id": vid}, {"$set": upd})
+    await log_attivita(user, "update", "voce_manuale_collab", vid)
+    return await db.voci_manuali_collab.find_one({"id": vid}, {"_id": 0})
 
 
 # --- Voci manuali (DARE/AVERE) sull'estratto conto compagnia ---
