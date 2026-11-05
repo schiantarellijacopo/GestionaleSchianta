@@ -748,28 +748,36 @@ async def estratto_provvigioni(
     pol_filter = {"collaboratore_id": cid}
     pol_ids = [p["id"] async for p in db.polizze.find(pol_filter, {"_id": 0, "id": 1})]
 
-    # Cutoff setup: escludi il pregresso (dati gestiti nel vecchio gestionale)
+    # Cutoff setup: escludi il pregresso (dati gestiti nel vecchio gestionale).
+    # Il cutoff è un confine di go-live sulla DATA INCASSO, NON sul periodo scelto
+    # dall'utente (che agisce sulla data copertura). NON va mescolato con dal/al.
     _cutoff = await _setup_cutoff_date()
-    if _cutoff:
-        dal = max(dal, _cutoff) if dal else _cutoff
 
     titolo_filter = {"polizza_id": {"$in": pol_ids}, "pregresso": {"$ne": True}}
-    inc_cond = {}
-    if dal: inc_cond["$gte"] = dal
-    if al: inc_cond["$lte"] = al
+    _and = []
+    # ★ Il filtro periodo Dal/Al scelto dall'utente agisce sulla colonna DATA COPERTURA.
+    date_cond = {}
+    if dal: date_cond["$gte"] = dal
+    if al: date_cond["$lte"] = al
+    if date_cond:
+        _and.append({"data_copertura": date_cond})
+    # Cutoff go-live: solo sui titoli incassati (i coperti-non-incassati hanno incasso nullo).
+    if _cutoff:
+        _and.append({"$or": [
+            {"data_incasso": {"$gte": _cutoff}},
+            {"data_incasso": None},
+            {"data_incasso": {"$exists": False}},
+        ]})
     if base == "copertura":
-        # incassati nel periodo (per data_incasso) OPPURE coperti nel periodo ma non ancora incassati
-        cop_cond = dict(inc_cond) if inc_cond else {}
-        or_clause = [{"stato": "incassato", **({"data_incasso": inc_cond} if inc_cond else {})}]
-        cov = {"stato": {"$nin": ["incassato", "stornato", "annullato"]}, "data_copertura": {"$ne": None}}
-        if cop_cond:
-            cov["data_copertura"] = cop_cond
-        or_clause.append(cov)
-        titolo_filter["$or"] = or_clause
+        _and.append({"$or": [
+            {"stato": "incassato"},
+            {"stato": {"$nin": ["incassato", "stornato", "annullato"]},
+             "data_copertura": {"$ne": None}},
+        ]})
     else:
         titolo_filter["stato"] = "incassato"
-        if inc_cond:
-            titolo_filter["data_incasso"] = inc_cond
+    if _and:
+        titolo_filter["$and"] = _and
 
     titoli = await db.titoli.find(titolo_filter, {"_id": 0}).to_list(5000)
     # arricchimento polizza/contraente
@@ -1601,39 +1609,157 @@ async def get_pagamento_dettaglio(
     }
 
 
+async def _provvigioni_export_dataset(cid, dal, al, base, user,
+                                      bozza_id=None, q=None, solo_da_pagare=False):
+    """Dataset condiviso per PDF/Excel/CSV della pagina provvigioni.
+    Filtra per lista salvata (bozza_id), ricerca testuale (q) o solo-da-pagare."""
+    data = await estratto_provvigioni(cid, dal=dal, al=al, base=base, user=user)
+    righe = list(data.get("righe") or [])
+    voci = list(data.get("voci_manuali") or [])
+    if bozza_id:
+        from tenant import tenant_filter
+        bz = await db.provvigioni_bozze.find_one(
+            {"id": bozza_id, "collaboratore_id": cid, **(tenant_filter(user) or {})}, {"_id": 0})
+        if not bz:
+            raise HTTPException(404, "Lista salvata non trovata")
+        tset = set(bz.get("titoli_ids") or [])
+        vset = set(bz.get("voci_ids") or [])
+        righe = [r for r in righe if r.get("titolo_id") in tset]
+        voci = [v for v in voci if v.get("id") in vset]
+        data = {**data, "_bozza": bz}
+    elif solo_da_pagare:
+        righe = [r for r in righe if not r.get("gia_pagato") and not r.get("in_bozza")]
+        voci = [v for v in voci if not v.get("pagata") and not v.get("in_bozza")]
+    if q:
+        ql = q.strip().lower()
+        righe = [r for r in righe if ql in str(r.get("contraente") or "").lower()
+                 or ql in str(r.get("numero_polizza") or "").lower()
+                 or ql in str(r.get("ramo") or "").lower()]
+    return data, righe, voci
+
+
+_PROVV_EXPORT_HEADERS = ["Data copertura", "Data incasso", "N. polizza", "Contraente",
+                         "Ramo", "Premio €", "Provvigione €", "Pagata"]
+
+
+def _provv_export_rows(righe, voci):
+    rows = []
+    for r in righe:
+        rows.append([r.get("data_copertura", ""), r.get("data_incasso", ""),
+                     r.get("numero_polizza", ""), r.get("contraente", ""),
+                     r.get("ramo", ""), r.get("importo_lordo", 0), r.get("provvigione", 0),
+                     "SÌ" if r.get("gia_pagato") else "NO"])
+    for v in voci:
+        rows.append(["", v.get("data", ""), "—", "VOCE MANUALE", v.get("causale", ""),
+                     "", v.get("importo", 0), "SÌ" if v.get("pagata") else "NO"])
+    return rows
+
+
 @api.get("/stampa/provvigioni/{cid}")
 async def stampa_provvigioni(cid: str, dal: Optional[str] = None, al: Optional[str] = None,
+                             base: str = "incasso", bozza_id: Optional[str] = None,
+                             q: Optional[str] = None, solo_da_pagare: bool = False,
                              user=Depends(require_user("admin", "collaboratore", "dipendente"))):
-    data = await estratto_provvigioni(cid, dal, al, user)
+    data, righe, voci = await _provvigioni_export_dataset(
+        cid, dal, al, base, user, bozza_id=bozza_id, q=q, solo_da_pagare=solo_da_pagare)
     collab = data["collaboratore"]
-    headers = ["Data", "N. polizza", "Contraente", "Ramo", "Premio €", "Provvigione €", "Pagata"]
-    rows = []
-    for r in data["righe"]:
-        rows.append([r.get("data_incasso", ""), r.get("numero_polizza", ""),
-                     r.get("contraente", ""), r.get("ramo", ""),
-                     r.get("importo_lordo", 0), r.get("provvigione", 0),
-                     "SÌ" if r.get("gia_pagato") else "NO"])
+    rows = _provv_export_rows(righe, voci)
     tot = data["totali"]
-    # Voci manuali
-    for v in data.get("voci_manuali", []):
-        rows.append([v.get("data", ""), "—", "VOCE MANUALE", v.get("causale", ""),
-                     "", v.get("importo", 0),
-                     "SÌ" if v.get("pagata") else "NO"])
-    rows.append(["", "", "", "TOTALE LORDO", "", tot["provvigioni_lorde_periodo"], ""])
-    rows.append(["", "", "", "DA PAGARE", "", tot["provvigioni_da_pagare"], ""])
-    rows.append(["", "", "", "RITENUTA ACCONTO", "", tot["ritenuta_acconto_calcolata"], ""])
-    rows.append(["", "", "", "CONTRIBUTI", "", tot["contributi_calcolati"], ""])
-    rows.append(["", "", "", "VOCI MANUALI", "", tot.get("voci_manuali_da_pagare", 0), ""])
-    rows.append(["", "", "", "NETTO DA PAGARE", "", tot["netto_da_pagare"], ""])
+    titolo_extra = ""
+    if data.get("_bozza"):
+        titolo_extra = f" - Lista: {data['_bozza'].get('nome')}"
+    else:
+        rows.append(["", "", "", "", "TOTALE LORDO", "", tot["provvigioni_lorde_periodo"], ""])
+        rows.append(["", "", "", "", "DA PAGARE", "", tot["provvigioni_da_pagare"], ""])
+        rows.append(["", "", "", "", "RITENUTA ACCONTO", "", tot["ritenuta_acconto_calcolata"], ""])
+        rows.append(["", "", "", "", "CONTRIBUTI", "", tot["contributi_calcolati"], ""])
+        rows.append(["", "", "", "", "NETTO DA PAGARE", "", tot["netto_da_pagare"], ""])
     pdf = pdf_report.stampa_elenco(
-        f"Estratto conto collaboratore - {collab.get('name')}",
-        f"Periodo: {dal or '—'} -> {al or '—'}",
-        headers, rows,
-        col_widths_mm=[25, 35, 60, 25, 30, 30, 22], landscape_mode=False,
-        filtri_attivi={"Dal": dal, "Al": al},
+        f"Estratto conto collaboratore - {collab.get('name')}{titolo_extra}",
+        f"Periodo (data copertura): {dal or '—'} -> {al or '—'}",
+        _PROVV_EXPORT_HEADERS, rows,
+        col_widths_mm=[24, 24, 32, 52, 24, 26, 28, 18], landscape_mode=True,
+        filtri_attivi={"Dal": dal, "Al": al, "Ricerca": q or None},
         **(await _intestazione_pdf()),
     )
     return _pdf_response(pdf, f"provvigioni_{collab.get('name')}.pdf")
+
+
+@api.get("/collaboratori/{cid}/estratto-provvigioni/export")
+async def export_provvigioni(cid: str, formato: str = "xlsx", dal: Optional[str] = None,
+                             al: Optional[str] = None, base: str = "incasso",
+                             bozza_id: Optional[str] = None, q: Optional[str] = None,
+                             solo_da_pagare: bool = False,
+                             user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    """Esporta la lista provvigioni (corrente o una lista salvata) in Excel o CSV."""
+    data, righe, voci = await _provvigioni_export_dataset(
+        cid, dal, al, base, user, bozza_id=bozza_id, q=q, solo_da_pagare=solo_da_pagare)
+    collab = data["collaboratore"]
+    rows = _provv_export_rows(righe, voci)
+    nome = (collab.get("name") or "collaboratore").replace(" ", "_")
+    if formato == "csv":
+        import csv as _csv
+        out = _io.StringIO()
+        w = _csv.writer(out, delimiter=";")
+        w.writerow(_PROVV_EXPORT_HEADERS)
+        for r in rows:
+            w.writerow(r)
+        return StreamingResponse(
+            _io.BytesIO(out.getvalue().encode("utf-8-sig")), media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="provvigioni_{nome}.csv"'})
+    # xlsx
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Provvigioni"
+    ws.append(_PROVV_EXPORT_HEADERS)
+    hdr_fill = PatternFill("solid", fgColor="1E293B")
+    for c in ws[1]:
+        c.font = Font(bold=True, color="FFFFFF")
+        c.fill = hdr_fill
+    for r in rows:
+        ws.append(r)
+    for col in ("F", "G"):
+        for cell in ws[col][1:]:
+            cell.number_format = '#,##0.00 €'
+    widths = [14, 14, 16, 30, 14, 14, 14, 8]
+    for i, wdt in enumerate(widths, 1):
+        ws.column_dimensions[chr(64 + i)].width = wdt
+    buf = _io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="provvigioni_{nome}.xlsx"'})
+
+
+@api.post("/collaboratori/{cid}/liste-bozze/{bid}/aggiungi")
+async def collaboratore_lista_bozza_aggiungi(cid: str, bid: str, body: dict,
+                                             user=Depends(require_user("admin", "collaboratore"))):
+    """Aggiunge titoli/voci (sfuggiti) a una lista salvata da pagare."""
+    from tenant import tenant_filter
+    bz = await db.provvigioni_bozze.find_one(
+        {"id": bid, "collaboratore_id": cid, **(tenant_filter(user) or {})}, {"_id": 0})
+    if not bz:
+        raise HTTPException(404, "Lista salvata non trovata")
+    add_tit = [t for t in (body.get("titoli_ids") or []) if t]
+    add_voci = [v for v in (body.get("voci_ids") or []) if v]
+    if not add_tit and not add_voci:
+        raise HTTPException(400, "Nessun titolo o voce da aggiungere")
+    titoli_ids = list(dict.fromkeys((bz.get("titoli_ids") or []) + add_tit))
+    voci_ids = list(dict.fromkeys((bz.get("voci_ids") or []) + add_voci))
+    titoli = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0, "provvigioni": 1}).to_list(5000) if titoli_ids else []
+    lordo = sum(float(t.get("provvigioni") or 0.0) for t in titoli)
+    voci = await db.voci_manuali_collab.find({"id": {"$in": voci_ids}, "collaboratore_id": cid}, {"_id": 0, "importo": 1}).to_list(500) if voci_ids else []
+    tot_voci = sum(float(v.get("importo") or 0.0) for v in voci)
+    await db.provvigioni_bozze.update_one(
+        {"id": bid},
+        {"$set": {"titoli_ids": titoli_ids, "voci_ids": voci_ids,
+                  "lordo": round(lordo, 2), "voci_totale": round(tot_voci, 2),
+                  "n_righe": len(titoli_ids) + len(voci_ids), "updated_at": _now_iso()}})
+    doc = await db.provvigioni_bozze.find_one({"id": bid}, {"_id": 0})
+    return {"ok": True, "bozza": doc}
 
 
 # ============================================================

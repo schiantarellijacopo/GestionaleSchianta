@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown } from "lucide-react";
+import { Printer, Wallet, Users, Plus, Trash2, ChevronRight, ChevronDown, FileSpreadsheet, FileText, Search, ListPlus } from "lucide-react";
 import SortHeader, { useTableSort } from "@/components/SortHeader";
 import DateInputIt from "@/components/DateInputIt";
 import { toast } from "sonner";
@@ -32,6 +32,8 @@ export default function Provvigioni() {
     const [bozze, setBozze] = useState([]);
     const [payBozza, setPayBozza] = useState(null);
     const [storicoKey, setStoricoKey] = useState(0);
+    const [search, setSearch] = useState("");
+    const [addToBozza, setAddToBozza] = useState(null);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollabs((r.data || []).filter((c) => c.role === "collaboratore")));
@@ -52,21 +54,44 @@ export default function Provvigioni() {
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [sel, dal, al, base]);
 
-    const { sorted: provSorted, sortKey: provSort, dir: provDir, toggle: provToggle } =
-        useTableSort((data?.righe || []).filter((r) => !r.gia_pagato && !r.in_bozza), "data_incasso", "desc", {
+    const matchSearch = (r) => {
+        if (!search.trim()) return true;
+        const q = search.trim().toLowerCase();
+        return [r.contraente, r.numero_polizza, r.ramo].some((f) => String(f || "").toLowerCase().includes(q));
+    };
+
+    const { sorted: provSortedAll, sortKey: provSort, dir: provDir, toggle: provToggle } =
+        useTableSort((data?.righe || []).filter((r) => !r.gia_pagato && !r.in_bozza), "data_copertura", "desc", {
+            data_copertura: (r) => r.data_copertura || "",
             data_incasso: (r) => r.data_incasso || r.data_copertura || "",
             premio: (r) => Number(r.importo_lordo || 0),
             provvigione: (r) => Number(r.provvigione || 0),
         });
+    const provSorted = provSortedAll.filter(matchSearch);
 
-    const stampa = () => {
-        const qs = new URLSearchParams();
+    const exportUrl = (formato, extra = {}) => {
+        const qs = new URLSearchParams({ base });
         if (dal) qs.append("dal", dal);
         if (al) qs.append("al", al);
+        Object.entries(extra).forEach(([k, v]) => { if (v != null && v !== "") qs.append(k, v); });
+        if (formato === "pdf") return `${API_BASE}/stampa/provvigioni/${sel.id}?${qs}`;
+        qs.append("formato", formato);
+        return `${API_BASE}/collaboratori/${sel.id}/estratto-provvigioni/export?${qs}`;
+    };
+    const scarica = (formato, extra = {}) => {
         const link = document.createElement("a");
-        link.href = `${API_BASE}/stampa/provvigioni/${sel.id}?${qs}`;
+        link.href = exportUrl(formato, extra);
         link.target = "_blank";
         document.body.appendChild(link); link.click(); link.remove();
+    };
+
+    const stampa = () => scarica("pdf");
+
+    const aggiungiTitoloLista = async (bid, titoloId) => {
+        try {
+            await api.post(`/collaboratori/${sel.id}/liste-bozze/${bid}/aggiungi`, { titoli_ids: [titoloId] });
+            toast.success("Titolo aggiunto alla lista"); setAddToBozza(null); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     const toggleTitolo = (id) => {
@@ -247,11 +272,16 @@ export default function Provvigioni() {
                                                     <span className="font-medium">{b.nome}</span>
                                                     <span className="text-slate-500 ml-2 text-xs">{b.n_righe} righe · lordo {fmtEur(b.lordo || 0)}{b.voci_totale ? ` · voci ${fmtEur(b.voci_totale)}` : ""}</span>
                                                 </div>
-                                                <div className="flex gap-2">
+                                                <div className="flex gap-2 items-center">
                                                     <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => pagaLista(b)} data-testid={`paga-lista-${b.id}`}>
                                                         <Wallet size={13} className="mr-1" /> Paga
                                                     </Button>
                                                     <Button size="sm" variant="outline" onClick={() => caricaLista(b)} data-testid={`carica-lista-${b.id}`}>Carica</Button>
+                                                    <div className="flex items-center gap-1 border-l border-amber-200 pl-2">
+                                                        <button title="Scarica Excel" onClick={() => scarica("xlsx", { bozza_id: b.id })} className="text-emerald-700 hover:text-emerald-900" data-testid={`lista-xlsx-${b.id}`}><FileSpreadsheet size={16} /></button>
+                                                        <button title="Scarica CSV" onClick={() => scarica("csv", { bozza_id: b.id })} className="text-sky-700 hover:text-sky-900" data-testid={`lista-csv-${b.id}`}><FileText size={16} /></button>
+                                                        <button title="Stampa PDF" onClick={() => scarica("pdf", { bozza_id: b.id })} className="text-slate-700 hover:text-slate-900" data-testid={`lista-pdf-${b.id}`}><Printer size={16} /></button>
+                                                    </div>
                                                     <button onClick={() => eliminaLista(b.id)} className="text-rose-600 hover:text-rose-700" data-testid={`elimina-lista-${b.id}`}><Trash2 size={16} /></button>
                                                 </div>
                                             </div>
@@ -263,9 +293,24 @@ export default function Provvigioni() {
                             {/* Tabella titoli */}
                             <Card className="border-slate-200 overflow-hidden">
                                 {(() => { const righeDaPagare = provSorted; return (<>
-                                <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                                    <div className="text-sm font-medium">Provvigioni maturate ({righeDaPagare.length})</div>
-                                    <div className="flex gap-2">
+                                <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-3 flex-wrap">
+                                    <div className="text-sm font-medium whitespace-nowrap">Provvigioni maturate ({righeDaPagare.length})</div>
+                                    <div className="relative flex-1 min-w-[180px] max-w-xs">
+                                        <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+                                        <Input
+                                            value={search}
+                                            onChange={(e) => setSearch(e.target.value)}
+                                            placeholder="Cerca contraente, n. polizza, ramo…"
+                                            className="pl-7 h-8 text-xs"
+                                            data-testid="prov-search"
+                                        />
+                                    </div>
+                                    <div className="flex gap-2 items-center flex-wrap">
+                                        <div className="flex items-center gap-1 border-r border-slate-200 pr-2 mr-1">
+                                            <button title="Scarica Excel" onClick={() => scarica("xlsx", { solo_da_pagare: true, q: search || undefined })} className="text-emerald-700 hover:text-emerald-900" data-testid="prov-export-xlsx"><FileSpreadsheet size={17} /></button>
+                                            <button title="Scarica CSV" onClick={() => scarica("csv", { solo_da_pagare: true, q: search || undefined })} className="text-sky-700 hover:text-sky-900" data-testid="prov-export-csv"><FileText size={17} /></button>
+                                            <button title="Stampa PDF" onClick={() => scarica("pdf", { solo_da_pagare: true, q: search || undefined })} className="text-slate-700 hover:text-slate-900" data-testid="prov-export-pdf"><Printer size={17} /></button>
+                                        </div>
                                         <button onClick={selectAllUnpaid} className="text-xs text-sky-700 hover:underline" data-testid="select-unpaid">
                                             Seleziona tutto da pagare
                                         </button>
@@ -295,12 +340,14 @@ export default function Provvigioni() {
                                         <thead>
                                             <tr>
                                                 <th className="w-10"></th>
-                                                <th><SortHeader k="data_incasso" sortKey={provSort} dir={provDir} toggle={provToggle}>Data</SortHeader></th>
+                                                <th><SortHeader k="data_copertura" sortKey={provSort} dir={provDir} toggle={provToggle}>Data copertura</SortHeader></th>
+                                                <th><SortHeader k="data_incasso" sortKey={provSort} dir={provDir} toggle={provToggle}>Data incasso</SortHeader></th>
                                                 <th><SortHeader k="numero_polizza" sortKey={provSort} dir={provDir} toggle={provToggle}>N. polizza</SortHeader></th>
                                                 <th><SortHeader k="contraente" sortKey={provSort} dir={provDir} toggle={provToggle}>Contraente</SortHeader></th>
                                                 <th><SortHeader k="ramo" sortKey={provSort} dir={provDir} toggle={provToggle}>Ramo</SortHeader></th>
                                                 <th className="text-right"><SortHeader k="premio" sortKey={provSort} dir={provDir} toggle={provToggle}>Premio</SortHeader></th>
                                                 <th className="text-right"><SortHeader k="provvigione" sortKey={provSort} dir={provDir} toggle={provToggle}>Provvigione</SortHeader></th>
+                                                {bozze.length > 0 && <th className="w-10"></th>}
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -315,7 +362,8 @@ export default function Provvigioni() {
                                                             data-testid={`select-titolo-${r.titolo_id}`}
                                                         />
                                                     </td>
-                                                    <td className="num">{fmtDate(r.data_incasso || r.data_copertura)}</td>
+                                                    <td className="num">{fmtDate(r.data_copertura)}</td>
+                                                    <td className="num">{fmtDate(r.data_incasso)}</td>
                                                     <td className="num text-xs">{r.numero_polizza || "-"}</td>
                                                     <td>{r.contraente || "-"}
                                                         {r.incassato === false && <span className="ml-1 text-[10px] bg-amber-100 text-amber-700 px-1 rounded">coperta · non incassata</span>}
@@ -323,6 +371,13 @@ export default function Provvigioni() {
                                                     <td className="text-xs">{r.ramo || "-"}</td>
                                                     <td className="num text-right">{fmtEur(r.importo_lordo)}</td>
                                                     <td className={`num text-right font-medium ${r.incassato === false ? "text-amber-600" : "text-emerald-700"}`}>{fmtEur(r.provvigione)}</td>
+                                                    {bozze.length > 0 && (
+                                                        <td>
+                                                            <button title="Aggiungi a una lista salvata" onClick={() => setAddToBozza(r)} className="text-amber-600 hover:text-amber-800" data-testid={`add-to-lista-${r.titolo_id}`}>
+                                                                <ListPlus size={16} />
+                                                            </button>
+                                                        </td>
+                                                    )}
                                                 </tr>
                                             ))}
                                         </tbody>
@@ -440,6 +495,42 @@ export default function Provvigioni() {
                     />
                 );
             })()}
+
+            {addToBozza && (
+                <Dialog open onOpenChange={(o) => !o && setAddToBozza(null)}>
+                    <DialogContent className="max-w-md" data-testid="add-to-lista-dialog">
+                        <DialogHeader><DialogTitle>Aggiungi titolo a una lista salvata</DialogTitle></DialogHeader>
+                        <div className="text-sm text-slate-600 mb-2">
+                            <div className="font-medium text-slate-800">{addToBozza.contraente || "—"}</div>
+                            <div className="text-xs">Pol. {addToBozza.numero_polizza || "-"} · {addToBozza.ramo || "-"} · provv. {fmtEur(addToBozza.provvigione)}</div>
+                        </div>
+                        {bozze.length === 0 ? (
+                            <Empty message="Nessuna lista salvata" />
+                        ) : (
+                            <div className="space-y-1">
+                                {bozze.map((b) => {
+                                    const giaPresente = (b.titoli_ids || []).includes(addToBozza.titolo_id);
+                                    return (
+                                        <button
+                                            key={b.id}
+                                            disabled={giaPresente}
+                                            onClick={() => aggiungiTitoloLista(b.id, addToBozza.titolo_id)}
+                                            className="w-full text-left px-3 py-2 rounded border border-slate-200 hover:bg-amber-50 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-between"
+                                            data-testid={`add-to-lista-option-${b.id}`}
+                                        >
+                                            <span className="font-medium">{b.nome}</span>
+                                            <span className="text-xs text-slate-500">{giaPresente ? "già presente" : `${b.n_righe} righe`}</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setAddToBozza(null)}>Chiudi</Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     );
 }
