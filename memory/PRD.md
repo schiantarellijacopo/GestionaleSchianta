@@ -303,3 +303,10 @@ Backlog (non bloccante): `sync_pending_for_tenant` usa get/delete sincroni in lo
 - `_create_crm_attachment` ora crea allegati CLOUD-ONLY: se il file è stato spostato su Drive (cloud_ref) l'allegato referenzia quel file (`cloud_sync`, storage_path=''), niente copia interna duplicata. Fallback interno solo se il move fallisce.
 - Retro CI (endpoint OCR `/api/utility/ocr-documento-identita`): il retro ora va su Drive nella stessa sottocartella del fronte, file `… (retro) [id].ext`; campo `cloud_sync_retro` + `url_retro` = `…/download?lato=retro`. Delete rimuove fronte+retro dal cloud. `mirror_document` ha nuovo param `file_label` (nome file diverso dal nome cartella).
 - Verificato su Drive reale: path/nome fronte e retro, allegato OCR cloud-only (storage_path='').
+
+### 2026-11-05 (follow-up 2) — INBOX OCR: auto-compilazione campi mancanti + resoconto
+- `cloud_ocr_scanner._enrich_entity_from_ocr`: dopo l'abbinamento, compila automaticamente i campi MANCANTI (non sovrascrive):
+  - libretto_circolazione → polizza: marca, modello, cv (cavalli fiscali), kw, cilindrata, alimentazione, tipo, telaio, targa, data immatricolazione (via `ocr_libretto.estrai_dati_libretto` + `_LIBRETTO_TO_POLIZZA`).
+  - carta_identita/patente/passaporto → anagrafica: CF, data/comune/provincia nascita, sesso, n° documento, comune+data emissione, scadenza, indirizzo, città (via `ocr_ci.estrai_dati_ci` + `_CI_TO_ANAG`).
+- Resoconto: `campi_aggiornati` per file (in cloud_documents + entries), `campi_aggiornati_tot` nel report scan + history; diario cliente riporta i campi aggiornati. Frontend OcrScanWidget: toast con conteggio, banner "✨ N campi compilati", badge "✨ N campi" per riga archivio (testid `scan-campi-aggiornati`, `archivio-campi-{i}`).
+- Verificato con extractor stubbati: compila solo i mancanti, non sovrascrive i valori esistenti, resoconto leggibile. NB: scan OCR end-to-end con documenti reali va confermato in produzione (richiede file reali in INBOX + classificatore Gemini).

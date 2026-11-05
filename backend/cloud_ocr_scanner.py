@@ -519,6 +519,84 @@ _PER_ENTITY_CATEGORIES = {
     "sinistro_specifico",
 }
 
+# Mappatura campi estratti dal libretto → campi polizza (db_models).
+_LIBRETTO_TO_POLIZZA = {
+    "targa": "targa", "telaio": "telaio", "marca": "veicolo_marca",
+    "modello": "veicolo_modello", "tipo_veicolo": "veicolo_tipo",
+    "alimentazione": "veicolo_alimentazione", "kw": "veicolo_kw",
+    "cv": "veicolo_cv_fiscali", "cilindrata": "veicolo_cilindrata",
+    "data_immatricolazione": "veicolo_data_immatricolazione",
+}
+# Mappatura campi estratti dalla C.I./patente → campi anagrafica.
+_CI_TO_ANAG = {
+    "codice_fiscale": "codice_fiscale", "data_nascita": "data_nascita",
+    "comune_nascita": "comune_nascita", "provincia_nascita": "provincia_nascita",
+    "sesso": "sesso", "numero_documento": "numero_carta_identita",
+    "comune_emissione": "ci_comune_emissione", "data_rilascio": "ci_data_emissione",
+    "data_scadenza": "ci_data_scadenza", "indirizzo_residenza": "indirizzo",
+    "comune_residenza": "citta",
+}
+
+# Etichette leggibili dei campi aggiornati (per il resoconto INBOX).
+_FIELD_LABELS = {
+    "veicolo_marca": "marca", "veicolo_modello": "modello",
+    "veicolo_cv_fiscali": "cavalli fiscali", "veicolo_kw": "potenza kW",
+    "veicolo_cilindrata": "cilindrata", "veicolo_alimentazione": "alimentazione",
+    "veicolo_tipo": "tipo veicolo", "veicolo_data_immatricolazione": "immatricolazione",
+    "targa": "targa", "telaio": "telaio",
+    "codice_fiscale": "codice fiscale", "data_nascita": "data nascita",
+    "comune_nascita": "comune nascita", "provincia_nascita": "provincia nascita",
+    "sesso": "sesso", "numero_carta_identita": "n° documento",
+    "ci_comune_emissione": "comune emissione", "ci_data_emissione": "data emissione",
+    "ci_data_scadenza": "scadenza documento", "indirizzo": "indirizzo", "citta": "città",
+}
+
+
+async def _enrich_entity_from_ocr(db, file_bytes: bytes, mime: str,
+                                  classification: dict, ana: Optional[dict],
+                                  pol: Optional[dict]) -> list:
+    """Compila automaticamente i campi MANCANTI dell'entità con i dati OCR.
+
+    - libretto_circolazione + polizza → marca/modello/cavalli/cilindrata/… mancanti
+    - carta_identita|patente|passaporto + anagrafica → data emissione/comune/CF/… mancanti
+
+    Non sovrascrive mai valori già presenti. Ritorna la lista di etichette aggiornate
+    (es. ['modello = PANDA', 'cavalli fiscali = 10']) per il resoconto INBOX.
+    """
+    tipo = (classification.get("tipo_documento") or "").lower()
+    updated: list = []
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        if tipo == "libretto_circolazione" and pol:
+            import ocr_libretto
+            dati = await ocr_libretto.estrai_dati_libretto(file_bytes, mime)
+            cur = await db.polizze.find_one({"id": pol["id"]}, {"_id": 0}) or {}
+            upd = {}
+            for k, field in _LIBRETTO_TO_POLIZZA.items():
+                v = dati.get(k)
+                if v not in (None, "", []) and cur.get(field) in (None, "", 0):
+                    upd[field] = v
+                    updated.append(f"{_FIELD_LABELS.get(field, field)} = {v}")
+            if upd:
+                upd["updated_at"] = now
+                await db.polizze.update_one({"id": pol["id"]}, {"$set": upd})
+        elif tipo in ("carta_identita", "patente", "passaporto") and ana:
+            import ocr_ci
+            dati = await ocr_ci.estrai_dati_ci(file_bytes, mime)
+            cur = await db.anagrafiche.find_one({"id": ana["id"]}, {"_id": 0}) or {}
+            upd = {}
+            for k, field in _CI_TO_ANAG.items():
+                v = dati.get(k)
+                if v not in (None, "", []) and cur.get(field) in (None, "", 0):
+                    upd[field] = v
+                    updated.append(f"{_FIELD_LABELS.get(field, field)} = {v}")
+            if upd:
+                upd["updated_at"] = now
+                await db.anagrafiche.update_one({"id": ana["id"]}, {"$set": upd})
+    except Exception as e:
+        logger.warning("Enrichment OCR fallito (%s): %s", tipo, str(e)[:200])
+    return updated
+
 
 def _route_document(classification: dict, ana: Optional[dict],
                     pol: Optional[dict], sin: Optional[dict]) -> tuple:
@@ -627,7 +705,7 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
 
     report = {
         "letti": len(files), "abbinati": 0, "in_attesa": 0,
-        "anagrafiche_create": 0,
+        "anagrafiche_create": 0, "campi_aggiornati_tot": 0,
         "errori": [], "entries": [], "provider": provider,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -642,6 +720,7 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
                 report["in_attesa"] += 1
             if entry.get("anagrafica_creata"):
                 report["anagrafiche_create"] += 1
+            report["campi_aggiornati_tot"] += len(entry.get("campi_aggiornati") or [])
         except Exception as e:
             logger.exception("Errore processing file %s", f.get("name"))
             report["errori"].append({"file": f.get("name"), "error": str(e)[:200]})
@@ -908,6 +987,7 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
 
     # ★ Se abbinato → crea ANCHE l'allegato nel CRM così il file compare in
     # Anagrafiche → tab Documenti (categoria carta_identita/patente/ecc.)
+    campi_aggiornati: list = []
     if category != "da_smistare" and ana:
         try:
             await _create_crm_attachment(
@@ -918,6 +998,18 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
             )
         except Exception as e:
             logger.warning("Creazione allegato CRM fallita per %s: %s", name, e)
+
+    # ★ Auto-compilazione campi mancanti (libretto→polizza, C.I.→anagrafica)
+    if category != "da_smistare":
+        try:
+            campi_aggiornati = await _enrich_entity_from_ocr(
+                db, file_bytes, mime, classification, ana, pol)
+            if campi_aggiornati:
+                await db.cloud_documents.update_one(
+                    {"file_id": file_id, "created_at": doc_record["created_at"]},
+                    {"$set": {"campi_aggiornati": campi_aggiornati}})
+        except Exception as e:
+            logger.warning("Auto-enrichment fallito per %s: %s", name, e)
 
 
     # Se NON abbinato → porta il file anche nella pagina Documenti Inbox del CRM
@@ -944,7 +1036,8 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
                 "tipo": "documento_ocr",
                 "titolo": titolo_diario,
                 "descrizione": (f"File '{name}' letto e archiviato in {' / '.join(dest_segments)}."
-                                + (" Anagrafica creata automaticamente dai dati estratti." if anagrafica_creata else "")),
+                                + (" Anagrafica creata automaticamente dai dati estratti." if anagrafica_creata else "")
+                                + (f" Campi aggiornati automaticamente: {', '.join(campi_aggiornati)}." if campi_aggiornati else "")),
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "autore": "OCR Automatico",
                 "meta": {"file_id": file_id, "provider": provider,
@@ -985,6 +1078,7 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
         "anagrafica_id": (ana or {}).get("id") if anagrafica_creata else None,
         "matched_polizza": (pol or {}).get("numero_polizza"),
         "matched_sinistro": (sin or {}).get("numero_sinistro"),
+        "campi_aggiornati": campi_aggiornati,
         "inbox_id": inbox_id,   # se presente, l'utente lo troverà in Documenti Inbox
     }
 

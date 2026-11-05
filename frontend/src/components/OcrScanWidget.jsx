@@ -53,7 +53,7 @@ export default function OcrScanWidget({ variant = "full", onClickPending }) {
             if (r.data.skipped) {
                 toast.info(r.data.reason || "Scan saltato");
             } else {
-                toast.success(`Scan completato: ${r.data.letti} letti, ${r.data.abbinati} abbinati, ${r.data.in_attesa} in attesa`);
+                toast.success(`Scan completato: ${r.data.letti} letti, ${r.data.abbinati} abbinati, ${r.data.in_attesa} in attesa` + (r.data.campi_aggiornati_tot ? `, ${r.data.campi_aggiornati_tot} campi aggiornati` : ""));
             }
             load();
         } catch (e) {
@@ -156,6 +156,11 @@ export default function OcrScanWidget({ variant = "full", onClickPending }) {
                 <StatBox label="Anagraf. create" value={latest.anagrafiche_create || 0} color="sky" icon={UserPlus} />
             </div>
 
+            {(latest.campi_aggiornati_tot || 0) > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded p-2 text-[11px] mb-2 text-indigo-800" data-testid="scan-campi-aggiornati">
+                    ✨ <strong>{latest.campi_aggiornati_tot}</strong> campi compilati automaticamente (es. modello, cavalli, data emissione) sui clienti/polizze abbinati.
+                </div>
+            )}
             {pending > 0 && (
                 <div className="bg-amber-50 border border-amber-300 rounded p-2 text-[11px] mb-2 flex items-center justify-between">
                     <div className="text-amber-900">
@@ -263,6 +268,13 @@ export default function OcrScanWidget({ variant = "full", onClickPending }) {
                                 )}
                                 {d.numero_polizza && (
                                     <span className="text-violet-700 font-mono">Pol. {d.numero_polizza}</span>
+                                )}
+                                {(d.campi_aggiornati || []).length > 0 && (
+                                    <span className="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[9px] shrink-0"
+                                          title={`Campi compilati: ${d.campi_aggiornati.join(", ")}`}
+                                          data-testid={`archivio-campi-${i}`}>
+                                        ✨ {d.campi_aggiornati.length} campi
+                                    </span>
                                 )}
                                 <span className="ml-auto text-[9px] text-slate-400 shrink-0">
                                     {new Date(d.created_at).toLocaleDateString("it-IT")}

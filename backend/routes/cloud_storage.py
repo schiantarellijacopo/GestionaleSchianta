@@ -1059,6 +1059,7 @@ async def list_archivio(
             "codice_fiscale": de.get("codice_fiscale"),
             "targa": de.get("targa"),
             "numero_polizza": de.get("numero_polizza"),
+            "campi_aggiornati": d.get("campi_aggiornati") or [],
             "created_at": d.get("created_at"),
         })
     # Statistiche
