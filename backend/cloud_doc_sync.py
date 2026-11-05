@@ -445,6 +445,55 @@ async def sync_status_for_tenant(tenant_id: str) -> dict:
     return {"ok": True, "synced": synced, "pending": pending, "total": total}
 
 
+# Evita backfill automatici concorrenti sullo stesso tenant
+_auto_backfill_running: set[str] = set()
+
+
+async def auto_backfill_tenant(tenant_id: str, max_batches: int = 80) -> None:
+    """Backfill automatico in BACKGROUND dei documenti storici dopo il collegamento
+    del cloud, senza che l'utente prema alcun pulsante.
+
+    IMPORTANTE: il wrapper DB filtra per tenant in base al ContextVar dell'utente
+    corrente; in un task di background non c'è utente → impostiamo un utente
+    sintetico con `agenzia_tenant_id=tenant_id` per garantire l'isolamento tenant
+    (senza questo, le query colpirebbero TUTTI i tenant)."""
+    import asyncio
+    from database import set_current_user, reset_current_user
+
+    if tenant_id in _auto_backfill_running:
+        logger.info("Auto-backfill già in corso per tenant=%s, skip", tenant_id)
+        return
+    _auto_backfill_running.add(tenant_id)
+    synthetic_user = {
+        "id": f"__auto_backfill__{tenant_id}",
+        "agenzia_tenant_id": tenant_id,
+        "role": "admin",
+        "is_super_admin": False,
+    }
+    ctx_token = set_current_user(synthetic_user)
+    try:
+        providers = await connected_providers(tenant_id)
+        if not providers:
+            return
+        total_moved = 0
+        for _ in range(max_batches):
+            res = await sync_pending_for_tenant(tenant_id, include_all=True)
+            if not res.get("ok"):
+                break
+            total_moved += res.get("moved", 0)
+            if (res.get("remaining") or 0) <= 0:
+                break
+            await asyncio.sleep(0.3)
+        logger.info("Auto-backfill tenant=%s completato: %d documenti caricati",
+                    tenant_id, total_moved)
+    except Exception as e:
+        logger.warning("Auto-backfill tenant=%s errore: %s", tenant_id, str(e)[:200])
+    finally:
+        reset_current_user(ctx_token)
+        _auto_backfill_running.discard(tenant_id)
+
+
+
 
 async def read_allegato_bytes(al: dict) -> tuple[bytes, str]:
     """Legge i byte di un allegato: dal cloud se cloud-only, altrimenti dallo storage interno.

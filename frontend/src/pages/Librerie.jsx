@@ -7585,12 +7585,15 @@ function CloudStorageSezione() {
 
     const [syncStatus, setSyncStatus] = useState(null);
     const [syncing, setSyncing] = useState(false);
+    const syncPollRef = useRef(null);
 
     const loadSyncStatus = async () => {
         try {
             const r = await api.get("/librerie/cloud-storage/sync-status");
             setSyncStatus(r.data);
+            return r.data;
         } catch { /* non bloccante */ }
+        return null;
     };
 
     const runBackfill = async (provider) => {
@@ -7649,6 +7652,29 @@ function CloudStorageSezione() {
         }
         // eslint-disable-next-line
     }, []);
+
+    // Mentre il backfill automatico gira in background, aggiorna il riepilogo
+    // ogni 5s finché restano documenti da sincronizzare.
+    useEffect(() => {
+        const pending = syncStatus?.pending || 0;
+        if (pending > 0 && !syncPollRef.current) {
+            syncPollRef.current = setInterval(async () => {
+                const d = await loadSyncStatus();
+                if (d && (d.pending || 0) <= 0 && syncPollRef.current) {
+                    clearInterval(syncPollRef.current);
+                    syncPollRef.current = null;
+                }
+            }, 5000);
+        }
+        return () => {
+            if (syncPollRef.current) {
+                clearInterval(syncPollRef.current);
+                syncPollRef.current = null;
+            }
+        };
+        // eslint-disable-next-line
+    }, [syncStatus?.pending]);
+
 
     const connectProvider = async (provider) => {
         setBusy(true);
@@ -7836,8 +7862,7 @@ function CloudStorageSezione() {
                                 <div className="text-xs text-slate-400 mt-2">Caricamento riepilogo…</div>
                             )}
                             <p className="text-[11px] text-slate-500 mt-2 max-w-xl">
-                                I documenti caricati <strong>dopo</strong> il collegamento salgono automaticamente sul Drive.
-                                Usa il pulsante per caricare anche quelli archiviati <strong>prima</strong> del collegamento.
+                                Il caricamento sul Drive parte <strong>da solo</strong> appena colleghi o riselezioni la cartella: i documenti salgono in background, anche quelli archiviati <strong>prima</strong> del collegamento. Il pulsante serve solo per forzare una nuova sincronizzazione.
                             </p>
                         </div>
                         <div className="flex flex-col items-end gap-2">

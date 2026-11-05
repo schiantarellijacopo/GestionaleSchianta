@@ -395,6 +395,15 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
         init_ok = "0"
         log.warning("Auto init-structure fallito dopo OAuth (tenant=%s): %s",
                     st["tenant_id"], str(e)[:300])
+    # Appena collegato, avvia in BACKGROUND il backfill dei documenti storici
+    # (caricati prima del collegamento) così finiscono sul Drive senza premere nulla.
+    try:
+        import asyncio
+        import cloud_doc_sync
+        asyncio.create_task(cloud_doc_sync.auto_backfill_tenant(st["tenant_id"]))
+    except Exception as e:
+        log.warning("Avvio auto-backfill fallito (tenant=%s): %s",
+                    st["tenant_id"], str(e)[:200])
     frontend_target = (FRONTEND_URL or BACKEND_PUBLIC_URL).rstrip("/")
     return RedirectResponse(
         f"{frontend_target}/librerie?cloud=connected&provider={provider}&init={init_ok}",
@@ -499,6 +508,14 @@ async def set_folder(
     except Exception as e:
         log.warning("Rebuild struttura dopo set-folder fallito (tenant=%s): %s",
                     tenant, str(e)[:300])
+    # Avvia in background il backfill degli storici anche quando si (ri)sceglie la cartella.
+    try:
+        import asyncio
+        import cloud_doc_sync
+        asyncio.create_task(cloud_doc_sync.auto_backfill_tenant(tenant))
+    except Exception as e:
+        log.warning("Avvio auto-backfill dopo set-folder fallito (tenant=%s): %s",
+                    tenant, str(e)[:200])
     return {"ok": True, "folder_id": folder_id, "folder_name": folder_name,
             "structure_created": bool(structure)}
 
