@@ -10,6 +10,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 import os
 import logging
+import sys
 import re
 import uuid
 from datetime import datetime, timezone
@@ -78,7 +79,33 @@ import io as _io
 # Local aliases kept for backward-compat with the rest of this module.
 mongo_url = os.environ["MONGO_URL"]
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Logging: INFO/DEBUG → stdout (azzurri su Railway), WARNING/ERROR → stderr (rossi).
+# Di default Python manda tutto su stderr, facendo apparire anche i log normali
+# "in rosso". Separiamo i due flussi sul root logger.
+class _MaxLevelFilter(logging.Filter):
+    def __init__(self, max_level: int):
+        super().__init__()
+        self.max_level = max_level
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return record.levelno <= self.max_level
+
+
+_log_fmt = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+_stdout_handler = logging.StreamHandler(sys.stdout)
+_stdout_handler.setLevel(logging.DEBUG)
+_stdout_handler.addFilter(_MaxLevelFilter(logging.INFO))  # solo DEBUG + INFO
+_stdout_handler.setFormatter(_log_fmt)
+_stderr_handler = logging.StreamHandler(sys.stderr)
+_stderr_handler.setLevel(logging.WARNING)  # WARNING + ERROR + CRITICAL
+_stderr_handler.setFormatter(_log_fmt)
+
+_root_logger = logging.getLogger()
+_root_logger.setLevel(logging.INFO)
+for _h in list(_root_logger.handlers):  # rimuove eventuali handler di default (stderr)
+    _root_logger.removeHandler(_h)
+_root_logger.addHandler(_stdout_handler)
+_root_logger.addHandler(_stderr_handler)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Programma Assicurativo")
