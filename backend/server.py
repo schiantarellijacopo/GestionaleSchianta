@@ -38,6 +38,7 @@ from shared import (
 from auth import (
     hash_password, verify_password, create_access_token, create_refresh_token,
     decode_token, get_token_from_request, require_user, current_user, can_see_all,
+    optional_current_user,
 )
 from db_models import (
     UserCreate, UserPublic, LoginRequest, Compagnia, Anagrafica, Polizza, Titolo,
@@ -17514,31 +17515,44 @@ async def patch_allegato(
 # Path canonico: /api/storage/{full_path}
 # ============================================================
 @api.get("/storage/{full_path:path}")
-async def serve_storage(full_path: str, user=Depends(current_user)):
+async def serve_storage(full_path: str, user=Depends(optional_current_user)):
     """Serve file dallo storage. ACL:
+    - immagini di branding/profilo (loghi azienda, avatar) -> PUBBLICHE (nessun token),
+      così non si rompono mai nei tag <img> anche a cookie/sessione scaduti
     - file in /users/{uid}/...   -> solo admin o proprietario
     - file in /azienda/...       -> qualunque utente autenticato (logo per stampe)
     - file in /titoli/... ecc.   -> qualunque utente autenticato (gli allegati hanno ACL specifica)
     """
-    # ACL sui documenti utente
     parts = full_path.split("/")
-    if "users" in parts:
-        try:
-            idx = parts.index("users")
-            owner_uid = parts[idx + 1]
-        except (ValueError, IndexError):
-            owner_uid = None
-        if user["role"] != "admin" and user["id"] != owner_uid:
-            raise HTTPException(403, "Permesso negato")
+    filename = full_path.rsplit("/", 1)[-1]
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    is_image = ext in ("png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico")
+    # Immagini pubbliche: loghi azienda e avatar (utenti/anagrafiche). Documenti/scansioni
+    # restano protetti perché non stanno in /azienda/ e non si chiamano avatar_*.
+    is_public_image = is_image and ("/azienda/" in f"/{full_path}" or filename.startswith("avatar_"))
+    if not is_public_image:
+        if user is None:
+            raise HTTPException(401, "Non autenticato")
+        # ACL sui documenti utente
+        if "users" in parts:
+            try:
+                idx = parts.index("users")
+                owner_uid = parts[idx + 1]
+            except (ValueError, IndexError):
+                owner_uid = None
+            if user["role"] != "admin" and user["id"] != owner_uid:
+                raise HTTPException(403, "Permesso negato")
     try:
         data, ctype = obj_storage.get_object(full_path)
     except Exception as e:
         raise HTTPException(404, f"File non trovato: {e}")
-    filename = full_path.rsplit("/", 1)[-1]
+    headers = {"Content-Disposition": f'inline; filename="{filename}"'}
+    if is_public_image:
+        headers["Cache-Control"] = "public, max-age=86400"
     return StreamingResponse(
         _io.BytesIO(data),
         media_type=ctype or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+        headers=headers,
     )
 
 

@@ -118,5 +118,16 @@ async def current_user(request: Request) -> dict[str, Any]:
     return await dep(request)
 
 
+async def optional_current_user(request: Request) -> dict[str, Any] | None:
+    """Come current_user ma non solleva: ritorna None se il token manca/non è valido."""
+    try:
+        dep = require_user()
+        return await dep(request)
+    except HTTPException:
+        return None
+    except Exception:
+        return None
+
+
 def can_see_all(role: str) -> bool:
     return role in ("admin", "collaboratore")

@@ -537,3 +537,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - invia_preventivo (routes/commerciale.py) ora usa il modello preventivo del canale (email/whatsapp) con sostituzione placeholder + nome agenzia da azienda_config; fallback al testo di default se il modello manca; body.messaggio esplicito ha priorità.
 - Seed modelli (_seed_modelli_default) esteso per includere il campo "oggetto".
 - Verificato a video: modello visibile e popolato nella sezione Email di Gestione Modelli.
+
+## 2026-06 — Fix DEFINITIVO immagini (loghi/avatar non saltano più)
+- Causa radice: i tag <img> di logo agenzia e avatar si autenticavano solo con cookie/token; a sessione scaduta davano 401 → immagini rotte.
+- Soluzione: endpoint /api/storage ora serve PUBBLICAMENTE (senza auth) solo le immagini di branding/profilo — loghi (path /azienda/) e avatar (file avatar_*) — con Cache-Control 1 giorno. Tutto il resto (documenti, scansioni, PDF) resta protetto: 401 senza auth.
+- Aggiunto auth.optional_current_user (non solleva, ritorna None).
+- Verificato: avatar/logo 200 senza token, documento privato 401 senza token; header mostra le immagini a video.
