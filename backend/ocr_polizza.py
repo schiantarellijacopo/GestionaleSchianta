@@ -211,15 +211,15 @@ def _riconcilia_premi(data: dict) -> None:
         data["premio_netto_totale"] = round(sum(netti), 2)
     netto = _num(data.get("premio_netto_totale"))
 
-    # IMPOSTE (deterministico, a prova di letture non deterministiche dell'LLM):
-    #  1) se il dettaglio per-garanzia è itemizzato -> SOMMA delle imposte di riga − contributo forzoso
-    #  2) altrimenti, se abbiamo lordo letto e netto -> RESIDUO (lordo − netto − ssn − diritti):
-    #     il valore singolo letto non è affidabile (può essere raddoppiato), il totale sì
-    #  3) altrimenti -> valore letto − contributo forzoso
-    if len(imposte) >= 2:
-        data["imposte_totali"] = round(max(sum(imposte) - cf, 0.0), 2)
-    elif lordo_letto and netto is not None:
+    # IMPOSTE — REGOLA PRIMARIA richiesta: Imposte = Lordo − Netto − SSN − Diritti.
+    # Quando abbiamo il premio lordo (totale da pagare) e il netto, le imposte si
+    # DERIVANO SEMPRE da quel calcolo: è deterministico e immune alle letture
+    # non deterministiche dell'LLM (che a volte raddoppia il valore o somma righe
+    # duplicate). Solo se manca il lordo usiamo la somma delle garanzie o il valore letto.
+    if lordo_letto and netto is not None:
         data["imposte_totali"] = round(max(lordo_letto - netto - ssn - diritti, 0.0), 2)
+    elif len(imposte) >= 2:
+        data["imposte_totali"] = round(max(sum(imposte) - cf, 0.0), 2)
     else:
         imp_llm = _num(data.get("imposte_totali"))
         if imp_llm is not None:

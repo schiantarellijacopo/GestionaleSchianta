@@ -564,3 +564,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - L'OCR leggeva una targa sbagliata (es. EN376ZF) presa da sezioni interne; la targa corretta è nell'intestazione "Polizza n. ... Targa / Telaio n. XXXX".
 - Aggiunta regola nel prompt ocr_polizza.py: la targa va letta SEMPRE dall'intestazione in alto (riga "Targa / Telaio n."), con priorità assoluta su ogni altra targa/codice nel documento.
 - Verificato live sul PDF reale: targa = VA164193 (corretta), imposte 25,43.
+
+## 2026-06 — Imposte OCR: regola PRIMARIA Lordo−Netto−SSN + redeploy produzione
+- Su richiesta esplicita utente: imposte = premio_lordo − premio_netto − contributo_ssn − diritti come REGOLA PRIMARIA in _riconcilia_premi (quando lordo+netto presenti), prima di garanzie/valore letto. Immune al non-determinismo LLM (niente più 50,86).
+- Verificato preview end-to-end sul PDF reale: targa VA164193, netto 205,43, imposte 25,43, SSN 19,14, lordo 250,00.
+- Confermato che il salvataggio (create/update_polizza + _fill_imposte_residuo) NON raddoppia: memorizza il valore ricevuto; _fill_imposte_residuo deduce solo se imposte 0/mancanti.
+- Causa del problema in produzione: runtime con build precedente alla fix imposte (targa ok, imposte no) → avviata ripubblicazione (deploy) per allineare il backend.
