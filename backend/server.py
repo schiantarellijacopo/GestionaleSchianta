@@ -4378,11 +4378,14 @@ async def _match_anagrafica_cf_piva(user: dict, cf: Optional[str], piva: Optiona
 
 
 def _fill_imposte_residuo(d: dict) -> None:
-    """Se il premio LORDO è noto ma le imposte sono 0/mancanti, deducile come residuo
-    (lordo − netto − ssn − accessori − addizionale). Evita che la scheda polizza nasca
-    con 'Imposte €: 0' pur avendo un lordo che le include — così netto+imposte+ssn
-    quadra col lordo e la polizza resta allineata al titolo. No-op per le Vita dove
-    lordo == netto (residuo ≈ 0)."""
+    """Allinea le IMPOSTE della scheda polizza al premio LORDO (totale da pagare) —
+    che è la cifra autorevole stampata in polizza/quietanza — come residuo:
+    imposte = lordo − netto − ssn − accessori − addizionale.
+    Corregge due casi:
+      1. imposte a 0/mancanti ma incluse nel lordo → le deduce;
+      2. imposte GONFIATE (le componenti SUPERANO il lordo, tipico OCR con righe
+         garanzia duplicate → doppio delle imposte) → le riconcilia col lordo.
+    No-op per le Vita (lordo == netto → residuo ≈ 0) e per le polizze che già quadrano."""
     try:
         lordo = float(d.get("premio_lordo") or 0)
         netto = float(d.get("premio_netto") or 0)
@@ -4393,10 +4396,18 @@ def _fill_imposte_residuo(d: dict) -> None:
         add = float(d.get("premio_addizionale") or 0)
     except (TypeError, ValueError):
         return
-    if lordo > 0 and (tasse + imposte2) <= 0.01:
-        residuo = round(lordo - netto - ssn - acc - add, 2)
+    if lordo <= 0:
+        return
+    residuo = round(lordo - netto - ssn - acc - add, 2)
+    somma = round(netto + tasse + imposte2 + ssn + acc + add, 2)
+    if (tasse + imposte2) <= 0.01:
         if residuo > 0.01:
             d["premio_tasse"] = residuo
+            d["premio_imposte"] = 0.0
+    elif somma - lordo > 0.5 and residuo >= -0.01:
+        # Componenti oltre il totale → imposte gonfiate: riconcilia sul lordo.
+        d["premio_tasse"] = max(residuo, 0.0)
+        d["premio_imposte"] = 0.0
 
 
 def _ripartizione_titolo_da_polizza(pol: dict, provv_tot_titolo: float) -> list:
@@ -4584,10 +4595,15 @@ async def update_polizza(pid: str, body: dict, user=Depends(require_user("admin"
     if doc and (set(body) & _ECON_FIELDS):
         # Heal imposte sulla scheda polizza: se il lordo le include ma il campo è 0.
         _tasse_prima = round(float(doc.get("premio_tasse") or 0), 2)
+        _imp_prima = round(float(doc.get("premio_imposte") or 0), 2)
         _fill_imposte_residuo(doc)
         _tasse_dopo = round(float(doc.get("premio_tasse") or 0), 2)
-        if _tasse_dopo != _tasse_prima:
-            await db.polizze.update_one({"id": pid}, {"$set": {"premio_tasse": _tasse_dopo}})
+        _imp_dopo = round(float(doc.get("premio_imposte") or 0), 2)
+        if _tasse_dopo != _tasse_prima or _imp_dopo != _imp_prima:
+            await db.polizze.update_one(
+                {"id": pid},
+                {"$set": {"premio_tasse": _tasse_dopo, "premio_imposte": _imp_dopo}},
+            )
         titolo_iniz = await db.titoli.find_one(
             {"polizza_id": pid, "stato": "da_incassare", "effetto": doc.get("effetto")},
             {"_id": 0, "id": 1},

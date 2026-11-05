@@ -39,6 +39,24 @@ import TagsEditor from "@/components/TagsEditor";
 import AzioniPolizzaTab from "@/components/AzioniPolizzaTab";
 import AllegatiCell from "@/components/AllegatiCell";
 
+// Imposte "consolidate" della polizza, riconciliate col premio LORDO (totale da pagare)
+// quando le componenti lo SUPERANO (tipico OCR con imposte doppie):
+// imposte = lordo − netto − SSN − accessori − addizionale. Altrimenti usa il dato memorizzato.
+const impostePolizza = (pol) => {
+    if (!pol) return 0;
+    const consolidate = (Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0);
+    const lordo = Number(pol.premio_lordo) || 0;
+    const netto = Number(pol.premio_netto) || 0;
+    const ssn = Number(pol.premio_ssn) || 0;
+    const acc = Number(pol.premio_accessori) || 0;
+    const add = Number(pol.premio_addizionale) || 0;
+    if (lordo <= 0) return consolidate;
+    const somma = netto + consolidate + ssn + acc + add;
+    const residuo = Math.round((lordo - netto - ssn - acc - add) * 100) / 100;
+    if (somma - lordo > 0.5 && residuo >= -0.01) return Math.max(residuo, 0);
+    return consolidate;
+};
+
 export default function PolizzaDetail() {
     const { id } = useParams();
     const navigate = useNavigate();
@@ -205,7 +223,7 @@ export default function PolizzaDetail() {
     const startPremiEdit = () => {
         setPremiForm({
             premio_netto: pol.premio_netto ?? 0,
-            premio_imposte: (Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0),
+            premio_imposte: impostePolizza(pol),
             premio_ssn: pol.premio_ssn ?? 0,
             premio_accessori: pol.premio_accessori ?? 0,
             premio_addizionale: pol.premio_addizionale ?? 0,
@@ -825,7 +843,7 @@ export default function PolizzaDetail() {
                         {!premiEdit ? (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 <F label="Premio netto" value={fmtEur(pol.premio_netto)} />
-                                <F label="Imposte" value={fmtEur((Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0))} />
+                                <F label="Imposte" value={fmtEur(impostePolizza(pol))} />
                                 <F label="SSN" value={fmtEur(pol.premio_ssn)} />
                                 <F label="Accessori" value={fmtEur(pol.premio_accessori)} />
                                 <F label="Addizionale" value={fmtEur(pol.premio_addizionale)} />
@@ -1039,7 +1057,7 @@ export default function PolizzaDetail() {
                                         scadenza: pol.scadenza || "",
                                         importo_lordo: pol.premio_lordo || 0,
                                         importo_netto: pol.premio_netto || 0,
-                                        imposte: pol.premio_imposte || 0,
+                                        imposte: impostePolizza(pol),
                                         provvigioni: pol.provvigioni || 0,
                                     } : {}),
                                 })}
@@ -1522,7 +1540,7 @@ function EditPolizzaDialog({ pol, onClose, onSaved }) {
         oggetto_assicurato: pol.oggetto_assicurato || "",
         premio_netto: pol.premio_netto || 0,
         premio_tasse: 0,
-        premio_imposte: (Number(pol.premio_imposte) || 0) + (Number(pol.premio_tasse) || 0),
+        premio_imposte: impostePolizza(pol),
         premio_ssn: pol.premio_ssn || 0,
         premio_accessori: pol.premio_accessori || 0,
         premio_addizionale: pol.premio_addizionale || 0,

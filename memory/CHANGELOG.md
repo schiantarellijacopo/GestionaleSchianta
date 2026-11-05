@@ -582,3 +582,22 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Fix in ocr_polizza.py: (1) DE-DUPLICA le righe garanzia prima di sommare; (2) se manca il lordo, lo ricostruisce dalle garanzie de-duplicate come ancoraggio; (3) regola primaria Imposte = Lordo − Netto − SSN − Diritti sempre; (4) collapse di sicurezza su scarto >0,50€. Prompt: premio_lordo_totale OBBLIGATORIO + niente righe duplicate.
 - Regressione: /app/backend/tests/test_ocr_imposte.py (6 test, incluso duplicate+no-lordo) → PASS. OCR live 3× consecutivi → sempre 25,43.
 - Richiede redeploy (il codice deployato precedente aveva ancora il bug del path no-lordo).
+
+## 2026-11-05 — Imposte polizza allineate al titolo (OCR righe doppie)
+Problema: polizza importata da OCR con imposte GONFIATE (50,86 invece di 25,43) —
+il titolo mostrava il valore corretto ma le sezioni "Premi" ed "Economici" della
+scheda polizza restavano a 50,86.
+Causa: `premio_tasse/premio_imposte` memorizzati col doppio (righe garanzia duplicate
+dall'LLM) e nessuna riconciliazione a livello di scheda polizza (solo il caso
+"imposte mancanti" era gestito da `_fill_imposte_residuo`).
+Fix:
+- backend `server.py` `_fill_imposte_residuo`: ora riconcilia anche le imposte GONFIATE
+  (quando netto+imposte+ssn+acc+add SUPERA il lordo di >0,50 €) → imposte = lordo−netto−ssn−acc−add,
+  azzerando `premio_imposte` per evitare doppio conteggio. `update_polizza` persiste
+  entrambi i campi (tasse + imposte).
+- frontend `PolizzaDetail.jsx`: helper `impostePolizza(pol)` riconcilia l'imposta
+  mostrata in tab Premi, form "Modifica premi", "Modifica polizza > Economici" e builder nuovo titolo.
+Verifica E2E (preview): POST /api/polizze con imposte 50,86/lordo 250 → persistite tasse 25,43,
+imposte 0, lordo 250; titolo auto-creato imposte 25,43. Unit: 6 scenari (gonfiate, mancanti, Vita, no-op) OK.
+Nota: per la polizza 184643597 su Railway, dopo il redeploy le sezioni mostrano subito 25,43;
+un salvataggio da "Modifica premi" rende permanente la correzione sul record legacy.
