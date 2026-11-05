@@ -231,6 +231,18 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
         w.document.close();
     };
 
+    const scaricaRiclassPdf = async (nAnni) => {
+        try {
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/report-azienda/riclassificato`, {
+                params: { anni: nAnni }, responseType: "blob",
+            });
+            const url = URL.createObjectURL(new Blob([r.data], { type: "application/pdf" }));
+            const w = window.open(url, "_blank");
+            if (!w) { const a = document.createElement("a"); a.href = url; a.download = `bilancio_riclassificato_${nAnni}anni.pdf`; a.click(); }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore generazione PDF riclassificato"); }
+    };
+
     const tipoCliente = ana?.tipo === "persona_giuridica";
 
     return (
@@ -276,13 +288,23 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                             <input type="file" hidden accept="application/pdf,image/*" onChange={uploadVisura} />
                         </label>
                         {riclass.length > 0 && (
-                            <div className="flex gap-2">
-                                <button onClick={() => stampaRiclassificato(3)}
-                                    className="inline-flex items-center gap-2 px-3 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700"
-                                    data-testid="sf-riclass-3-btn"><Printer size={14} /> Anteprima 3 anni</button>
-                                <button onClick={() => stampaRiclassificato(5)}
-                                    className="inline-flex items-center gap-2 px-3 py-2 bg-amber-700 text-white rounded text-sm hover:bg-amber-800"
-                                    data-testid="sf-riclass-5-btn"><Printer size={14} /> Anteprima 5 anni</button>
+                            <div className="flex flex-col gap-1.5 items-end">
+                                <div className="flex gap-2">
+                                    <button onClick={() => stampaRiclassificato(3)}
+                                        className="inline-flex items-center gap-2 px-3 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700"
+                                        data-testid="sf-riclass-3-btn"><Printer size={14} /> Anteprima 3 anni</button>
+                                    <button onClick={() => stampaRiclassificato(5)}
+                                        className="inline-flex items-center gap-2 px-3 py-2 bg-amber-700 text-white rounded text-sm hover:bg-amber-800"
+                                        data-testid="sf-riclass-5-btn"><Printer size={14} /> Anteprima 5 anni</button>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button onClick={() => scaricaRiclassPdf(3)}
+                                        className="inline-flex items-center gap-2 px-3 py-2 bg-rose-700 text-white rounded text-sm hover:bg-rose-800"
+                                        data-testid="sf-riclass-pdf-3-btn"><FileText size={14} /> PDF riclass. 3 anni</button>
+                                    <button onClick={() => scaricaRiclassPdf(5)}
+                                        className="inline-flex items-center gap-2 px-3 py-2 bg-rose-800 text-white rounded text-sm hover:bg-rose-900"
+                                        data-testid="sf-riclass-pdf-5-btn"><FileText size={14} /> PDF riclass. 5 anni</button>
+                                </div>
                             </div>
                         )}
                         {tipoCliente && (

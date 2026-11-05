@@ -132,6 +132,196 @@ async def report_docx(aid: str, gruppo: bool = False, user=Depends(current_user)
         headers={"Content-Disposition": f'attachment; filename="report_azienda_{aid[:8]}.docx"'})
 
 
+@router.get("/anagrafiche/{aid}/report-azienda/riclassificato")
+async def report_riclassificato_pdf(aid: str, anni: int = 5, user=Depends(current_user)):
+    """PDF del bilancio riclassificato (CE a valore aggiunto + SP finanziario)
+    con comparazione sugli ultimi `anni` esercizi (3 o 5)."""
+    anni = 3 if anni <= 3 else 5
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    sf = ana.get("salute_fiscale_dati") or {}
+    riclass = sf.get("bilanci_riclassificati") or []
+    if not riclass:
+        raise HTTPException(400, "Nessun bilancio riclassificato disponibile. Compila prima da OpenAPI.")
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    logo = await _logo_bytes()
+    pdf = _build_riclass_pdf(ana, riclass, anni, sf.get("fonte"), az, logo)
+    return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                             headers={"Content-Disposition": f'inline; filename="bilancio_riclassificato_{anni}anni_{aid[:8]}.pdf"'})
+
+
+# ============================================================ PDF RICLASSIFICATO
+_CE_ROWS = [
+    ("Ricavi delle vendite e prestazioni", "ricavi", 0),
+    ("Variazione rimanenze prodotti", "rimanenze_variazione", 0),
+    ("VALORE DELLA PRODUZIONE", "valore_produzione", 1),
+    ("Costi per materie prime", "costi_materie", 0),
+    ("Costi per servizi", "costi_servizi", 0),
+    ("Godimento beni di terzi", "costi_godimento_beni", 0),
+    ("Oneri diversi di gestione", "oneri_diversi_gestione", 0),
+    ("VALORE AGGIUNTO", "__va", 1),
+    ("Costo del personale", "costi_personale", 0),
+    ("MARGINE OPERATIVO LORDO (EBITDA)", "ebitda", 1),
+    ("Ammortamenti e svalutazioni", "ammortamenti", 0),
+    ("RISULTATO OPERATIVO (EBIT)", "ebit", 1),
+    ("Proventi finanziari", "proventi_finanziari", 0),
+    ("Oneri finanziari", "oneri_finanziari", 0),
+    ("RISULTATO ANTE IMPOSTE", "utile_lordo", 1),
+    ("Imposte sul reddito", "imposte", 0),
+    ("UTILE / (PERDITA) D'ESERCIZIO", "utile_netto", 1),
+]
+_SP_ROWS = [
+    ("ATTIVO", None, 2),
+    ("Immobilizzazioni", "immobilizzazioni", 0),
+    ("Attivo circolante", "attivo_circolante", 0),
+    ("\u2014 di cui Rimanenze", "rimanenze_totali", 0),
+    ("\u2014 di cui Crediti verso clienti", "crediti_clienti", 0),
+    ("TOTALE ATTIVO", "totale_attivo", 1),
+    ("PASSIVO E PATRIMONIO NETTO", None, 2),
+    ("Patrimonio netto", "patrimonio_netto", 1),
+    ("\u2014 di cui Capitale sociale", "capitale_sociale", 0),
+    ("Totale debiti", "totale_debiti", 0),
+    ("\u2014 di cui Debiti a breve termine", "debiti_breve", 0),
+    ("\u2014 di cui Debiti verso fornitori", "debiti_fornitori", 0),
+]
+
+
+def _rnum(v):
+    try:
+        return None if v in (None, "") else float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _valore_aggiunto(y):
+    if not y.get("completo"):
+        return None
+    vp = _rnum(y.get("valore_produzione"))
+    if vp is None:
+        return None
+    return vp - sum(_rnum(y.get(k)) or 0 for k in ("costi_materie", "costi_servizi", "costi_godimento_beni", "oneri_diversi_gestione"))
+
+
+def _cell(y, key):
+    return _valore_aggiunto(y) if key == "__va" else y.get(key)
+
+
+def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable)
+
+    navy = colors.HexColor("#0f2f4a")
+    amber = colors.HexColor("#b45309")
+    ss = getSampleStyleSheet()
+    H1 = ParagraphStyle("H1", parent=ss["Title"], fontSize=15, leading=19, textColor=navy, alignment=TA_CENTER, spaceAfter=2)
+    sub = ParagraphStyle("sub", parent=ss["BodyText"], fontSize=9, alignment=TA_CENTER, textColor=colors.HexColor("#64748b"))
+    H2 = ParagraphStyle("H2", parent=ss["Heading2"], fontSize=11.5, leading=14, textColor=navy, spaceBefore=12, spaceAfter=4)
+    small = ParagraphStyle("s", parent=ss["BodyText"], fontSize=7, leading=9.5, textColor=colors.HexColor("#94a3b8"))
+
+    years = sorted([y for y in riclass if y.get("anno") is not None],
+                   key=lambda x: x.get("anno") or 0, reverse=True)[:anni]
+    if not years:
+        raise HTTPException(400, "Nessun esercizio disponibile")
+
+    def fmt(v):
+        x = _rnum(v)
+        return "n.d." if x is None else "€ " + f"{x:,.0f}".replace(",", ".")
+
+    def var_pct(key):
+        a = _rnum(_cell(years[0], key))
+        b = _rnum(_cell(years[-1], key))
+        if a is None or b is None or b == 0:
+            return "", None
+        p = (a - b) / abs(b) * 100
+        return f"{'+' if p >= 0 else ''}{p:.1f}%", p
+
+    ncol = len(years)
+    anno_min, anno_max = years[-1]["anno"], years[0]["anno"]
+
+    def build_table(rows):
+        header = ["Voce"] + [str(y["anno"]) for y in years] + [f"Var. {anno_min}\u2192{anno_max}"]
+        data = [header]
+        styles = [
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#cbd5e1")),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]
+        ri = 1
+        for label, key, kind in rows:
+            if kind == 2:
+                data.append([label] + [""] * (ncol + 1))
+                styles.append(("SPAN", (0, ri), (-1, ri)))
+                styles.append(("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#0f766e")))
+                styles.append(("TEXTCOLOR", (0, ri), (-1, ri), colors.white))
+                styles.append(("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"))
+            else:
+                vtxt, vp = var_pct(key)
+                data.append([label] + [fmt(_cell(y, key)) for y in years] + [vtxt])
+                if kind == 1:
+                    styles.append(("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#f1f5f9")))
+                    styles.append(("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"))
+                if vp is not None:
+                    styles.append(("TEXTCOLOR", (-1, ri), (-1, ri),
+                                   colors.HexColor("#047857") if vp >= 0 else colors.HexColor("#be123c")))
+            ri += 1
+        voce_w = 7.2
+        col_w = (24.5 - voce_w - 3.0) / ncol
+        widths = [voce_w * cm] + [col_w * cm] * ncol + [3.0 * cm]
+        t = Table(data, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle(styles))
+        return t
+
+    rag = (ana.get("ragione_sociale") or "").replace("&", "&amp;").replace("<", "&lt;")
+    story = [
+        Paragraph("Bilancio riclassificato \u2014 comparazione %d %s" % (ncol, "anno" if ncol == 1 else "anni"), H1),
+        Paragraph("%s \u00b7 esercizi %s\u2013%s%s" % (rag, anno_min, anno_max, (" \u00b7 fonte: " + fonte) if fonte else ""), sub),
+        HRFlowable(width="100%", thickness=1.2, color=navy, spaceBefore=6, spaceAfter=4),
+        Paragraph("Conto economico riclassificato (a valore aggiunto)", H2),
+        build_table(_CE_ROWS),
+        Paragraph("Stato patrimoniale riclassificato", H2),
+        build_table(_SP_ROWS),
+        Spacer(1, 8),
+        Paragraph("Le voci non disponibili per gli esercizi precedenti all'ultimo bilancio depositato "
+                  "sono indicate con \"n.d.\". " + NOTE_LEGALI, small),
+        Paragraph(NOTE_IA, small),
+    ]
+
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=2.2 * cm, bottomMargin=1.6 * cm,
+                            leftMargin=1.8 * cm, rightMargin=1.8 * cm, title="Bilancio riclassificato")
+
+    def _hdr(canvas, d):
+        canvas.saveState()
+        W, H = landscape(A4)
+        if logo:
+            try:
+                from reportlab.lib.utils import ImageReader
+                img = ImageReader(BytesIO(logo))
+                iw, ih = img.getSize(); lw = 2.8 * cm; lh = lw * ih / iw
+                canvas.drawImage(img, W - 1.8 * cm - lw, H - 0.9 * cm - lh, lw, lh, preserveAspectRatio=True, mask="auto")
+            except Exception:
+                pass
+        canvas.setFont("Helvetica", 7); canvas.setFillColor(colors.HexColor("#94a3b8"))
+        canvas.drawString(1.8 * cm, 1.0 * cm, "Documento riservato \u00b7 Bilancio riclassificato")
+        canvas.drawRightString(W - 1.8 * cm, 1.0 * cm, f"Pag. {d.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_hdr, onLaterPages=_hdr)
+    return buf.getvalue()
+
+
 # ============================================================ PDF
 def _build_pdf(ana, sf, bil, comp, az, piramide, mdc, mdc_giorno, impatto, *, gruppo=None, logo=None) -> bytes:
     from reportlab.lib.pagesizes import A4

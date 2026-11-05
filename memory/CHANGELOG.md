@@ -709,3 +709,11 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Nuovo endpoint `POST /anagrafiche/{aid}/applica-visura` (admin/collaboratore): mappa il JSON OCR visura sui campi anagrafica (ragione_sociale, partita_iva, codice_fiscale, indirizzo/comune/provincia/cap, telefono, email, pec, amministratore=legale rappr.) e su `corporate_profile` (ateco, capitale_sociale, numero_dipendenti, pec, legale_rappresentante); salva il raw in `visura_camerale_dati`; forza tipo=persona_giuridica se forma societaria. Aggiorna anche campi già compilati.
 - Frontend `SaluteFiscaleTab.jsx`: pulsante "Carica visura camerale" (usa OCR esistente `/utility/ocr-visura-camerale` poi `applica-visura`); pulsanti "Anteprima 3 anni"/"Anteprima 5 anni" (gated su `bilanci_riclassificati`). `buildRiclassHTML()` apre una finestra stampabile (CE riclassificato a valore aggiunto + SP riclassificato finanziario, colonne per anno + Var.%, voci mancanti = "n.d.", bottone Stampa/Salva PDF).
 - Test: `applica-visura` verificato via curl (mapping + persistenza corretti). UI verificata via screenshot (bottoni presenti, tab carica). Anteprima stampabile verificata: contiene VALORE DELLA PRODUZIONE, VALORE AGGIUNTO, EBITDA, TOTALE ATTIVO, 5 colonne anno (2024..2020), "n.d." per voci storiche mancanti. NB: flusso OpenAPI reale e OCR visura reale non testabili in preview (credenziali/documenti solo su Railway) — da validare dopo "Save to GitHub".
+
+## 2026-06 — Report riclassificato PDF server-side
+- Nuovo endpoint GET /api/anagrafiche/{aid}/report-azienda/riclassificato?anni=3|5 (routes/report_azienda.py)
+  genera PDF A4 landscape del bilancio riclassificato (CE a valore aggiunto + SP finanziario),
+  comparazione 3 o 5 anni, Var.% colorata, "n.d." per voci storiche non disponibili. Logo/note legali inclusi.
+- SaluteFiscaleTab.jsx: aggiunti pulsanti "PDF riclass. 3 anni" / "PDF riclass. 5 anni"
+  (data-testid sf-riclass-pdf-3-btn / sf-riclass-pdf-5-btn) accanto alle anteprime stampabili.
+- Testato e2e con login admin + anagrafica seed: HTTP 200, application/pdf valido (3 e 5 anni). Record temp rimosso.
