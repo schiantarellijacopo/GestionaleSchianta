@@ -1624,8 +1624,26 @@ async def company_financials(cf_piva: str) -> Optional[dict]:
         "copertura": d.get("coverageRatios"),
     }
 
-    # storico fatturato/utile (IT-advanced balanceSheets.all)
+    # voci riclassificate dell'ultimo bilancio (dettaglio completo)
+    _RICLASS_KEYS = (
+        "ricavi", "rimanenze_variazione", "valore_produzione", "costi_materie",
+        "costi_servizi", "costi_godimento_beni", "oneri_diversi_gestione",
+        "costi_personale", "ebitda", "ammortamenti", "ebit", "proventi_finanziari",
+        "oneri_finanziari", "utile_lordo", "imposte", "utile_netto",
+        "immobilizzazioni", "attivo_circolante", "rimanenze_totali", "crediti_clienti",
+        "totale_attivo", "patrimonio_netto", "capitale_sociale", "totale_debiti",
+        "debiti_breve", "debiti_fornitori", "dipendenti",
+    )
+
+    def _riclass_da_dett(x: dict) -> dict:
+        row = {k: x.get(k) for k in _RICLASS_KEYS}
+        row["anno"] = x.get("anno")
+        row["completo"] = True
+        return row
+
+    # storico fatturato/utile + bilanci riclassificati multi-anno (IT-advanced balanceSheets.all)
     storico = []
+    bilanci_riclassificati = {}
     adv_name = None
     adv = await _call_api([f"GET:{_CO_HOST}/IT-advanced"], "GET", f"https://{_CO_HOST}/IT-advanced/{key}")
     if adv:
@@ -1635,20 +1653,42 @@ async def company_financials(cf_piva: str) -> Optional[dict]:
         da = da or {}
         adv_name = da.get("companyName")
         for b in (da.get("balanceSheets") or {}).get("all", []):
+            anno_b = b.get("year")
             t = _co_num(b.get("turnover"))
             if t:
                 storico.append({
-                    "anno": b.get("year"),
+                    "anno": anno_b,
                     "fatturato": t,
                     "patrimonio_netto": _co_num(b.get("netWorth")),
                     "dipendenti": b.get("employees"),
                 })
+            if anno_b is not None:
+                # anni storici: solo le voci leggere disponibili (il resto sarà "n.d.")
+                row = {k: None for k in _RICLASS_KEYS}
+                row.update({
+                    "anno": anno_b,
+                    "ricavi": t,
+                    "costi_personale": _co_num(b.get("totalStaffCost")),
+                    "totale_attivo": _co_num(b.get("totalAssets")),
+                    "patrimonio_netto": _co_num(b.get("netWorth")),
+                    "capitale_sociale": _co_num(b.get("shareCapital")),
+                    "dipendenti": b.get("employees"),
+                    "completo": False,
+                })
+                bilanci_riclassificati[anno_b] = row
         storico.sort(key=lambda x: x.get("anno") or 0, reverse=True)
+
+    # l'anno dell'ultimo bilancio (IT-full) ha il dettaglio completo → prevale
+    if dett.get("anno") is not None:
+        bilanci_riclassificati[dett["anno"]] = _riclass_da_dett(dett)
+    riclass_list = sorted(bilanci_riclassificati.values(),
+                          key=lambda x: x.get("anno") or 0, reverse=True)[:5]
 
     return {
         "dettaglio": dett,
         "indici": indici,
         "storico": storico[:6],
+        "bilanci_riclassificati": riclass_list,
         "ragione_sociale": d.get("companyName") or adv_name,
         "provider": "company.openapi.com IT-full (LIVE)",
     }

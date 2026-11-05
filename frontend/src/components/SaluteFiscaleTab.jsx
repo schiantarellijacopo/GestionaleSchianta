@@ -8,19 +8,149 @@ import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Upload, Activity, TrendingUp, AlertTriangle, Sparkles } from "lucide-react";
+import { Upload, Activity, TrendingUp, AlertTriangle, Sparkles, FileText, Printer } from "lucide-react";
 import { BarChart, Bar, Cell, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceLine } from "recharts";
 import { toast } from "sonner";
 import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
 import { PiramideCopertureNuova } from "@/components/AnalisiClienteTab";
 import ImmobiliSection from "@/components/ImmobiliSection";
 
+// ── Anteprima stampabile del bilancio riclassificato (3 / 5 anni) ──
+function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
+    const years = [...(allYears || [])]
+        .filter((y) => y && y.anno != null)
+        .sort((a, b) => (b.anno || 0) - (a.anno || 0))
+        .slice(0, nAnni);
+    if (!years.length) return null;
+
+    const num = (v) => (v == null || v === "" || isNaN(Number(v))) ? null : Number(v);
+    const fmt = (v) => { const x = num(v); return x == null ? "n.d." : x.toLocaleString("it-IT", { maximumFractionDigits: 0 }) + " €"; };
+    const va = (y) => {
+        if (!y.completo) return null;
+        const vp = num(y.valore_produzione);
+        if (vp == null) return null;
+        return vp - ((num(y.costi_materie) || 0) + (num(y.costi_servizi) || 0) + (num(y.costi_godimento_beni) || 0) + (num(y.oneri_diversi_gestione) || 0));
+    };
+    const cellVal = (y, key) => key === "__va" ? va(y) : y[key];
+
+    const ceRows = [
+        ["Ricavi delle vendite e prestazioni", "ricavi", 0],
+        ["Variazione rimanenze prodotti", "rimanenze_variazione", 0],
+        ["VALORE DELLA PRODUZIONE", "valore_produzione", 1],
+        ["Costi per materie prime", "costi_materie", 0],
+        ["Costi per servizi", "costi_servizi", 0],
+        ["Godimento beni di terzi", "costi_godimento_beni", 0],
+        ["Oneri diversi di gestione", "oneri_diversi_gestione", 0],
+        ["VALORE AGGIUNTO", "__va", 1],
+        ["Costo del personale", "costi_personale", 0],
+        ["MARGINE OPERATIVO LORDO (EBITDA)", "ebitda", 1],
+        ["Ammortamenti e svalutazioni", "ammortamenti", 0],
+        ["RISULTATO OPERATIVO (EBIT)", "ebit", 1],
+        ["Proventi finanziari", "proventi_finanziari", 0],
+        ["Oneri finanziari", "oneri_finanziari", 0],
+        ["RISULTATO ANTE IMPOSTE", "utile_lordo", 1],
+        ["Imposte sul reddito", "imposte", 0],
+        ["UTILE / (PERDITA) D'ESERCIZIO", "utile_netto", 1],
+    ];
+    const spRows = [
+        ["ATTIVO", null, 2],
+        ["Immobilizzazioni", "immobilizzazioni", 0],
+        ["Attivo circolante", "attivo_circolante", 0],
+        ["\u2014 di cui Rimanenze", "rimanenze_totali", 0],
+        ["\u2014 di cui Crediti verso clienti", "crediti_clienti", 0],
+        ["TOTALE ATTIVO", "totale_attivo", 1],
+        ["PASSIVO E PATRIMONIO NETTO", null, 2],
+        ["Patrimonio netto", "patrimonio_netto", 1],
+        ["\u2014 di cui Capitale sociale", "capitale_sociale", 0],
+        ["Totale debiti", "totale_debiti", 0],
+        ["\u2014 di cui Debiti a breve termine", "debiti_breve", 0],
+        ["\u2014 di cui Debiti verso fornitori", "debiti_fornitori", 0],
+    ];
+
+    const varPct = (key) => {
+        const recente = cellVal(years[0], key);
+        const vecchio = cellVal(years[years.length - 1], key);
+        const a = num(recente), b = num(vecchio);
+        if (a == null || b == null || b === 0) return "";
+        const p = ((a - b) / Math.abs(b)) * 100;
+        const cls = p >= 0 ? "pos" : "neg";
+        return `<td class="var ${cls}">${p >= 0 ? "+" : ""}${p.toFixed(1)}%</td>`;
+    };
+
+    const headCols = years.map((y) => `<th class="num">${y.anno}</th>`).join("");
+    const renderRows = (rows) => rows.map(([label, key, kind]) => {
+        if (kind === 2) return `<tr class="sez"><td colspan="${years.length + 2}">${label}</td></tr>`;
+        const cells = years.map((y) => `<td class="num">${fmt(cellVal(y, key))}</td>`).join("");
+        return `<tr class="${kind === 1 ? "tot" : ""}"><td class="lbl">${label}</td>${cells}${varPct(key)}</tr>`;
+    }).join("");
+
+    const titolo = azienda || "Azienda";
+    const annoMin = years[years.length - 1].anno, annoMax = years[0].anno;
+    return `<!doctype html><html lang="it"><head><meta charset="utf-8">
+<title>Bilancio riclassificato ${nAnni} anni \u2014 ${titolo}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 28px 34px; }
+  .bar { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:18px; }
+  h1 { font-size: 19px; margin: 0; }
+  .sub { font-size: 12px; color:#64748b; margin-top:3px; }
+  .btn { background:#0f766e; color:#fff; border:0; border-radius:6px; padding:9px 16px; font-size:13px; cursor:pointer; }
+  h2 { font-size:14px; margin: 22px 0 8px; padding-bottom:5px; border-bottom:2px solid #0f766e; color:#0f766e; }
+  table { width:100%; border-collapse:collapse; font-size:12px; }
+  th, td { padding:5px 9px; border-bottom:1px solid #e2e8f0; }
+  th { background:#f1f5f9; text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:#475569; }
+  th.num, td.num { text-align:right; font-variant-numeric: tabular-nums; }
+  td.lbl { text-align:left; }
+  tr.tot td { font-weight:700; background:#f8fafc; }
+  tr.sez td { font-weight:700; background:#0f766e; color:#fff; text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
+  td.var { text-align:right; font-weight:600; }
+  td.var.pos { color:#047857; } td.var.neg { color:#be123c; }
+  .foot { margin-top:22px; font-size:10px; color:#94a3b8; }
+  @media print { .btn { display:none; } body { padding:0; } }
+</style></head>
+<body>
+  <div class="bar">
+    <div>
+      <h1>Bilancio riclassificato \u2014 comparazione ${years.length} ${years.length === 1 ? "anno" : "anni"}</h1>
+      <div class="sub">${titolo} \u00b7 esercizi ${annoMin}\u2013${annoMax}${fonte ? " \u00b7 fonte: " + fonte : ""}</div>
+    </div>
+    <button class="btn" onclick="window.print()">\ud83d\udda8\ufe0f Stampa / Salva PDF</button>
+  </div>
+  <h2>Conto economico riclassificato (a valore aggiunto)</h2>
+  <table><thead><tr><th>Voce</th>${headCols}<th class="num">Var. ${annoMin}\u2192${annoMax}</th></tr></thead>
+  <tbody>${renderRows(ceRows)}</tbody></table>
+  <h2>Stato patrimoniale riclassificato</h2>
+  <table><thead><tr><th>Voce</th>${headCols}<th class="num">Var. ${annoMin}\u2192${annoMax}</th></tr></thead>
+  <tbody>${renderRows(spRows)}</tbody></table>
+  <div class="foot">Le voci non disponibili per gli esercizi precedenti all'ultimo bilancio depositato sono indicate con "n.d.". Documento generato automaticamente dal gestionale.</div>
+</body></html>`;
+}
+
+
 export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [dati, setDati] = useState(null);
     const [aggIl, setAggIl] = useState(null);
     const [busy, setBusy] = useState(false);
+    const [visuraBusy, setVisuraBusy] = useState(false);
     const [showPir, setShowPir] = useState(false);
     const [pirBusy, setPirBusy] = useState(false);
+
+    const uploadVisura = async (e) => {
+        const f = e.target.files?.[0]; if (!f) return;
+        setVisuraBusy(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            fd.append("anagrafica_id", anagrafica_id);
+            const r = await api.post(`/utility/ocr-visura-camerale`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            const res = (await api.post(`/anagrafiche/${anagrafica_id}/applica-visura`, { dati: r.data })).data;
+            const nAmm = (res.amministratori || []).length;
+            toast.success(`Visura elaborata · dati societari aggiornati${nAmm ? ` · ${nAmm} amministratori rilevati` : ""}`);
+            onReload?.();
+        } catch (err) { toast.error(err.response?.data?.detail || "Errore OCR visura camerale"); }
+        finally { setVisuraBusy(false); e.target.value = ""; }
+    };
 
     const apriPiramide = async () => {
         setPirBusy(true);
@@ -87,9 +217,19 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
     const ind = dati?.indicatori || {};
     const bil = dati?.bilancio_estratto || {};
     const storico = dati?.storico || [];
+    const riclass = dati?.bilanci_riclassificati || [];
     const rischio = dati?.score_rischio_default ?? null;
     const crossSell = dati?.cross_sell_suggerito || [];
     const ramoColor = (s) => s == null ? "slate" : s <= 3 ? "emerald" : s <= 6 ? "amber" : "rose";
+
+    const stampaRiclassificato = (nAnni) => {
+        const html = buildRiclassHTML(riclass, nAnni, dati?.fonte, ana?.ragione_sociale);
+        if (!html) { toast.error("Nessun bilancio disponibile. Premi prima \u26a1 Compila da OpenAPI."); return; }
+        const w = window.open("", "_blank");
+        if (!w) { toast.error("Abilita i popup per aprire l'anteprima di stampa"); return; }
+        w.document.write(html);
+        w.document.close();
+    };
 
     const tipoCliente = ana?.tipo === "persona_giuridica";
 
@@ -130,6 +270,21 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                             {busy ? "Elaborazione OCR…" : "Carica bilancio (PDF/JPG)"}
                             <input type="file" hidden accept="application/pdf,image/*" onChange={upload} />
                         </label>
+                        <label className="inline-flex items-center gap-2 px-3 py-2 bg-teal-700 text-white rounded text-sm cursor-pointer hover:bg-teal-800" data-testid="sf-visura-btn">
+                            <FileText size={14} />
+                            {visuraBusy ? "Leggo visura…" : "Carica visura camerale"}
+                            <input type="file" hidden accept="application/pdf,image/*" onChange={uploadVisura} />
+                        </label>
+                        {riclass.length > 0 && (
+                            <div className="flex gap-2">
+                                <button onClick={() => stampaRiclassificato(3)}
+                                    className="inline-flex items-center gap-2 px-3 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700"
+                                    data-testid="sf-riclass-3-btn"><Printer size={14} /> Anteprima 3 anni</button>
+                                <button onClick={() => stampaRiclassificato(5)}
+                                    className="inline-flex items-center gap-2 px-3 py-2 bg-amber-700 text-white rounded text-sm hover:bg-amber-800"
+                                    data-testid="sf-riclass-5-btn"><Printer size={14} /> Anteprima 5 anni</button>
+                            </div>
+                        )}
                         {tipoCliente && (
                             <button onClick={apriPiramide} disabled={pirBusy}
                                 className="inline-flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"

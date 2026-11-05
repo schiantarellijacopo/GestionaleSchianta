@@ -1657,6 +1657,7 @@ async def salute_fiscale_da_openapi(aid: str, user=Depends(current_user)) -> dic
             "indicatori": indicatori,
             "indici_ufficiali": indici_raw,
             "storico": fin.get("storico") or [],
+            "bilanci_riclassificati": fin.get("bilanci_riclassificati") or [],
             "score_rischio_default": rischio,
             "cross_sell_suggerito": list(dict.fromkeys(cross_sell)),
             "fonte": fin.get("provider"),
@@ -1669,8 +1670,74 @@ async def salute_fiscale_da_openapi(aid: str, user=Depends(current_user)) -> dic
 
 
 
-# ===========================================================
-# 9) RACCOLTA DATI + POTENTI DOMANDE (onboarding cliente)
+class VisuraApplyBody(BaseModel):
+    dati: dict
+
+
+@router.post("/anagrafiche/{aid}/applica-visura")
+async def applica_visura(
+    aid: str, body: VisuraApplyBody,
+    user=Depends(require_user("admin", "collaboratore")),
+) -> dict:
+    """Applica i dati estratti da una visura camerale (OCR) all'anagrafica,
+    aggiornando anche i campi già compilati (scelta dell'utente)."""
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
+    if not ana:
+        raise HTTPException(404, "Anagrafica non trovata")
+    v = body.dati or {}
+    upd: dict = {}
+
+    def setif(field: str, val):
+        if val not in (None, "", []):
+            upd[field] = val
+
+    setif("ragione_sociale", v.get("ragione_sociale"))
+    setif("partita_iva", v.get("partita_iva"))
+    setif("codice_fiscale", v.get("codice_fiscale_ditta"))
+    setif("indirizzo", v.get("indirizzo_sede"))
+    setif("comune", v.get("comune_sede"))
+    setif("provincia", v.get("provincia_sede"))
+    setif("cap", v.get("cap_sede"))
+    setif("telefono", v.get("telefono"))
+    setif("email", v.get("email"))
+    setif("pec", v.get("pec"))
+
+    # legale rappresentante / amministratore
+    amm = v.get("amministratori") or []
+    def _is_lr(a):
+        r = (a.get("ruolo") or "").lower()
+        return any(x in r for x in ("legale", "unico", "presidente"))
+    lr = next((a for a in amm if _is_lr(a)), amm[0] if amm else None)
+    nome_lr = None
+    if lr:
+        nome_lr = f"{lr.get('nome') or ''} {lr.get('cognome') or ''}".strip() or None
+        setif("amministratore", nome_lr)
+
+    # corporate profile (merge, aggiornando i valori dalla visura)
+    cp = dict(ana.get("corporate_profile") or {})
+    if v.get("codice_ateco"):
+        cp["ateco"] = v["codice_ateco"]
+    if v.get("capitale_sociale"):
+        cp["capitale_sociale"] = v["capitale_sociale"]
+    if v.get("numero_dipendenti") not in (None, ""):
+        cp["numero_dipendenti"] = v["numero_dipendenti"]
+    if v.get("pec"):
+        cp["pec"] = v["pec"]
+    if nome_lr:
+        cp["legale_rappresentante"] = nome_lr
+    if cp:
+        upd["corporate_profile"] = cp
+
+    # se la visura indica una forma giuridica societaria → persona giuridica
+    fg = (v.get("forma_giuridica") or "").lower()
+    if fg and "individuale" not in fg and "ditta" not in fg:
+        upd["tipo"] = "persona_giuridica"
+
+    upd["visura_camerale_dati"] = {**v, "estratto_il": _now_iso()}
+    upd["updated_at"] = _now_iso()
+    await db.anagrafiche.update_one({"id": aid}, {"$set": upd})
+    return {"ok": True, "aggiornati": [k for k in upd if k not in ("updated_at",)],
+            "amministratori": amm, "legale_rappresentante": nome_lr}
 # ===========================================================
 class RaccoltaDatiBody(BaseModel):
     raccolta_dati: dict
