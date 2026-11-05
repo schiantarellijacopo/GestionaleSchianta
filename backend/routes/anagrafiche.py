@@ -1208,20 +1208,61 @@ async def upload_documento_anagrafica(
         raise HTTPException(400, "File troppo grande (max 15 MB)")
     ct = file.content_type or obj_storage.mime_for(file.filename or "")
     ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
-    path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/{tipo}_{_uid()}.{ext}"
-    try:
-        result = obj_storage.put_object(path, data, ct)
-    except Exception as e:
-        raise HTTPException(503, f"Errore upload: {e}")
-    url = f"/api/storage/{result['path']}"
-    doc_entry = {
-        "url": url, "storage_path": result["path"],
+    doc_id = _uid()
+    tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+
+    # Entry precedente (per sostituire il file sul cloud alla ri-upload)
+    prev = await db.anagrafiche.find_one(
+        {"id": aid}, {"_id": 0, f"documenti.{tipo}": 1})
+    prev_entry = ((prev or {}).get("documenti") or {}).get(tipo) or {}
+    prev_cloud = prev_entry.get("cloud_sync") or {}
+
+    import cloud_doc_sync
+    doc_entry: dict = {
+        "doc_id": doc_id,
         "nome_file": file.filename, "mime": ct,
         "size_kb": round(len(data) / 1024, 1),
         "data_caricamento": _now_iso(),
         "scadenza": scadenza,
         "caricato_da": user.get("id"),
     }
+
+    # Modello CLOUD-ONLY: se c'è un cloud collegato, il file vive SOLO sul cloud.
+    sync = None
+    providers = await cloud_doc_sync.connected_providers(tenant_id)
+    if providers:
+        try:
+            sync = await cloud_doc_sync.mirror_document(
+                tenant_id=tenant_id, entita_tipo="anagrafica", entita_id=aid,
+                doc_label_text=cloud_doc_sync.doc_label(tipo), doc_id=doc_id,
+                data=data, mime=ct, filename=file.filename or f"{tipo}.{ext}",
+                replace_file_id=prev_cloud.get("file_id"),
+            )
+        except Exception as _e:
+            logging.warning("Upload cloud anagrafica doc %s fallito: %s", tipo, _e)
+
+    if sync:
+        # Solo cloud: nessuna copia interna.
+        doc_entry["cloud_sync"] = sync
+        doc_entry["storage_provider"] = sync["provider"]
+        doc_entry["pending_sync"] = False
+        url = f"/api/anagrafiche/{aid}/documenti/{tipo}/download"
+        doc_entry["url"] = url
+    else:
+        # Fallback: nessun cloud collegato (o upload fallito) → copia interna + pending.
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/{tipo}_{doc_id}.{ext}"
+        try:
+            result = obj_storage.put_object(path, data, ct)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        url = f"/api/storage/{result['path']}"
+        doc_entry["url"] = url
+        doc_entry["storage_path"] = result["path"]
+        doc_entry["storage_provider"] = "emergent"
+        doc_entry["pending_sync"] = True
+        if prev_cloud.get("file_id"):
+            await cloud_doc_sync.delete_cloud_file(
+                tenant_id, prev_cloud.get("provider", "google_drive"), prev_cloud["file_id"])
     set_fields = {f"documenti.{tipo}": doc_entry, "updated_at": _now_iso()}
     if tipo == "privacy_firmata":
         set_fields.update({
@@ -1250,11 +1291,64 @@ async def upload_documento_anagrafica(
     return {tipo: doc_entry, "avatar_url": avatar_url}
 
 
+@router.get("/anagrafiche/{aid}/documenti/{tipo}/download")
+async def download_documento_anagrafica(aid: str, tipo: str,
+                                        user: dict = Depends(current_user)):
+    """Scarica/visualizza un documento della card: dal cloud se è lì, altrimenti dallo storage interno."""
+    if tipo not in ANAGRAFICA_DOC_TIPI:
+        raise HTTPException(400, "Tipo non valido")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, f"documenti.{tipo}": 1})
+    entry = ((ana or {}).get("documenti") or {}).get(tipo) if ana else None
+    if not entry:
+        raise HTTPException(404, "Documento non trovato")
+    # ACL cliente: solo la propria anagrafica
+    if user.get("role") == "cliente" and user.get("anagrafica_id") != aid:
+        raise HTTPException(403, "Permesso negato")
+    nome = entry.get("nome_file") or f"{tipo}.pdf"
+    mime = entry.get("mime") or "application/octet-stream"
+    cloud = entry.get("cloud_sync") or {}
+    if cloud.get("file_id") and not entry.get("pending_sync"):
+        import cloud_doc_sync
+        tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+        res = await cloud_doc_sync.download_cloud_file(
+            tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
+        if not res:
+            raise HTTPException(503, "Impossibile scaricare il documento dal cloud")
+        data, ctype = res
+        return StreamingResponse(
+            _io.BytesIO(data), media_type=mime or ctype,
+            headers={"Content-Disposition": f'inline; filename="{nome}"'})
+    sp = entry.get("storage_path")
+    if not sp:
+        raise HTTPException(404, "File non disponibile")
+    try:
+        data, ctype = obj_storage.get_object(sp)
+    except Exception as e:
+        raise HTTPException(503, f"Errore download: {e}")
+    return StreamingResponse(
+        _io.BytesIO(data), media_type=mime or ctype,
+        headers={"Content-Disposition": f'inline; filename="{nome}"'})
+
+
 @router.delete("/anagrafiche/{aid}/documenti/{tipo}")
 async def delete_documento_anagrafica(aid: str, tipo: str,
                                        user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))):
     if tipo not in ANAGRAFICA_DOC_TIPI:
         raise HTTPException(400, "Tipo non valido")
+    ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0, f"documenti.{tipo}": 1})
+    entry = ((ana or {}).get("documenti") or {}).get(tipo) if ana else None
+    if entry:
+        cloud = entry.get("cloud_sync") or {}
+        if cloud.get("file_id"):
+            import cloud_doc_sync
+            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+            await cloud_doc_sync.delete_cloud_file(
+                tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
+        elif entry.get("storage_path"):
+            try:
+                obj_storage.delete_object(entry["storage_path"])
+            except Exception:
+                pass
     await db.anagrafiche.update_one(
         {"id": aid},
         {"$unset": {f"documenti.{tipo}": ""}, "$set": {"updated_at": _now_iso()}},
@@ -1281,8 +1375,22 @@ async def prepara_firma_documento(aid: str, tipo: str,
     mime = entry.get("mime") or entry.get("content_type") or ""
     if "pdf" not in (mime or "").lower() and not nome.lower().endswith(".pdf"):
         raise HTTPException(400, "La firma è disponibile solo su documenti PDF")
+    # Cloud-only: materializza il PDF dal cloud in storage interno per la firma.
     if not sp:
-        raise HTTPException(400, "File non disponibile nello storage")
+        cloud = entry.get("cloud_sync") or {}
+        if cloud.get("file_id"):
+            import cloud_doc_sync
+            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+            res = await cloud_doc_sync.download_cloud_file(
+                tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
+            if not res:
+                raise HTTPException(503, "Impossibile recuperare il PDF dal cloud per la firma")
+            data_bytes, _ctype = res
+            path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{aid}/{tipo}_firma_{_uid()}.pdf"
+            result = obj_storage.put_object(path, data_bytes, "application/pdf")
+            sp = result["path"]
+        else:
+            raise HTTPException(400, "File non disponibile nello storage")
     # Riusa l'allegato esistente se presente e valido
     alleg_id = entry.get("allegato_id")
     if alleg_id:

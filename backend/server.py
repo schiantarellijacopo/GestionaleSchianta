@@ -3351,20 +3351,17 @@ async def ocr_documento_identita(
     if anagrafica_id:
         # salva file fronte (o PDF) come documento principale; retro come allegato
         ext = (file.filename or "doc.bin").rsplit(".", 1)[-1].lower() or "bin"
-        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_{_uid()}.{ext}"
         try:
-            result = obj_storage.put_object(path, contents, ct)
-            documento_url = f"/api/storage/{result['path']}"
-            doc_entry = {
-                "url": documento_url, "storage_path": result["path"],
-                "nome_file": file.filename, "mime": ct,
-                "size_kb": round(len(contents) / 1024, 1),
-                "data_caricamento": _now_iso(),
-                "scadenza": data.get("data_scadenza"),
-                "caricato_da": user.get("id"),
-            }
+            import cloud_doc_sync
+            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+            doc_entry = await cloud_doc_sync.save_anag_card_document(
+                tenant_id=tenant_id, aid=anagrafica_id, tipo=tipo,
+                data=contents, mime=ct, filename=file.filename or f"{tipo}.{ext}",
+                scadenza=data.get("data_scadenza"), user_id=user.get("id"),
+            )
+            documento_url = doc_entry.get("url")
             if contents_retro:
-                # salva retro come allegato addizionale
+                # salva retro come file secondario interno
                 ext_r = (file_retro.filename or "retro.jpg").rsplit(".", 1)[-1].lower() or "jpg"
                 path_r = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/{tipo}_retro_{_uid()}.{ext_r}"
                 try:
@@ -3520,18 +3517,15 @@ async def ocr_carta_identita(
     avatar_url = None
     if anagrafica_id:
         ext = (file.filename or "ci.bin").rsplit(".", 1)[-1].lower() or "bin"
-        path = f"{os.environ.get('APP_NAME', 'assicura')}/anagrafiche/{anagrafica_id}/carta_identita_{_uid()}.{ext}"
         try:
-            result = obj_storage.put_object(path, contents, ct)
-            documento_url = f"/api/storage/{result['path']}"
-            doc_entry = {
-                "url": documento_url, "storage_path": result["path"],
-                "nome_file": file.filename, "mime": ct,
-                "size_kb": round(len(contents) / 1024, 1),
-                "data_caricamento": _now_iso(),
-                "scadenza": data.get("data_scadenza"),
-                "caricato_da": user.get("id"),
-            }
+            import cloud_doc_sync
+            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+            doc_entry = await cloud_doc_sync.save_anag_card_document(
+                tenant_id=tenant_id, aid=anagrafica_id, tipo="carta_identita",
+                data=contents, mime=ct, filename=file.filename or f"carta_identita.{ext}",
+                scadenza=data.get("data_scadenza"), user_id=user.get("id"),
+            )
+            documento_url = doc_entry.get("url")
             await db.anagrafiche.update_one(
                 {"id": anagrafica_id},
                 {"$set": {"documenti.carta_identita": doc_entry, "updated_at": _now_iso()}},
@@ -16463,6 +16457,22 @@ def _build_card_list(entita, az):
     return row
 
 
+async def _card_label_for(entita_tipo: str, categoria: Optional[str]) -> str:
+    """Nome leggibile della card (sottocartella cloud) data la sua chiave.
+    Risolve anche le card personalizzate create in Librerie → Visibilità documenti."""
+    if not categoria:
+        return "Documenti"
+    for c in CARD_DEFS.get(entita_tipo, []):
+        if c["key"] == categoria:
+            return c["label"]
+    az = await db.azienda_config.find_one({}, {"_id": 0, "card_custom": 1}) or {}
+    for c in (az.get("card_custom") or {}).get(entita_tipo, []):
+        if c.get("key") == categoria:
+            return c.get("label") or categoria
+    return categoria.replace("_", " ").capitalize()
+
+
+
 @api.get("/config/card-visibilita")
 async def get_card_visibilita(user=Depends(current_user)):
     """Restituisce la configurazione di ogni card documento (visibilità cliente,
@@ -17418,24 +17428,60 @@ async def upload_allegato(
         raise HTTPException(400, "File troppo grande (max 25 MB)")
     ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else "bin"
     file_id = _uid()
-    path = f"{os.environ.get('APP_NAME', 'assicura')}/{entita_tipo}/{entita_id}/{file_id}.{ext}"
     content_type = file.content_type or obj_storage.mime_for(file.filename or "")
-    try:
-        # put_object usa `requests` (sincrono): eseguilo in un thread per non
-        # bloccare l'event loop (velocizza le operazioni concorrenti).
-        from starlette.concurrency import run_in_threadpool
-        result = await run_in_threadpool(obj_storage.put_object, path, data, content_type)
-    except Exception as e:
-        raise HTTPException(503, f"Errore upload: {e}")
+    tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+
+    # Modello CLOUD-ONLY: se c'è un cloud collegato, il file vive SOLO sul cloud.
+    import cloud_doc_sync
+    cloud_sync = None
+    storage_path = ""
+    storage_provider = "emergent"
+    pending_sync = False
+    providers = await cloud_doc_sync.connected_providers(tenant_id)
+    if providers and entita_tipo in ("anagrafica", "polizza", "sinistro"):
+        card_label = await _card_label_for(entita_tipo, categoria)
+        try:
+            cloud_sync = await cloud_doc_sync.mirror_document(
+                tenant_id=tenant_id, entita_tipo=entita_tipo, entita_id=entita_id,
+                doc_label_text=card_label, doc_id=file_id,
+                data=data, mime=content_type, filename=file.filename or f"doc.{ext}",
+            )
+        except Exception as e:
+            logger.warning("Upload cloud allegato fallito: %s", e)
+        if cloud_sync:
+            storage_provider = cloud_sync["provider"]
+        else:
+            pending_sync = True  # cloud collegato ma upload fallito → ritenta dopo
+    elif entita_tipo in ("anagrafica", "polizza", "sinistro"):
+        pending_sync = True  # nessun cloud collegato → sincronizza appena lo colleghi
+
+    if not cloud_sync:
+        path = f"{os.environ.get('APP_NAME', 'assicura')}/{entita_tipo}/{entita_id}/{file_id}.{ext}"
+        try:
+            from starlette.concurrency import run_in_threadpool
+            result = await run_in_threadpool(obj_storage.put_object, path, data, content_type)
+        except Exception as e:
+            raise HTTPException(503, f"Errore upload: {e}")
+        storage_path = result["path"]
+        size_val = result.get("size", len(data))
+    else:
+        size_val = len(data)
+
     obj = Allegato(
         entita_tipo=entita_tipo, entita_id=entita_id,
-        nome_file=file.filename, storage_path=result["path"],
-        content_type=content_type, size=result.get("size", len(data)),
+        nome_file=file.filename, storage_path=storage_path,
+        storage_provider=storage_provider,
+        content_type=content_type, size=size_val,
         descrizione=descrizione, autore_id=user["id"],
         categoria=categoria, visibile_cliente=visibile_cliente,
         applicazione_matricola_id=applicazione_matricola_id,
     )
-    await db.allegati.insert_one(obj.model_dump())
+    obj.id = file_id
+    obj_dict = obj.model_dump()
+    obj_dict["pending_sync"] = pending_sync
+    if cloud_sync:
+        obj_dict["cloud_sync"] = cloud_sync
+    await db.allegati.insert_one(dict(obj_dict))
     await log_attivita(user, "upload", "allegato", obj.id, f"{file.filename} su {entita_tipo}:{entita_id}")
     # auto-traccia nel diario se l'allegato è su anagrafica/polizza/sinistro di un cliente
     anag_id_for_diario = None
@@ -17450,11 +17496,11 @@ async def upload_allegato(
         await log_diario_cliente(
             anag_id_for_diario, "documento_inviato" if False else "altro",
             titolo=f"📎 Documento caricato: {file.filename}",
-            descrizione=f"Allegato a {entita_tipo} (size: {result.get('size', len(data))} bytes)" + (f" - {descrizione}" if descrizione else ""),
+            descrizione=f"Allegato a {entita_tipo} (size: {size_val} bytes)" + (f" - {descrizione}" if descrizione else ""),
             autore=user,
             payload={"allegato_id": obj.id, "allegato_nome": file.filename},
         )
-    return obj.model_dump()
+    return obj_dict
 
 
 @api.get("/allegati/{aid}/download")
@@ -17474,6 +17520,21 @@ async def download_allegato(aid: str, user=Depends(current_user)):
             ok = target and target.get("contraente_id") == user.get("anagrafica_id")
         if not ok:
             raise HTTPException(403, "Permesso negato")
+    # Cloud-only: se il file è sul cloud, scaricalo da lì tramite l'ID.
+    cloud = rec.get("cloud_sync") or {}
+    if cloud.get("file_id") and not rec.get("pending_sync"):
+        import cloud_doc_sync
+        tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+        res = await cloud_doc_sync.download_cloud_file(
+            tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
+        if not res:
+            raise HTTPException(503, "Impossibile scaricare il documento dal cloud")
+        data, ctype = res
+        return StreamingResponse(
+            _io.BytesIO(data),
+            media_type=rec.get("content_type") or ctype,
+            headers={"Content-Disposition": f'inline; filename="{rec["nome_file"]}"'},
+        )
     try:
         data, ctype = obj_storage.get_object(rec["storage_path"])
     except Exception as e:
@@ -17487,9 +17548,17 @@ async def download_allegato(aid: str, user=Depends(current_user)):
 
 @api.delete("/allegati/{aid}")
 async def delete_allegato(aid: str, user=Depends(require_user("admin", "collaboratore", "dipendente"))):
+    rec = await db.allegati.find_one({"id": aid}, {"_id": 0, "cloud_sync": 1, "storage_path": 1})
     res = await db.allegati.update_one({"id": aid}, {"$set": {"is_deleted": True, "updated_at": _now_iso()}})
     if res.matched_count == 0:
         raise HTTPException(404, "Allegato non trovato")
+    if rec:
+        cloud = rec.get("cloud_sync") or {}
+        if cloud.get("file_id"):
+            import cloud_doc_sync
+            tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+            await cloud_doc_sync.delete_cloud_file(
+                tenant_id, cloud.get("provider", "google_drive"), cloud["file_id"])
     await log_attivita(user, "delete", "allegato", aid)
     return {"ok": True}
 

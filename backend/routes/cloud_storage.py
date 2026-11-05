@@ -62,18 +62,26 @@ STANDARD_FOLDER_STRUCTURE: dict = {
     "root": ["Assicura CRM"],
     "inbox": ["Assicura CRM", "INBOX"],
     "da_smistare": ["Assicura CRM", "Da smistare manualmente"],
-    "contraenti": ["Assicura CRM", "Contraenti"],
-    "contraente_privacy": ["Assicura CRM", "Contraenti", "{cliente}", "Privacy"],
-    "contraente_identita": ["Assicura CRM", "Contraenti", "{cliente}", "Carta d'Identità"],
-    "contraente_codice_fiscale": ["Assicura CRM", "Contraenti", "{cliente}", "Codice Fiscale"],
-    "contraente_altri": ["Assicura CRM", "Contraenti", "{cliente}", "Altri Documenti"],
+    # ─ Anagrafiche: una cartella per cliente, i documenti dentro col nome della card.
+    "anagrafiche": ["Assicura CRM", "Anagrafiche"],
+    "anagrafica_cliente": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    # Alias retrocompatibili (OCR): puntano alla stessa cartella piatta del cliente.
+    "contraenti": ["Assicura CRM", "Anagrafiche"],
+    "contraente_privacy": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    "contraente_identita": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    "contraente_codice_fiscale": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    "contraente_altri": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    # ─ Polizze: una cartella per numero polizza, documenti dentro.
     "polizze": ["Assicura CRM", "Polizze"],
-    "polizza_condizioni": ["Assicura CRM", "Polizze", "{polizza}", "Condizioni di Polizza"],
-    "polizza_documenti": ["Assicura CRM", "Polizze", "{polizza}", "Documenti di Polizza"],
-    "quietanze": ["Assicura CRM", "Quietanze"],
-    "quietanze_anno": ["Assicura CRM", "Quietanze", "{anno}"],
+    "polizza_cliente": ["Assicura CRM", "Polizze", "{polizza}"],
+    "polizza_condizioni": ["Assicura CRM", "Polizze", "{polizza}"],
+    "polizza_documenti": ["Assicura CRM", "Polizze", "{polizza}"],
+    # ─ Sinistri: una cartella per numero sinistro.
     "sinistri": ["Assicura CRM", "Sinistri"],
     "sinistro_specifico": ["Assicura CRM", "Sinistri", "{sinistro}"],
+    # ─ Quietanze / Contabilità (per anno/mese).
+    "quietanze": ["Assicura CRM", "Quietanze"],
+    "quietanze_anno": ["Assicura CRM", "Quietanze", "{anno}"],
     "contabilita": ["Assicura CRM", "Contabilità"],
     "contabilita_prima_nota": ["Assicura CRM", "Contabilità", "Prima Nota", "{anno}", "{mese}"],
     "contabilita_estratti": ["Assicura CRM", "Contabilità", "Estratti Conto Compagnie", "{anno}"],
@@ -82,7 +90,7 @@ STANDARD_FOLDER_STRUCTURE: dict = {
 
 # Categorie che vengono create SUBITO al primo setup (senza placeholder).
 INIT_CATEGORIES = [
-    "root", "inbox", "da_smistare", "contraenti", "polizze",
+    "root", "inbox", "da_smistare", "anagrafiche", "polizze",
     "quietanze", "sinistri", "contabilita",
 ]
 
@@ -758,6 +766,18 @@ async def init_structure(
         created_paths.append({"category": "inbox_subfolders", "error": str(e)[:200]})
 
     return {"ok": True, "provider": provider, "created": created_paths}
+
+
+@router.post("/sync-pending")
+async def sync_pending(
+    provider: str = Form("google_drive", regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Sposta sul cloud i documenti rimasti nel CRM in attesa (caricati prima del
+    collegamento del cloud). Eseguito nel contesto utente → scope per-agenzia garantito."""
+    import cloud_doc_sync
+    tenant = _tenant_id(user)
+    return await cloud_doc_sync.sync_pending_for_tenant(tenant)
 
 
 @router.post("/upload-document")

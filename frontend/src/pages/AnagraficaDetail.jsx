@@ -2477,6 +2477,23 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                         {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}
                                         {doc.scadenza && <span className="ml-2 text-amber-700">scad. {doc.scadenza}</span>}
                                     </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        {doc.doc_id && (
+                                            <span className="text-[10px] font-mono bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded" data-testid={`doc-id-${dt.key}`} title="ID documento">
+                                                ID {String(doc.doc_id).slice(0, 8)}
+                                            </span>
+                                        )}
+                                        {doc.cloud_sync?.file_id && !doc.pending_sync && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 inline-flex items-center gap-1" data-testid={`doc-cloud-${dt.key}`} title={doc.cloud_sync.path}>
+                                                ☁️ Su {doc.storage_provider === "onedrive" ? "OneDrive" : "Drive"}
+                                            </span>
+                                        )}
+                                        {doc.pending_sync && (
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 inline-flex items-center gap-1" data-testid={`doc-pending-${dt.key}`} title="Verrà spostato sul cloud appena colleghi un account">
+                                                ⏳ Da sincronizzare
+                                            </span>
+                                        )}
+                                    </div>
                                     {doc.firma_stato === "in_attesa" && (
                                         <div className="text-amber-700" data-testid={`doc-firma-info-${dt.key}`}>
                                             ⏳ In attesa di firma · inviata il {(doc.firma_richiesta_at || "").slice(0, 10)}
