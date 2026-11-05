@@ -12804,6 +12804,7 @@ class CalcoloRequest(BaseModel):
     percentuale_invalidita: Optional[float] = None
     numero_familiari: int = 0
     anagrafica_id: Optional[str] = None
+    gestione: Optional[str] = None
 
 
 @api.post("/pensioni/calcola")
@@ -12815,6 +12816,7 @@ async def calcola_pensione(body: CalcoloRequest, user=Depends(current_user)):
         eta=body.eta,
         percentuale_invalidita=body.percentuale_invalidita,
         numero_familiari=body.numero_familiari,
+        gestione=body.gestione,
     )
     calc = CalcoloPensione(
         anagrafica_id=body.anagrafica_id,
@@ -12916,6 +12918,10 @@ async def calcolo_pensione_preview(aid: str, user=Depends(current_user)):
     n_familiari = (1 if coniugato else 0) + figli_carico
     requisiti_superstite_ok = n_familiari > 0
 
+    # gestione previdenziale (dal campo professione) → aliquota di computo del montante
+    gestione = ana.get("professione") or ana.get("tipo_lavoratore")
+    ginfo = inps_calculator.gestione_info(gestione)
+
     # settimane stimate
     settimane = ana.get("settimane_contributive")
     if not settimane and ana.get("data_inizio_contribuzione"):
@@ -12935,6 +12941,10 @@ async def calcolo_pensione_preview(aid: str, user=Depends(current_user)):
         "coniugato": coniugato,
         "tipo_lavoratore": ana.get("tipo_lavoratore"),
         "professione": ana.get("professione"),
+        "gestione": ginfo["codice"],
+        "gestione_label": ginfo["label"],
+        "aliquota_computo_pct": round(ginfo["aliquota_computo"] * 100, 2),
+        "stima_cassa": ginfo["stima"],
         "reddito_annuo_lordo": ana.get("reddito_annuo_lordo") or 0.0,
         "numero_figli": ana.get("numero_figli") or 0,
         "numero_figli_a_carico": figli_carico,
@@ -12963,6 +12973,7 @@ async def calcolo_pensione_anagrafica(aid: str, body: dict, user=Depends(current
     eta = int(body.get("eta") or preview["eta"] or 0)
     invalidita = body.get("percentuale_invalidita")
     familiari = int(body.get("numero_familiari") if body.get("numero_familiari") is not None else preview["numero_familiari"])
+    gestione = body.get("gestione") or preview.get("gestione")
 
     risultati = {}
     for tipo in ("invalidita", "inabilita", "superstite"):
@@ -12984,6 +12995,7 @@ async def calcolo_pensione_anagrafica(aid: str, body: dict, user=Depends(current
             eta=eta,
             percentuale_invalidita=invalidita,
             numero_familiari=familiari,
+            gestione=gestione,
         )
 
     # GAP di reddito: differenza tra reddito attuale e pensione lorda annua per ogni tipo
@@ -13017,6 +13029,8 @@ async def calcolo_pensione_anagrafica(aid: str, body: dict, user=Depends(current
         "parametri_usati": {
             "settimane": settimane, "retribuzione_annua": retribuzione,
             "eta": eta, "familiari": familiari, "invalidita": invalidita,
+            "gestione": gestione, "gestione_label": inps_calculator.gestione_info(gestione)["label"],
+            "aliquota_computo_pct": round(inps_calculator.aliquota_computo(gestione) * 100, 2),
         },
         "risultati": risultati,
         "gap_reddito": gap,
@@ -13285,6 +13299,10 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
     settimane = settimane or int(ana.get("settimane_contributive") or 0)
     anni_contrib = settimane / 52.0
 
+    # gestione previdenziale → aliquota di computo del montante
+    gestione_prev = ac.get("tipo_lavoratore") or ana.get("professione") or ana.get("tipo_lavoratore")
+    aliquota_prev = inps_calculator.aliquota_computo(gestione_prev)
+
     # Retribuzione media (ultimi 5 anni se disponibili)
     redditi = sorted([(r.get("anno") or 0, float(r.get("reddito") or 0)) for r in storico], reverse=True)
     if redditi:
@@ -13312,17 +13330,18 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
             tipo=tipo, settimane_contributive=settimane,
             retribuzione_media_annua=retribuzione_media, eta=eta_attuale,
             percentuale_invalidita=75, numero_familiari=n_familiari,
+            gestione=gestione_prev,
         )
 
     # Pensioni DOMANI: proiezione da 64 a 71
     pensioni_domani = []
-    montante_attuale = round(retribuzione_media * 0.33 * anni_contrib, 2)
+    montante_attuale = round(retribuzione_media * aliquota_prev * anni_contrib, 2)
     for eta_pens in range(64, 72):
         anni_extra = eta_pens - eta_attuale
         if anni_extra <= 0:
             continue
         anni_tot = anni_contrib + anni_extra
-        montante = retribuzione_media * 0.33 * anni_tot
+        montante = retribuzione_media * aliquota_prev * anni_tot
         coeff = inps_calculator._coefficiente_trasformazione(eta_pens)
         importo_annuo = montante * coeff
         modalita = "Anticipata" if eta_pens < 67 else "Vecchiaia"
@@ -13347,13 +13366,12 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
         except Exception:
             pass
 
-    # Totale versato / rivalutato (basato su redditi storici + 24% aliquota commerciante)
-    aliquota_storica = reddito_calc.ALIQUOTE_CONTRIBUTIVE.get(
-        (ac.get("tipo_lavoratore") or "commerciante").lower(), 0.24
-    )
+    # Totale versato / rivalutato (aliquota di computo della gestione previdenziale)
+    aliquota_storica = aliquota_prev
     totale_versato = round(sum(r[1] for r in redditi) * aliquota_storica, 2)
     totale_rivalutato = round(totale_versato * 1.068, 2)  # rivalutazione media ~6.8%
 
+    _ginfo = inps_calculator.gestione_info(gestione_prev)
     return {
         "eta_attuale": eta_attuale,
         "anni_contribuzione": round(anni_contrib, 1),
@@ -13366,6 +13384,10 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
         "pensioni_domani": pensioni_domani,
         "numero_familiari": n_familiari,
         "ha_coniuge": coniuge,
+        "gestione": _ginfo["codice"],
+        "gestione_label": _ginfo["label"],
+        "aliquota_computo_pct": round(aliquota_prev * 100, 2),
+        "stima_cassa": _ginfo["stima"],
     }
 
 

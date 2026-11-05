@@ -722,3 +722,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - ocr_visura.py: il prompt Gemini ora estrae anche l'array `soci` (denominazione/nome/cognome, codice_fiscale, quota_percentuale, tipo accomandatario/accomandante/unico...).
 - applica_visura (extras_p1p2.py): i soci estratti vengono mappati in openapi_data.company.soci come {nome, quota, tipo, codice_fiscale}; la scheda Info Azienda → Soci/Azionisti li mostra con torta e percentuali. Nessuna modifica frontend necessaria.
 - Testato e2e: applica-visura con 2 soci (90%/10%) → persistiti correttamente in company.soci, ragione_sociale preservata.
+
+## 2026-06 — Calcolo INPS per gestione previdenziale
+- inps_calculator.py: nuova mappa GESTIONI_INPS (aliquote di computo del montante) + helper gestione_info()/aliquota_computo(). calcola_pensione() ora accetta `gestione` e usa l'aliquota corretta (33% dipendenti, 24% artigiani, 24,48% commercianti, 26,07% GS professionista, 35,03% GS co.co.co, 16% prof. con cassa [stima], 19,5% medico ENPAM [stima], 24% coltivatore [stima]). Alias retro-compatibili per i vecchi tipo_lavoratore.
+- Output calcolo arricchito con gestione/gestione_label/aliquota_computo_pct/stima_cassa.
+- server.py: endpoint calcolo-pensione/preview, /calcola, /pensioni/calcola e analisi/calcola-pensioni-future ora derivano la gestione dal campo professione dell'anagrafica (o override body) e applicano l'aliquota corretta (eliminato lo 0.33 hardcoded nelle proiezioni e nel totale versato).
+- Frontend AnagraficaDetail.jsx: campo "Professione" trasformato in menù a tendina "Professione / Gestione INPS" (GESTIONI_INPS + gestioneLabel); display read-only e preview calcolo mostrano la label + aliquota/stima.
+- Testato e2e (anagrafica seed commerciante): preview, calcola e pensioni-future applicano 24,48% correttamente; stato civile + figli a carico già usati per i superstiti (numero_familiari).

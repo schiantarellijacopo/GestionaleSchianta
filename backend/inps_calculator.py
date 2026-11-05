@@ -73,6 +73,43 @@ PARAMS = {
 }
 
 
+# Gestioni previdenziali INPS/casse — aliquota di computo del montante contributivo.
+# `stima=True` indica casse con regole proprie (il calcolo contributivo è indicativo).
+GESTIONI_INPS = {
+    "dipendente_privato": {"label": "Dipendente privato", "aliquota_computo": 0.33, "stima": False},
+    "dipendente_pubblico": {"label": "Dipendente pubblico", "aliquota_computo": 0.33, "stima": False},
+    "artigiano": {"label": "Artigiano (IVS)", "aliquota_computo": 0.24, "stima": False},
+    "commerciante": {"label": "Commerciante (IVS)", "aliquota_computo": 0.2448, "stima": False},
+    "gestione_separata_professionista": {"label": "Gestione Separata \u2014 libero professionista", "aliquota_computo": 0.2607, "stima": False},
+    "gestione_separata_cococo": {"label": "Gestione Separata \u2014 collaboratore (co.co.co)", "aliquota_computo": 0.3503, "stima": False},
+    "professionista_cassa": {"label": "Professionista con cassa", "aliquota_computo": 0.16, "stima": True},
+    "medico_enpam": {"label": "Medico / ENPAM", "aliquota_computo": 0.195, "stima": True},
+    "coltivatore_diretto": {"label": "Coltivatore diretto / CD-CM", "aliquota_computo": 0.24, "stima": True},
+    "altro": {"label": "Altro / non specificato", "aliquota_computo": 0.33, "stima": True},
+}
+
+# Compatibilità con i vecchi valori di `tipo_lavoratore`.
+_GESTIONE_ALIAS = {
+    "dipendente": "dipendente_privato",
+    "autonomo": "commerciante",
+    "parasubordinato": "gestione_separata_cococo",
+    "professionista": "gestione_separata_professionista",
+    "pensionato": "altro",
+}
+
+
+def gestione_info(gestione: Optional[str]) -> dict:
+    """Ritorna {label, aliquota_computo, stima, codice} per una gestione previdenziale."""
+    key = (gestione or "").strip().lower()
+    key = _GESTIONE_ALIAS.get(key, key)
+    info = GESTIONI_INPS.get(key) or GESTIONI_INPS["altro"]
+    return {"codice": key if key in GESTIONI_INPS else "altro", **info}
+
+
+def aliquota_computo(gestione: Optional[str]) -> float:
+    return gestione_info(gestione)["aliquota_computo"]
+
+
 def _coefficiente_trasformazione(eta: int) -> float:
     table = PARAMS["coefficienti_trasformazione_2025"]
     if eta in table:
@@ -214,17 +251,22 @@ def calcola_pensione(
     eta: int,
     percentuale_invalidita: Optional[float] = None,
     numero_familiari: int = 0,
+    gestione: Optional[str] = None,
 ) -> dict:
     """Restituisce un dizionario con il calcolo della pensione.
 
     L'algoritmo è una stima:
-    - Calcola un montante contributivo: 33% * retribuzione * anni contributivi
+    - Calcola un montante contributivo: aliquota_di_computo * retribuzione * anni contributivi
+      (l'aliquota dipende dalla gestione previdenziale: 33% dipendenti, 24% artigiani,
+      24,48% commercianti, 26,07%/35,03% gestione separata, ecc.)
     - Applica il coefficiente di trasformazione in base all'età
     - Delega a `_calcola_invalidita` / `_calcola_inabilita` / `_calcola_superstite`
       la logica specifica del singolo tipo di pensione.
     """
+    ginfo = gestione_info(gestione)
+    aliquota = ginfo["aliquota_computo"]
     anni = settimane_contributive / 52.0
-    montante = retribuzione_media_annua * 0.33 * anni
+    montante = retribuzione_media_annua * aliquota * anni
     coeff = _coefficiente_trasformazione(eta)
     pensione_contributiva_annua = montante * coeff
 
@@ -260,6 +302,10 @@ def calcola_pensione(
         "pensione_netta_stimata": round(pensione_netta_mensile, 2),
         "coefficiente_applicato": coeff,
         "metodologia": metodologia,
+        "gestione": ginfo["codice"],
+        "gestione_label": ginfo["label"],
+        "aliquota_computo_pct": round(aliquota * 100, 2),
+        "stima_cassa": ginfo["stima"],
         "dettaglio": {
             "anni_contributivi": round(anni, 2),
             "montante_contributivo": round(montante, 2),

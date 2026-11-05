@@ -20,6 +20,21 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import RowActions, { PrintButton } from "@/components/RowActions";
+// Gestioni previdenziali INPS/casse (allineate a backend inps_calculator.GESTIONI_INPS)
+export const GESTIONI_INPS = [
+    { value: "dipendente_privato", label: "Dipendente privato (33%)" },
+    { value: "dipendente_pubblico", label: "Dipendente pubblico (33%)" },
+    { value: "artigiano", label: "Artigiano \u2013 IVS (24%)" },
+    { value: "commerciante", label: "Commerciante \u2013 IVS (24,48%)" },
+    { value: "gestione_separata_professionista", label: "Gestione Separata \u2013 libero professionista (26,07%)" },
+    { value: "gestione_separata_cococo", label: "Gestione Separata \u2013 collaboratore co.co.co (35,03%)" },
+    { value: "professionista_cassa", label: "Professionista con cassa (stima)" },
+    { value: "medico_enpam", label: "Medico / ENPAM (stima)" },
+    { value: "coltivatore_diretto", label: "Coltivatore diretto / CD-CM (stima)" },
+    { value: "altro", label: "Altro / non specificato" },
+];
+export const gestioneLabel = (v) => GESTIONI_INPS.find((g) => g.value === v)?.label || v || "—";
+
 import { FirmaButton } from "@/components/DocumentiSezioneSplit";
 import RichiediDocCard from "@/components/RichiediDocCard";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
@@ -501,7 +516,7 @@ function DatiTab({ ana, canEdit, onReload }) {
                         ["Indirizzo", ana.indirizzo],
                         ["Comune", `${ana.comune || ""} ${ana.provincia ? `(${ana.provincia})` : ""}`],
                         ["CAP", ana.cap],
-                        ["Professione", ana.professione],
+                        ["Professione", gestioneLabel(ana.professione)],
                         ["Tipo lavoratore", ana.tipo_lavoratore],
                         ["Stato civile", ana.stato_civile],
                         ["N. figli", ana.numero_figli],
@@ -708,7 +723,16 @@ function DatiTab({ ana, canEdit, onReload }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <div><Label>Professione</Label><Input value={f.professione || ""} onChange={(e) => set("professione", e.target.value)} /></div>
+                <div>
+                    <Label>Professione / Gestione INPS</Label>
+                    <Select value={f.professione || ""} onValueChange={(v) => set("professione", v)}>
+                        <SelectTrigger data-testid="anag-professione"><SelectValue placeholder="-" /></SelectTrigger>
+                        <SelectContent>
+                            {GESTIONI_INPS.map((g) => <SelectItem key={g.value} value={g.value}>{g.label}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <div className="text-[10px] text-slate-500 mt-1">Determina l&apos;aliquota di computo usata nel calcolo pensione INPS.</div>
+                </div>
                 <div><Label>N. figli</Label><Input type="number" value={f.numero_figli || 0} onChange={(e) => set("numero_figli", parseInt(e.target.value) || 0)} /></div>
                 <div><Label>Figli a carico</Label><Input type="number" value={f.numero_figli_a_carico || 0} onChange={(e) => set("numero_figli_a_carico", parseInt(e.target.value) || 0)} /></div>
                 <div><Label>Reddito annuo lordo €</Label><Input type="number" step="0.01" value={f.reddito_annuo_lordo || ""} onChange={(e) => set("reddito_annuo_lordo", parseFloat(e.target.value) || null)} /></div>
@@ -2153,7 +2177,8 @@ function PensioneTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <Field label="Settimane contributive" value={preview.settimane_contributive} />
                     <Field label="Reddito annuo lordo" value={fmtEur(preview.reddito_annuo_lordo)} />
                     <Field label="Figli a carico" value={preview.numero_figli_a_carico} />
-                    <Field label="Professione" value={preview.professione || "—"} />
+                    <Field label="Professione" value={gestioneLabel(preview.professione)} />
+                    <Field label="Gestione INPS" value={preview.gestione_label} hint={preview.stima_cassa ? "stima (cassa con regole proprie)" : `aliquota ${preview.aliquota_computo_pct}%`} />
                 </div>
 
                 <div className="mt-4 pt-4 border-t border-slate-100 grid grid-cols-3 gap-3 items-end">
