@@ -20528,6 +20528,8 @@ async def startup():
                 res_wh = await auto_repair_webhooks()
                 if res_wh.get("updated"):
                     logger.info("WhatsApp webhook auto-ripristinati: %s", res_wh["updated"])
+                if res_wh.get("removed"):
+                    logger.info("WhatsApp istanze orfane rimosse: %s", res_wh["removed"])
             except Exception as e:  # noqa: BLE001
                 logger.warning("Auto-repair webhook WhatsApp fallito (non bloccante): %s", e)
             # Backfill tenant sui messaggi ricevuti prima del fix (DB-only, idempotente)

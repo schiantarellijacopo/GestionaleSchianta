@@ -460,7 +460,7 @@ async def auto_repair_webhooks() -> dict:
     if not webhook_base:
         return {"ok": False, "skipped": "nessun URL (privato o pubblico) disponibile"}
 
-    out = {"ok": True, "updated": [], "errors": [], "base": webhook_base}
+    out = {"ok": True, "updated": [], "removed": [], "errors": [], "base": webhook_base}
     try:
         instances = await db.whatsapp_instances.find({}, {"_id": 0, "instance_name": 1, "token": 1}).to_list(200)
     except Exception as e:  # noqa: BLE001
@@ -483,7 +483,19 @@ async def auto_repair_webhooks() -> dict:
             )
             out["updated"].append(name)
         except Exception as e:  # noqa: BLE001
-            out["errors"].append({"instance": name, "error": str(e)[:200]})
+            status = getattr(e, "status_code", None)
+            msg = str(getattr(e, "detail", e))
+            # Istanza inesistente sul server Evolution (orfana / di test rimossa):
+            # elimina il record locale così non viene più richiamata a vuoto a ogni avvio.
+            if status == 404 or " 404" in f" {msg}" or "not found" in msg.lower():
+                try:
+                    await db.whatsapp_instances.delete_one({"instance_name": name})
+                    out["removed"].append(name)
+                    logger.info("WhatsApp: rimossa istanza orfana '%s' (404 su Evolution)", name)
+                except Exception:  # noqa: BLE001
+                    out["errors"].append({"instance": name, "error": msg[:200]})
+            else:
+                out["errors"].append({"instance": name, "error": msg[:200]})
     if out["updated"]:
         logger.info("Auto-repair webhook WhatsApp: riallineate %s istanze -> %s", len(out["updated"]), webhook_base)
     return out
