@@ -168,6 +168,29 @@ async def _call_api(scopes: list[str], method: str, url: str, **kwargs) -> Optio
         return None
 
 
+async def _call_api_status(scopes: list[str], method: str, url: str, **kwargs) -> tuple[int, Optional[dict]]:
+    """Come _call_api ma ritorna anche lo status HTTP (serve a distinguere il 402 credito)."""
+    token = await _get_token(scopes)
+    if not token:
+        return 0, None
+    headers = kwargs.pop("headers", {}) or {}
+    headers["Authorization"] = f"Bearer {token}"
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.request(method, url, headers=headers, **kwargs)
+        body = None
+        try:
+            body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {"raw": r.text}
+        except Exception:
+            body = None
+        if r.status_code >= 400:
+            logger.warning("OpenAPI.it %s %s → HTTP %s: %s", method, url, r.status_code, r.text[:200])
+        return r.status_code, body
+    except Exception as e:
+        logger.warning("OpenAPI.it %s %s error: %s", method, url, e)
+        return 0, None
+
+
 # ===================================================================
 # SERVIZIO 1 · COMPANY (Imprese)
 # ===================================================================
@@ -732,6 +755,14 @@ def _map_titolo(desc: str) -> str:
     return "proprieta"
 
 
+def _euro_to_float(s) -> float:
+    """'418,33' / '1.234,56' → float. Gestisce separatori italiani."""
+    try:
+        return float(str(s or "0").replace(".", "").replace(",", "."))
+    except Exception:
+        return 0.0
+
+
 def _as_list(v):
     if v is None:
         return []
@@ -806,12 +837,18 @@ def _parse_visura_json(jdata: dict, cf: str) -> list[dict]:
             if not isinstance(im, dict):
                 continue
             ident = ((im.get("DatiIdentificativi") or {}).get("IdentificativoDefinitivo") or {}).get("@attributes") or {}
-            clas = (im.get("DatiClassamentoT") or {}).get("@attributes") or {}
-            rd = 0.0
-            try:
-                rd = float((clas.get("RedditoDominicaleEuro") or clas.get("RenditaEuro") or "0").replace(".", "").replace(",", "."))
-            except Exception:
-                rd = 0.0
+            clas_node = im.get("DatiClassamentoT") or {}
+            # La classamento terreni è annidata in ClassamentoT[].@attributes (può avere più porzioni/qualità)
+            porzioni = _as_list(clas_node.get("ClassamentoT"))
+            if not porzioni and clas_node.get("@attributes"):
+                porzioni = [clas_node]  # fallback: @attributes diretto
+            rd_tot, sup_tot, qualita = 0.0, 0.0, ""
+            for cl in porzioni:
+                a = (cl.get("@attributes") or {}) if isinstance(cl, dict) else {}
+                if not qualita:
+                    qualita = a.get("Qualita") or ""
+                rd_tot += _euro_to_float(a.get("RedditoDominicaleEuro") or a.get("RenditaEuro"))
+                sup_tot += _euro_to_float(a.get("SuperficieMQ"))
             out.append({
                 "tipo": "terreno",
                 "indirizzo": "",
@@ -820,12 +857,12 @@ def _parse_visura_json(jdata: dict, cf: str) -> list[dict]:
                 "foglio": str(ident.get("Foglio") or ""),
                 "particella": str(ident.get("ParticellaNum") or ""),
                 "sub": str(ident.get("Subalterno") or ""),
-                "categoria_catastale": clas.get("Qualita") or "TERRENO",
-                "rendita_catastale": rd,
-                "superficie_mq": 0.0,
+                "categoria_catastale": qualita or "TERRENO",
+                "rendita_catastale": round(rd_tot, 2),
+                "superficie_mq": round(sup_tot, 2),
                 "titolo": titolo,
                 "percentuale_proprieta": quota,
-                "note": "Importato da Catasto (terreno)",
+                "note": f"Importato da Catasto (terreno) — {qualita}".strip(" —"),
                 "fonte": "openapi.it/catasto",
             })
     return out
@@ -893,11 +930,15 @@ async def fetch_cadastre_detailed(cf_or_piva: str, want_pdf: bool = True) -> dic
 
     # 2) visura JSON analitica → immobili
     immobili: list[dict] = []
-    rv = await _call_api([f"POST:{_CAT_HOST}/visura_catastale"], "POST",
-                         f"https://{_CAT_HOST}/visura_catastale",
-                         json={"entita": "soggetto", "id_soggetto": id_soggetto,
-                               "tipo_visura": "ordinaria", "tipo_formato": "json",
-                               "tipo_dettaglio": "analitica", "richiedente": "CRM Assicura"})
+    credito_insufficiente = False
+    status_v, rv = await _call_api_status(
+        [f"POST:{_CAT_HOST}/visura_catastale"], "POST",
+        f"https://{_CAT_HOST}/visura_catastale",
+        json={"entita": "soggetto", "id_soggetto": id_soggetto,
+              "tipo_visura": "ordinaria", "tipo_formato": "json",
+              "tipo_dettaglio": "analitica", "richiedente": "CRM Assicura"})
+    if status_v == 402:
+        credito_insufficiente = True
     vd = (rv or {}).get("data") or {}
     vid_json = vd.get("id")
     if vid_json:
@@ -915,10 +956,13 @@ async def fetch_cadastre_detailed(cf_or_piva: str, want_pdf: bool = True) -> dic
     # 3) visura PDF ufficiale (opzionale)
     pdf_bytes, pdf_filename = None, None
     if want_pdf:
-        rp = await _call_api([f"POST:{_CAT_HOST}/visura_catastale"], "POST",
-                             f"https://{_CAT_HOST}/visura_catastale",
-                             json={"entita": "soggetto", "id_soggetto": id_soggetto,
-                                   "tipo_visura": "ordinaria", "richiedente": "CRM Assicura"})
+        status_p, rp = await _call_api_status(
+            [f"POST:{_CAT_HOST}/visura_catastale"], "POST",
+            f"https://{_CAT_HOST}/visura_catastale",
+            json={"entita": "soggetto", "id_soggetto": id_soggetto,
+                  "tipo_visura": "ordinaria", "richiedente": "CRM Assicura"})
+        if status_p == 402:
+            credito_insufficiente = True
         pd = (rp or {}).get("data") or {}
         vid_pdf = pd.get("id")
         if vid_pdf:
@@ -934,6 +978,18 @@ async def fetch_cadastre_detailed(cf_or_piva: str, want_pdf: bool = True) -> dic
     if not immobili:
         immobili = _normalize_cadastre_nazionale(data, key)
 
+    # Messaggio onesto: se la visura è stata rifiutata per credito, dirlo chiaramente
+    saldo = await get_credit() if credito_insufficiente else None
+    if credito_insufficiente:
+        saldo_txt = f", saldo attuale €{saldo:.2f}" if saldo is not None else ""
+        message = (
+            f"Credito OpenAPI.it insufficiente per generare la visura soggetto "
+            f"(costo €1,90{saldo_txt}): vie, rendita e titolo NON sono stati estratti. "
+            f"Ricarica il credito su console.openapi.com. Mostrato solo il riepilogo per comune."
+        )
+    else:
+        message = f"{len(immobili)} immobili trovati." if immobili else "Visura generata senza dettaglio strutturato."
+
     return {
         "found": bool(immobili) or bool(pdf_bytes),
         "immobili": immobili,
@@ -941,7 +997,10 @@ async def fetch_cadastre_detailed(cf_or_piva: str, want_pdf: bool = True) -> dic
         "pdf_bytes": pdf_bytes,
         "pdf_filename": pdf_filename,
         "provider": "openapi.it/catasto (LIVE)",
-        "message": f"{len(immobili)} immobili trovati." if immobili else "Visura generata senza dettaglio strutturato.",
+        "credito_insufficiente": credito_insufficiente,
+        "saldo_openapi": saldo,
+        "dettaglio_disponibile": any(i.get("indirizzo") or i.get("rendita_catastale") for i in immobili),
+        "message": message,
     }
 
 

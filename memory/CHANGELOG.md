@@ -601,3 +601,18 @@ Verifica E2E (preview): POST /api/polizze con imposte 50,86/lordo 250 → persis
 imposte 0, lordo 250; titolo auto-creato imposte 25,43. Unit: 6 scenari (gonfiate, mancanti, Vita, no-op) OK.
 Nota: per la polizza 184643597 su Railway, dopo il redeploy le sezioni mostrano subito 25,43;
 un salvataggio da "Modifica premi" rende permanente la correzione sul record legacy.
+
+## 2026-11-05 — Catasto: diagnosi "vie/rendita/titolo mancanti" (CAUSA = credito OpenAPI.it)
+- Causa trovata con cattura diagnostica reale (CF VVNLSN75M08L175V): il POST /visura_catastale (visura SOGGETTO, €1,90) torna **402 Pagamento richiesto** perché il saldo reale OpenAPI.it è €0,79 → l'app ripiegava SILENZIOSAMENTE sul riepilogo ricerca_nazionale (solo comune+conteggi), da cui mancano vie, rendita e titolo.
+- Chiarimento business: il costo CRM "catasto" €0,30 (openapi_credito DEFAULT_LISTINO) è l'addebito INTERNO all'agenzia e copre solo /richiesta (€0,30 reali). Vie/rendita/titolo richiedono la visura soggetto (€1,90 reali su OpenAPI.it) → mismatch: il CRM addebita 0,30 ma consuma 1,90 di saldo reale.
+- FIX codice (non silenzioso): openapi_it_service.fetch_cadastre_detailed usa ora _call_api_status e intercetta il 402 → ritorna credito_insufficiente/saldo_openapi/dettaglio_disponibile + messaggio chiaro. routes/openapi_it.fetch_cadastre_for_anagrafica li espone. OpenApiActions.jsx mostra toast.warning esplicito.
+- NON VERIFICATO: la correttezza del parser _parse_visura_json (struttura VisuraSoggettoAttuale/GruppoUnitaImmobiliari/@attributes) NON è stata validata perché la visura non è mai stata generata (402). Da ri-verificare con cattura reale appena il saldo OpenAPI.it sarà ricaricato (≥ €1,90).
+- AZIONE UTENTE: ricaricare il wallet OpenAPI.it su console.openapi.com (prezzo visura soggetto = €1,90/chiamata). Valutare se allineare il listino CRM "catasto" al costo reale.
+
+## 2026-11-05 (2) — Catasto RISOLTO dopo ricarica credito OpenAPI.it
+- COSTI REALI MISURATI (delta saldo, CF VVNLSN75M08L175V): ricerca_nazionale €0,30 + visura soggetto JSON €1,90 + visura soggetto PDF €1,90.
+  → SENZA PDF (dati: vie/rendita/titolo) = €2,20 · CON PDF = €4,10.
+- Listino CRM aggiornato (openapi_credito.DEFAULT_LISTINO): catasto 0,30→2,20 ; catasto_pdf 1,90→4,10. (openapi_config a DB: nessun override.)
+- Parser _parse_visura_json VALIDATO su JSON reale (root VisuraSoggettoAttuale → GruppoUnitaImmobiliari → ImmobileFabbricatiS/ImmobileTerreniS). Fabbricati OK: via, rendita (A/10=418,33 C/6=336,73 A/7=662,36), superficie, titolo (DirittiReali per CF), quota.
+- FIX BUG terreni: la classamento terreni è annidata in DatiClassamentoT.ClassamentoT[].@attributes (non @attributes diretto). Ora estrae Qualita (SEMINATIVO/BOSCO), RedditoDominicaleEuro (0,27/0,13/3,43) e SuperficieMQ, sommando le porzioni. Aggiunto helper _euro_to_float.
+- 10/10 immobili estratti correttamente con tutti i campi.

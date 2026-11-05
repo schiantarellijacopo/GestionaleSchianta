@@ -23,8 +23,8 @@ from db_models import _now_iso
 # Modificabile dal Super Admin. Valori in euro per singola estrazione.
 DEFAULT_LISTINO: dict[str, float] = {
     "camerale": 0.00,     # ricerca/dati azienda = GRATIS (i PDF si pagano a parte)
-    "catasto": 0.30,      # dati catastali (richiesta) - riempimento campi
-    "catasto_pdf": 1.90,  # visura catastale PDF ufficiale
+    "catasto": 2.20,      # ricerca_nazionale (€0,30) + visura soggetto JSON (€1,90) = riempimento vie/rendita/titolo
+    "catasto_pdf": 4.10,  # catasto (€2,20) + visura catastale PDF ufficiale (€1,90)
     "veicoli": 0.30,      # PRA / automotive
     "visura": 4.90,       # visura camerale ordinaria (visengine/legacy)
     "visure": 4.90,       # Visure & Documenti (visengine)
@@ -34,8 +34,8 @@ DEFAULT_LISTINO: dict[str, float] = {
 # Etichette per la UI del listino
 LISTINO_LABELS: dict[str, str] = {
     "camerale": "Camerale (dati azienda) — ricerca gratis",
-    "catasto": "Catasto (dati / riempimento campi)",
-    "catasto_pdf": "Catasto — visura PDF ufficiale",
+    "catasto": "Catasto (dati: vie, rendita, titolo)",
+    "catasto_pdf": "Catasto — dati + visura PDF ufficiale",
     "veicoli": "Veicoli (PRA)",
     "visura": "Visura camerale",
     "visure": "Visure & Documenti",

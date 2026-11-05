@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only regression test of the 'all dropdowns searchable' refactor (SearchableSelect + shadcn Select reimplemented on Popover+cmdk). All requested flows work: login/dashboard, Polizze filters (compagnia long list shows 'Cerca...' and filters/selects; stato 7 options has no search and selects), Anagrafica header OPERATORE select (select+save+persist after reload, restored afterwards), PolizzaDetail provvigioni collab/tipo selects, CollaboratoreInlineSelect (opening dropdown does NOT close edit mode; Salva works), ContrattoConsulenza canale + 'Applica un modello' (applied a TEST_ model, text/importo updated, model deleted afterwards), TablePager page-size on Titoli and Polizze, smoke-render of 16 pages with zero page errors. Found 1 significant bug (mouse-wheel scrolling of dropdown lists inside Dialogs does not work) and 3 minor issues.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "select.jsx / searchable-select.jsx inside Radix Dialog (e.g. Polizze 'Nuova polizza' -> Ramo, 53 items)", "issue": "Mouse-wheel scrolling of the options list does not work when the dropdown is opened inside a Dialog (scrollTop stays 0, scrollHeight 1696 vs clientHeight 300). Outside dialogs wheel scrolling works (Polizze filter compagnia 0->148). Cause: PopoverContent is portaled outside the Dialog's react-remove-scroll lock, so wheel events are swallowed. Users can only reach lower items via typing or arrow keys. Fix: pass `modal` to <Popover> in both Select root and SearchableSelect (Radix Popover modal mode adds its own scroll-lock allowlisting the content), or add onWheel={(e)=>e.stopPropagation()} / render the portal inside the dialog container.", "selector": "[data-testid='pol-ramo-select'] -> [cmdk-list]", "priority": "HIGH"},
+      {"component": "searchable-select.jsx + select.jsx filter", "issue": "Search matches hidden parts of item values. CommandItem value is `${label}\\u0000${index}` (SearchableSelect) or `${label}\\u0000${value}` (shadcn SelectItem, value often a UUID). The custom filter does `val.includes(search)` on the whole string, so typing '7' in Polizze Compagnia returned 9 companies with no '7' in the name; 'a1' returned 'CATTOLICA'. Fix: filter on the label only, e.g. `val.split('\\u0000')[0].toLowerCase().includes(...)`.", "selector": "[data-testid='pol-f-compagnia'] [cmdk-input]", "priority": "MEDIUM"},
+      {"component": "CollaboratoreInlineSelect", "issue": "Previous native onBlur auto-save on click-outside no longer fires: after selecting an operator and clicking elsewhere, edit mode stays open and nothing is saved (user must press 'Salva'). Not a crash and arguably safer, but behaviour changed vs native select; either remove the dead onBlur or call save in onChange.", "selector": "[data-testid='collaboratore-inline-select']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Anagrafica -> Contratto Consulenza -> Sottoscrizione con OTP", "issues": ["contratto-canale trigger has className 'block ...' which overrides the button's 'flex', so the chevron wraps under the label ('Email' with chevron below) and the trigger has no width. Replace 'block' with 'flex w-40' (or similar)."]},
+      {"screen": "Operator dropdowns (anagrafica header, provvigioni, inline)", "issues": ["Two users named 'SCHIANTARELLI JACOPO' (admin + collaboratore) appear identical in lists; consider showing email/role as secondary text (pre-existing data issue, more visible now)."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix wheel scrolling of dropdown lists inside Dialogs (add `modal` to Popover in select.jsx and searchable-select.jsx, then verify in 'Nuova polizza' Ramo dropdown)",
+    "Restrict cmdk filter to the label part (split on \\u0000) in both select.jsx and searchable-select.jsx",
+    "ContrattoConsulenzaTab line ~304: replace 'block' class on contratto-canale SearchableSelect",
+    "CollaboratoreInlineSelect: decide on click-outside behaviour (remove onBlur or auto-save on select)"
+  ],
+  "critical_code_review_comments": [
+    "SearchableSelect forwards unknown props (defaultValue, autoFocus, name, required) to a <button>; `required`/form validation semantics of native select are lost silently — check forms relying on native required.",
+    "shadcn SelectValue: labelMap label takes precedence over SelectValue children (Radix shows children when provided). Where children intentionally differ from item label, display changes; when value not in list, children render with muted grey styling.",
+    "labelMap/countSelectItems only see SelectItems that are direct JSX descendants; SelectItems rendered inside a custom wrapper component will not show their label in the trigger nor count toward the >7 threshold.",
+    "Native <optgroup> is not handled by flattenOptions (none found currently, but would be silently dropped)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "90% - all 8 requested flows pass; 1 high (dialog wheel scroll) + minor issues"},
+  "seed_data_creation": "Temporarily created contratti-modelli 'TEST_Modello_SS' (id c4c51969-...) and deleted it. Changed operator of anagrafica ITER103 TESTMERGE to Mario Dipendente and restored to admin 7194d586 (verified via API). Set polizza TESTMERGE-2026-10-05-M1 operator to Mario then restored to none. Unsaved provvigioni row added locally only.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Dropdown triggers are <button aria-haspopup> ; options are [cmdk-item], search is [cmdk-input] in a Radix portal. Test anagrafica: /anagrafiche/21b12f72-5185-4acf-9175-b781f7d47a96 (ITER103 TESTMERGE); test polizza: /polizze/ef4789ca-ebc2-4721-970c-51419e75bc3b. Retest wheel scroll inside 'Nuova polizza' dialog Ramo dropdown and filter on digits ('7' in pol-f-compagnia should return no results)."
+}

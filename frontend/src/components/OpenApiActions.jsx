@@ -49,8 +49,12 @@ export default function OpenApiActions({ ana, canEdit, onReload }) {
         try {
             const r = await api.post(`/openapi-it/cadastre/${ana.id}?pdf=${catastoPdf ? "true" : "false"}`);
             if (r.data.pdf_salvato) toast.success("Visura catastale PDF salvata negli Allegati");
-            if ((r.data.count || 0) === 0 && !r.data.pdf_salvato) {
+            if (r.data.credito_insufficiente) {
+                toast.warning(r.data.message || "Credito OpenAPI.it insufficiente per la visura", { duration: 9000 });
+            } else if ((r.data.count || 0) === 0 && !r.data.pdf_salvato) {
                 toast.info(r.data.message || "Nessun immobile trovato al Catasto");
+            } else if (!r.data.dettaglio_disponibile && (r.data.count || 0) > 0) {
+                toast.info(r.data.message || "Trovato solo il riepilogo per comune (senza vie/rendita)");
             }
             setCatastoData({ immobili: r.data.immobili || [], soggetto: r.data.soggetto });
             onReload?.();
