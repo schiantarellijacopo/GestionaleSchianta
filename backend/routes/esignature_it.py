@@ -602,6 +602,18 @@ async def finalizza_pending() -> int:
                 cur_state = ys or rec.get("stato")
             else:
                 det = await esvc.get_detail(rec["signature_id"])
+                if not det.get("ok"):
+                    err = str(det.get("error") or "")
+                    # 404 = firma inesistente sul provider (vecchia/cancellata): chiudila
+                    # come ERROR così esce dal filtro e non viene più interrogata all'infinito.
+                    if "404" in err or "not found" in err.lower():
+                        await raw_db.firma_requests.update_one(
+                            {"id": rec["id"]},
+                            {"$set": {"stato": "ERROR",
+                                      "errore": "Firma non trovata sul provider (404)",
+                                      "updated_at": _now_iso()}})
+                    # Altri errori (rete/credenziali): lasciamo lo stato invariato e riproviamo dopo.
+                    continue
                 state = (det.get("state") or "").upper()
                 is_done = esvc.is_done(det.get("state"))
                 cur_state = det.get("state") or rec.get("stato")

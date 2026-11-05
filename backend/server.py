@@ -20440,33 +20440,53 @@ async def startup():
     except Exception as e:
         logger.warning("Object storage non disponibile: %s", e)
 
-    # Scheduler: avvisi scadenze giornalieri (08:00 locale)
-    try:
-        avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
-        import face_crop as _face_crop
-        _face_crop.start_scheduler(db, hour=2, minute=30)
-        # Esecutore avvisi programmati (schedule/soglia) multi-tenant
-        from scheduler_alert import start_alert_scheduler
-        from database import raw_db as _raw_db
-        start_alert_scheduler(_raw_db)
-    except Exception as e:
-        logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
+    # ── Scheduler in background: avviati SOLO sull'istanza "leader" (lock condiviso
+    # su MongoDB), così con più worker/replica su Railway NON girano doppi
+    # (poller IMAP, avvisi scadenze, finalizza firme, Cloud OCR). Vedi scheduler_leader.py.
+    async def _start_background_schedulers():
+        try:
+            avvisi_scadenze.start_scheduler(db, hour=8, minute=0)
+            import face_crop as _face_crop
+            _face_crop.start_scheduler(db, hour=2, minute=30)
+            from scheduler_alert import start_alert_scheduler
+            from database import raw_db as _raw_db
+            start_alert_scheduler(_raw_db)
+        except Exception as e:
+            logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
+        # Cloud OCR notturno (legge le INBOX dei tenant collegati e smista i file).
+        try:
+            from cloud_ocr_scanner import start_scheduler as _cloud_ocr_start
+            _cloud_ocr_start(db)
+        except Exception as e:
+            logger.warning("Scheduler Cloud OCR non avviato: %s", e)
+        # Poller firme eSignature (finalizza automaticamente i documenti firmati).
+        try:
+            from routes.esignature_it import start_scheduler as _esign_start
+            _esign_start()
+        except Exception as e:
+            logger.warning("Scheduler eSignature non avviato: %s", e)
+        # IMAP Poller — solo se abilitato in config.
+        try:
+            az_cfg = await imap_poller.get_active_config(db)
+            if (az_cfg.get("imap_poller_enabled")
+                    and az_cfg.get("imap_host")
+                    and az_cfg.get("imap_user")
+                    and az_cfg.get("imap_password")):
+                imap_poller.start_scheduler(
+                    db, minutes=int(az_cfg.get("imap_poller_minutes") or 5),
+                )
+                logger.info("IMAP poller auto-avviato all'avvio del backend")
+        except Exception as e:
+            logger.warning("IMAP poller non avviato: %s", e)
 
-    # Scheduler: Cloud OCR notturno (ogni ora dalle 22 alle 06 UTC)
-    # Legge la cartella INBOX di ogni tenant collegato a Google Drive/OneDrive,
-    # classifica i file con Gemini Vision, li smista automaticamente.
     try:
-        from cloud_ocr_scanner import start_scheduler as _cloud_ocr_start
-        _cloud_ocr_start(db)
+        import asyncio as _aio_sched
+        import scheduler_leader
+        from database import raw_db as _raw_db_lock
+        _aio_sched.create_task(
+            scheduler_leader.run_leader(_raw_db_lock, _start_background_schedulers))
     except Exception as e:
-        logger.warning("Scheduler Cloud OCR non avviato: %s", e)
-
-    # Poller firme eSignature (finalizza automaticamente i documenti firmati)
-    try:
-        from routes.esignature_it import start_scheduler as _esign_start
-        _esign_start()
-    except Exception as e:
-        logger.warning("Scheduler eSignature non avviato: %s", e)
+        logger.warning("Avvio leader-election scheduler fallito: %s", e)
 
     # Seed modelli di default (idempotente)
     try:
@@ -20492,19 +20512,7 @@ async def startup():
     except Exception as e:
         logger.warning("Seed tipi titolo fallito: %s", e)
 
-    # IMAP Poller — avviato automaticamente solo se abilitato in config
-    try:
-        az_cfg = await imap_poller.get_active_config(db)
-        if (az_cfg.get("imap_poller_enabled")
-                and az_cfg.get("imap_host")
-                and az_cfg.get("imap_user")
-                and az_cfg.get("imap_password")):
-            imap_poller.start_scheduler(
-                db, minutes=int(az_cfg.get("imap_poller_minutes") or 5),
-            )
-            logger.info("IMAP poller auto-avviato all'avvio del backend")
-    except Exception as e:
-        logger.warning("IMAP poller non avviato: %s", e)
+    # (IMAP poller avviato dentro _start_background_schedulers sul leader)
 
     # WhatsApp — riallinea automaticamente i webhook verso questo backend
     # (solo in produzione) così i messaggi IN non si perdono dopo un deploy.
@@ -20564,6 +20572,13 @@ async def shutdown():
         pass
     try:
         imap_poller.stop_scheduler()
+    except Exception:
+        pass
+    # Rilascia il lock leader così il prossimo processo subentra subito (niente attesa TTL).
+    try:
+        import scheduler_leader
+        from database import raw_db as _raw_db_rel
+        await scheduler_leader.release(_raw_db_rel)
     except Exception:
         pass
     client.close()

@@ -652,3 +652,8 @@ un salvataggio da "Modifica premi" rende permanente la correzione sul record leg
 - `_find_folder` esclude già i cestinati (trashed=false) → non ritrova cartelle eliminate.
 - VERIFICA E2E su Drive reale (preview, tenant-principale-schiantarelli): init rigenera tutte le cartelle/sottocartelle — INBOX (18 sottocartelle) + Archivio (Anagrafiche, Polizze, Sinistri, Trattative, Titoli, Disdette, Documenti Firmati, Altri documenti, Quietanze, Contabilità/{Prima Nota, Estratti Conto Compagnie, Estratti Conto Collaboratori}).
 - DEPLOY in produzione avviato (utente ha confermato). Dopo il deploy: Librerie → Cloud Storage → "Riorganizza (INBOX + ARCHIVIO)" oppure scollega/ricollega per rigenerare sul Drive reale.
+
+## 2026-11-05 — Fix scheduler Railway + firme 404
+- **Firma 404 loop**: in `finalizza_pending()` (routes/esignature_it.py) una firma che risponde 404 sul provider viene ora chiusa come `stato="ERROR"` (+ campo `errore`), così esce dal filtro pending e non viene più interrogata all'infinito. Verificato end-to-end con record sintetico + mock.
+- **Firma 200 OK ri-interrogata**: comportamento corretto (polling finché non è DONE). Quando è DONE, `_finalizza` imposta `allegato_firmato_id` e `stato=DONE`, uscendo dal filtro. Nessuna modifica necessaria.
+- **Scheduler duplicati su Railway**: introdotto lock distribuito MongoDB (`scheduler_leader.py`, collection `scheduler_locks`, leader election con heartbeat/TTL). Gli scheduler di background (avvisi scadenze, avvisi programmati, face_crop, Cloud OCR, poller eSignature, IMAP poller) ora partono SOLO sull'istanza leader in `server.py` startup, evitando esecuzioni doppie con più worker/replica Uvicorn. Rilascio del lock allo shutdown per takeover immediato. Verificata elezione e takeover.

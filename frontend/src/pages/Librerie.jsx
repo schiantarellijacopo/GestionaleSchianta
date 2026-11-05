@@ -7608,7 +7608,13 @@ function CloudStorageSezione() {
             )) return;
             const fd = new FormData();
             const r = await api.post("/librerie/cloud-storage/migrate-tenant", fd);
-            toast.success("Collegamento Google Drive recuperato sull'agenzia attuale ✓");
+            // Dopo aver recuperato il collegamento, crea subito la struttura cartelle.
+            try {
+                const ifd = new FormData();
+                ifd.append("provider", "google_drive");
+                await api.post("/librerie/cloud-storage/init-structure", ifd);
+            } catch (_) { /* best-effort: le cartelle si possono creare col pulsante Riorganizza */ }
+            toast.success("Collegamento Google Drive recuperato e cartelle create sull'agenzia attuale ✓");
             load();
             void r;
         } catch (e) {

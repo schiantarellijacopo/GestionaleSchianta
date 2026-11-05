@@ -868,6 +868,61 @@ async def _resolve_category_path(category: str, context: dict) -> list:
     return [seg.format(**ctx) if "{" in seg else seg for seg in template]
 
 
+async def _adopt_legacy_connection(provider: str, target_tenant: str) -> Optional[dict]:
+    """Self-heal split-tenant: se la connessione cloud è rimasta su un tenant legacy
+    della stessa agenzia, la sposta sul tenant attivo così le funzioni ripartono senza
+    dover ricollegare Drive. Sposta connessione + cache + cronologia scan + inbox.
+    Ritorna la connessione adottata o None."""
+    from database import raw_db
+    from tenant import TENANT_PRINCIPALE_ID
+    if target_tenant == TENANT_PRINCIPALE_ID:
+        return None
+    legacy_match = {"$or": [
+        {"tenant_id": TENANT_PRINCIPALE_ID}, {"agenzia_tenant_id": TENANT_PRINCIPALE_ID}]}
+    src = await raw_db.cloud_connections.find_one({**legacy_match, "provider": provider})
+    if not src:
+        return None
+    set_target = {"$set": {"tenant_id": target_tenant, "agenzia_tenant_id": target_tenant}}
+    for coll in ("cloud_connections", "cloud_folder_cache", "cloud_scan_history"):
+        await getattr(raw_db, coll).update_many(legacy_match, set_target)
+    await raw_db.documenti_inbox.update_many(
+        {"agenzia_tenant_id": TENANT_PRINCIPALE_ID},
+        {"$set": {"agenzia_tenant_id": target_tenant}})
+    log.info("Self-heal: connessione cloud %s adottata da %s a %s",
+             provider, TENANT_PRINCIPALE_ID, target_tenant)
+    return await raw_db.cloud_connections.find_one(
+        {"tenant_id": target_tenant, "provider": provider})
+
+
+async def _folder_alive(provider: str, token: str, folder_id: str) -> bool:
+    """True se la cartella esiste ancora (non cestinata). In caso di dubbio ritorna
+    True per non azzerare una radice valida."""
+    try:
+        if provider == "google_drive":
+            async with httpx.AsyncClient(timeout=20) as x:
+                r = await x.get(
+                    f"https://www.googleapis.com/drive/v3/files/{folder_id}",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"fields": "id,trashed", "supportsAllDrives": "true"},
+                )
+            if r.status_code == 404:
+                return False
+            r.raise_for_status()
+            return not r.json().get("trashed", False)
+        async with httpx.AsyncClient(timeout=20) as x:
+            r = await x.get(
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}",
+                headers={"Authorization": f"Bearer {token}"},
+                params={"$select": "id,deleted"},
+            )
+        if r.status_code == 404:
+            return False
+        r.raise_for_status()
+        return "deleted" not in r.json()
+    except Exception:
+        return True
+
+
 async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
     """Crea la struttura di cartelle base dell'agenzia + sottocartelle INBOX.
 
@@ -878,8 +933,23 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
         "tenant_id": tenant, "provider": provider,
     })
     if not conn:
+        # Self-heal split-tenant: la connessione potrebbe essere rimasta su un tenant
+        # legacy della stessa agenzia. La adottiamo sul tenant attivo (niente ricollegamento).
+        conn = await _adopt_legacy_connection(provider, tenant)
+    if not conn:
         raise HTTPException(409, "Account non collegato per questo provider")
     token = await _fresh_access_token(provider, conn)
+    # Se la radice personalizzata è stata cancellata dentro Drive, il suo folder_id non
+    # esiste più: ripieghiamo sulla root standard "Assicura CRM" così le cartelle si creano.
+    if conn.get("root_is_custom") and conn.get("folder_id"):
+        if not await _folder_alive(provider, token, conn["folder_id"]):
+            from database import raw_db
+            await raw_db.cloud_connections.update_one(
+                {"tenant_id": tenant, "provider": provider},
+                {"$set": {"folder_id": None, "root_is_custom": False, "folder_name": None}},
+            )
+            conn["folder_id"] = None
+            conn["root_is_custom"] = False
     custom_root = bool(conn.get("root_is_custom") and conn.get("folder_id"))
 
     # Svuotiamo SEMPRE la cache dei path all'inizio dell'init: così la (ri)creazione
