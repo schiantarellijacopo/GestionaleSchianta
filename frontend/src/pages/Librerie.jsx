@@ -7563,6 +7563,26 @@ function CloudStorageSezione() {
     const [credDialog, setCredDialog] = useState(null);     // { provider }
     const [searchParams, setSearchParams] = useSearchParams();
 
+    const autoInitDone = useRef({});
+
+    const maybeAutoInit = async (conns) => {
+        for (const c of conns) {
+            if (c.connected && !c.structure_initialized_at && !autoInitDone.current[c.provider]) {
+                autoInitDone.current[c.provider] = true;
+                try {
+                    const fd = new FormData();
+                    fd.append("provider", c.provider);
+                    await api.post("/librerie/cloud-storage/init-structure", fd);
+                    toast.success("Struttura cartelle e INBOX configurate automaticamente su Drive ✓");
+                    const st = await api.get("/librerie/cloud-storage/status");
+                    setConnections(st.data.connections || []);
+                } catch (e) {
+                    toast.error("Configurazione automatica cartelle non riuscita: " + errMsg(e));
+                }
+            }
+        }
+    };
+
     const load = async () => {
         try {
             const [cfg, st] = await Promise.all([
@@ -7570,7 +7590,9 @@ function CloudStorageSezione() {
                 api.get("/librerie/cloud-storage/status"),
             ]);
             setConfigStatus(cfg.data);
-            setConnections(st.data.connections || []);
+            const conns = st.data.connections || [];
+            setConnections(conns);
+            maybeAutoInit(conns);
         } catch (e) {
             toast.error("Errore caricamento cloud storage: " + errMsg(e));
         }
@@ -7580,9 +7602,15 @@ function CloudStorageSezione() {
         load();
         if (searchParams.get("cloud") === "connected") {
             const p = searchParams.get("provider");
-            toast.success(`Account ${p === "google_drive" ? "Google Drive" : "OneDrive"} collegato con successo`);
+            const initFlag = searchParams.get("init");
+            if (initFlag === "0") {
+                toast.warning(`${p === "google_drive" ? "Google Drive" : "OneDrive"} collegato, ma la configurazione automatica delle cartelle non è riuscita. Riprovo ora…`);
+            } else {
+                toast.success(`Account ${p === "google_drive" ? "Google Drive" : "OneDrive"} collegato e configurato con successo`);
+            }
             searchParams.delete("cloud");
             searchParams.delete("provider");
+            searchParams.delete("init");
             setSearchParams(searchParams, { replace: true });
         }
         // eslint-disable-next-line

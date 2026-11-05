@@ -532,10 +532,33 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
         raise HTTPException(400, "Specificare l'entità di destinazione")
 
     # 1. Salva il file nella CARD corretta
+    import cloud_doc_sync
+    tenant_id = user.get("agenzia_tenant_id") or user.get("tenant_id") or "default"
+    providers = await cloud_doc_sync.connected_providers(tenant_id)
+    sp = inb.get("storage_path")
+
+    async def _mirror_inbox_file(doc_id: str, label: str):
+        """Copia il file inbox sul Drive dell'agenzia. Ritorna il dict cloud_sync o None."""
+        if not providers or entita_tipo not in ("anagrafica", "polizza", "sinistro") or not sp:
+            return None
+        try:
+            data, mime = obj_storage.get_object(sp)
+        except Exception as e:
+            logging.warning("Mirror inbox: impossibile leggere il file %s: %s", sp, e)
+            return None
+        try:
+            return await cloud_doc_sync.mirror_document(
+                tenant_id=tenant_id, entita_tipo=entita_tipo, entita_id=entita_id,
+                doc_label_text=label, doc_id=doc_id,
+                data=data, mime=mime, filename=inb.get("filename") or "documento",
+            )
+        except Exception as e:
+            logging.warning("Mirror inbox su cloud fallito: %s", e)
+            return None
+
     allegato_id = None
     if entita_tipo == "anagrafica" and categoria in ANAG_CARD_KEYS:
         # → card nel dict `anagrafiche.documenti[categoria]`
-        sp = inb.get("storage_path")
         doc_entry = {
             "url": f"/api/storage/{sp}" if sp else None,
             "storage_path": sp,
@@ -546,13 +569,24 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
             "scadenza": (dati.get("data_scadenza") if tipo_doc == "carta_identita" else None),
             "caricato_da": user.get("id"),
         }
+        cloud_sync = await _mirror_inbox_file(iid, categoria)
+        if cloud_sync:
+            doc_entry["cloud_sync"] = cloud_sync
+            doc_entry["storage_provider"] = cloud_sync["provider"]
+            doc_entry["url"] = None
+            doc_entry["storage_path"] = None
+            doc_entry["pending_sync"] = False
+        elif providers:
+            doc_entry["pending_sync"] = True  # cloud collegato ma upload fallito → ritenta
+        elif sp:
+            doc_entry["pending_sync"] = True  # nessun cloud → sincronizza appena collegato
         await db.anagrafiche.update_one(
             {"id": entita_id},
             {"$set": {f"documenti.{categoria}": doc_entry, "updated_at": _now_iso()}},
         )
     else:
         # → allegato con categoria = card key (polizza/sinistro o anagrafica "altro")
-        if not inb.get("storage_path"):
+        if not sp:
             raise HTTPException(400, "File non disponibile nello storage: impossibile archiviare")
         alleg = Allegato(
             entita_tipo=entita_tipo, entita_id=entita_id,
@@ -565,8 +599,17 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
             visibile_cliente=await _default_visibile(entita_tipo, categoria),
             autore_id=user.get("id"),
         )
-        await db.allegati.insert_one(alleg.model_dump())
         allegato_id = alleg.id
+        cloud_sync = await _mirror_inbox_file(alleg.id, categoria)
+        alleg_dict = alleg.model_dump()
+        if cloud_sync:
+            alleg_dict["storage_provider"] = cloud_sync["provider"]
+            alleg_dict["cloud_sync"] = cloud_sync
+            alleg_dict["pending_sync"] = False
+            alleg_dict["storage_path"] = ""
+        else:
+            alleg_dict["pending_sync"] = True
+        await db.allegati.insert_one(alleg_dict)
 
     # 2. Applica campi all'anagrafica (se disponibile un'anagrafica di riferimento)
     ana_updates = {}

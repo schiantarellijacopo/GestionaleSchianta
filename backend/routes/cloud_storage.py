@@ -22,6 +22,7 @@ Google `drive.file` scope, Microsoft `Files.ReadWrite offline_access`.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -37,6 +38,8 @@ from auth import current_user, require_user
 from database import db
 
 router = APIRouter(prefix="/librerie/cloud-storage", tags=["cloud-storage"])
+
+log = logging.getLogger("cloud_storage")
 
 # ============================================================
 # Config da environment
@@ -383,9 +386,18 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
         }},
         upsert=True,
     )
+    # Appena l'agenzia collega il Drive, crea subito la struttura cartelle + INBOX
+    # (così "le funzioni devono funzionare appena viene collegato il Google Drive").
+    init_ok = "1"
+    try:
+        await _init_structure_for_tenant(provider, st["tenant_id"])
+    except Exception as e:
+        init_ok = "0"
+        log.warning("Auto init-structure fallito dopo OAuth (tenant=%s): %s",
+                    st["tenant_id"], str(e)[:300])
     frontend_target = (FRONTEND_URL or BACKEND_PUBLIC_URL).rstrip("/")
     return RedirectResponse(
-        f"{frontend_target}/librerie?cloud=connected&provider={provider}",
+        f"{frontend_target}/librerie?cloud=connected&provider={provider}&init={init_ok}",
         status_code=302,
     )
 
@@ -425,7 +437,8 @@ async def status(user=Depends(current_user)):
     rows = db.cloud_connections.find(
         {"tenant_id": tenant},
         {"_id": 0, "provider": 1, "folder_id": 1, "folder_name": 1,
-         "connected_at": 1, "scopes": 1, "connected_by": 1},
+         "connected_at": 1, "scopes": 1, "connected_by": 1,
+         "structure_initialized_at": 1},
     )
     connections = [
         {
@@ -435,6 +448,7 @@ async def status(user=Depends(current_user)):
             "folder_name": r.get("folder_name"),
             "connected_at": r.get("connected_at"),
             "connected_by": r.get("connected_by"),
+            "structure_initialized_at": r.get("structure_initialized_at"),
         }
         async for r in rows
     ]
@@ -705,20 +719,12 @@ async def _resolve_category_path(category: str, context: dict) -> list:
     return [seg.format(**ctx) if "{" in seg else seg for seg in template]
 
 
-@router.post("/init-structure")
-async def init_structure(
-    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
-    user=Depends(current_user),
-):
-    """Crea la struttura di cartelle base dell'agenzia:
-       Assicura CRM/
-       ├── Contraenti/
-       ├── Polizze/
-       ├── Quietanze/{anno}/
-       ├── Sinistri/
-       └── Contabilità/{Prima Nota, Estratti Conto, Provvigioni}/{anno}/
+async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
+    """Crea la struttura di cartelle base dell'agenzia + sottocartelle INBOX.
+
+    Riutilizzata dall'endpoint manuale /init-structure E dal callback OAuth
+    (così appena l'agenzia collega il Drive la struttura e l'INBOX esistono subito).
     """
-    tenant = _tenant_id(user)
     conn = await db.cloud_connections.find_one({
         "tenant_id": tenant, "provider": provider,
     })
@@ -766,6 +772,22 @@ async def init_structure(
         created_paths.append({"category": "inbox_subfolders", "error": str(e)[:200]})
 
     return {"ok": True, "provider": provider, "created": created_paths}
+
+
+@router.post("/init-structure")
+async def init_structure(
+    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
+    user=Depends(current_user),
+):
+    """Crea la struttura di cartelle base dell'agenzia:
+       Assicura CRM/
+       ├── Contraenti/
+       ├── Polizze/
+       ├── Quietanze/{anno}/
+       ├── Sinistri/
+       └── Contabilità/{Prima Nota, Estratti Conto, Provvigioni}/{anno}/
+    """
+    return await _init_structure_for_tenant(provider, _tenant_id(user))
 
 
 @router.post("/sync-pending")
