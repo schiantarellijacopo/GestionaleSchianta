@@ -1,5 +1,15 @@
 # Changelog — Axicura CRM
 
+## 2026-11-05 — Fix VISION360: set-folder ora auto-adotta la connessione legacy (split-tenant) + logging stdout/stderr
+- **Sintomo utente**: "jacopo@schiantarelli.it collegato al Drive, ho scelto la cartella VISION360 ma non si popola con INBOX e Archivio".
+- **RCA produzione (deployer)**: in `cloud_connections` esisteva UN SOLO doc `google_drive` intestato al tenant legacy `tenant-principale-schiantarelli` (folder_name "Assicura CRM"); per il tenant attivo `c5ae2d0e-283e-4513-aaf2-cbd97ef62d78` NESSUNA connessione (count 0). Lo switch a VISION360 non è mai stato persistito.
+- **Root cause nel codice**: `set_folder` (pulsante "Scegli cartella") faceva `update_one({tenant_attivo})` → `matched_count==0` → HTTPException 404 "Account non collegato". Il self-heal (`_adopt_legacy_connection`) era invocato SOLO dentro `_init_structure_for_tenant` (endpoint init-structure / "Riorganizza"), MAI in `set_folder`. Quindi scegliendo la cartella custom l'utente otteneva un 404 silenzioso e la struttura non veniva creata.
+- **Fix** (`routes/cloud_storage.py` → `set_folder`): prima dell'update, se non esiste connessione per il tenant attivo, chiama `_adopt_legacy_connection(provider, tenant)` per re-intestare la connessione legacy (connessione + cache + scan history + inbox) al tenant attivo. Dopo l'adozione, l'update imposta `folder_id`=VISION360, `root_is_custom=True`, invalida la cache e crea INBOX+Archivio nella cartella custom.
+- **Verifica (preview, Drive reale)**: simulato lo stato di produzione (connessione solo su legacy, 0 per tenant attivo) → creata cartella test "VISION360 TEST" nel Drive → `set_folder` come tenant attivo → connessione adottata su c5ae2d0e con folder=VISION360, e nel Drive sono comparse `INBOX` + `Archivio` dentro la cartella custom. Cleanup: cartella test cestinata, DB preview ripristinato.
+- **Logging** (`server.py`): root logger con handler separati — DEBUG/INFO → `sys.stdout` (azzurri su Railway), WARNING/ERROR → `sys.stderr` (rossi). Aggiunto import `sys`. Verificato in preview.
+- **Nota deploy**: entrambi i fix sono attivi in produzione SOLO dopo nuovo deploy. Dopo il deploy, jacopo deve rifare Librerie → Cloud Storage → "Scegli cartella" → VISION360 per popolarla.
+
+
 ## 2026-11 — Drive = archivio digitale COMPLETO del CRM (INBOX + ARCHIVIO)
 - **Richiesta utente**: "IL DRIVE DEVE ESSERE IL MIO ARCHIVIO DIGITALE DI TUTTI I DOCUMENTI DEL CRM", con cartella principale INBOX (ingresso OCR) + cartella principale ARCHIVIO (documenti lavorati, con Contabilità). Archiviare anche i PDF firmati digitalmente e i documenti di trattative/titoli/disdette.
 - **Struttura cartelle** (`routes/cloud_storage.py` → `STANDARD_FOLDER_STRUCTURE`): tutte le destinazioni d'archivio spostate sotto `Assicura CRM/Archivio/...` (Anagrafiche, Polizze, Sinistri, Trattative, Titoli, Disdette, Documenti Firmati, Altri documenti, Quietanze, Contabilità). `INBOX` resta dedicata al solo ingresso. `Contabilità` con sottocartelle Prima Nota, Estratti Conto Compagnie, Estratti Conto Collaboratori (create al setup). `INIT_CATEGORIES` aggiornato.

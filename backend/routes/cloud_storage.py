@@ -522,6 +522,12 @@ async def set_folder(
     """Salva la cartella di destinazione (o root se folder_id=None) e ricrea la
     struttura (sottocartelle + INBOX) DENTRO la cartella scelta. Per l'intera agenzia."""
     tenant = _tenant_id(user)
+    # Split-tenant: se la connessione è ancora intestata al tenant legacy della stessa
+    # agenzia, adottala PRIMA sul tenant attivo. Senza questo, l'update qui sotto non
+    # troverebbe il documento e solleverebbe 404 "Account non collegato" (è il motivo
+    # per cui, scegliendo una cartella custom, la struttura non veniva creata).
+    if not await db.cloud_connections.find_one({"tenant_id": tenant, "provider": provider}):
+        await _adopt_legacy_connection(provider, tenant)
     r = await db.cloud_connections.update_one(
         {"tenant_id": tenant, "provider": provider},
         {"$set": {
