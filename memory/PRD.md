@@ -338,3 +338,9 @@ Requisito utente: in Prima Nota, su un pagamento provvigioni, su una registrazio
 - Frontend `EditMovimentoDialog` (BrogliaccioTab.jsx): `importoBloccato` disabilita Importo/Tipo/Categoria/Descrizione (readOnly, sfondo grigio), avviso 🔒 (testid `brog-edit-locked-note`); salva solo data+mezzo. Conferma eliminazione provvigioni avvisa "torna ARRETRATO (da pagare)".
 Verifica: test backend su DB — pagamento provvigioni e titolo-link: importo/categoria/tipo/descrizione invariati, data+mezzo applicati, propagazione a pagamenti_provvigioni OK. Frontend compila senza errori.
 Il revert-a-arretrato su cancellazione PN (requisito 1) era già implementato (follow-up 4) e qui riconfermato.
+
+### 2026-06 (follow-up 6) — BUGFIX: titoli pagati riapparivano tra le "da pagare"
+Sintomo utente: creata la lista, salvata e pagata, i titoli pagati restavano nell'elenco "Provvigioni maturate" in alto (es. 236 righe con dentro i 173 già pagati).
+Causa radice: in `estratto_provvigioni` (server.py ~790) il set `titoli_gia_pagati`/`voci_gia_pagate` era costruito filtrando i pagamenti per `data_pagamento` ∈ [dal, al]. Se il pagamento era fuori dall'intervallo (es. pago il 04/11 titoli del periodo fino al 03/11), il pagamento veniva escluso → i titoli risultavano `gia_pagato=False` e riapparivano tra le da pagare (il frontend filtra `!gia_pagato`).
+Fix: rimosso il filtro per data sul query dei pagamenti — un titolo/voce pagato è pagato indipendentemente dalla data del pagamento. `titoli_gia_pagati` ora usa TUTTI i pagamenti del collaboratore. Export PDF/Excel/CSV coperti (usano la stessa funzione).
+Verifica: tenant reale c5ae2d0e, collaboratore BS BROKER — titolo pagato l'08/10 risulta `gia_pagato=True` anche con `al=2026-09-30` (prima bug: sarebbe stato False).

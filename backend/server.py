@@ -787,14 +787,12 @@ async def estratto_provvigioni(
     ana_map = {a["id"]: a async for a in db.anagrafiche.find(
         {"id": {"$in": ana_ids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
 
-    # pagamenti già effettuati nel periodo (per evitare conteggi doppi)
-    pag_filter = {"collaboratore_id": cid}
-    if dal or al:
-        cond = {}
-        if dal: cond["$gte"] = dal
-        if al: cond["$lte"] = al
-        pag_filter["data_pagamento"] = cond
-    pagamenti = await db.pagamenti_provvigioni.find(pag_filter, {"_id": 0}).sort("data_pagamento", -1).to_list(500)
+    # Titoli/voci GIÀ PAGATI: un elemento pagato resta pagato indipendentemente dalla
+    # DATA del pagamento. NON filtriamo i pagamenti per data_pagamento, altrimenti un
+    # pagamento effettuato fuori dall'intervallo [dal, al] (es. pago il 04/11 titoli del
+    # periodo fino al 03/11) farebbe riapparire i titoli come "da pagare".
+    pagamenti = await db.pagamenti_provvigioni.find(
+        {"collaboratore_id": cid}, {"_id": 0}).sort("data_pagamento", -1).to_list(500)
     titoli_gia_pagati = set()
     voci_gia_pagate = set()
     for p in pagamenti:
