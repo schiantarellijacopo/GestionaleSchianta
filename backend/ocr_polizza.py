@@ -222,17 +222,21 @@ def _riconcilia_premi(data: dict) -> None:
         diritti = _num(data.get("diritti")) or 0.0
         data["premio_lordo_totale"] = round(netto + imp + ssn + diritti, 2)
 
-    # Imposte mancanti ma LORDO noto: deduci le imposte come residuo
-    # (lordo − netto − ssn − diritti). Succede quando il PDF riporta il totale
-    # ma non itemizza le imposte riga per riga: senza questo, la scomposizione
-    # (netto+imposte+ssn) non quadra con il lordo e la polizza/titolo nasce con
-    # imposte a 0. Così netto+imposte+ssn == lordo sempre.
+    # Guardia di coerenza finale: deve valere netto + imposte + ssn + diritti = lordo.
+    # Succede quando il PDF riporta il totale ma non itemizza le imposte riga per riga
+    # (imposte a 0 → le deduciamo), OPPURE quando l'LLM legge male le imposte con un
+    # valore NON zero palesemente incoerente col lordo (es. contate due volte): in
+    # entrambi i casi ricalcoliamo le imposte come residuo (lordo − netto − ssn − diritti)
+    # così la scomposizione quadra sempre col premio lordo da pagare.
     lordo_r = _num(data.get("premio_lordo_totale"))
     netto_r = _num(data.get("premio_netto_totale"))
     imp_r = _num(data.get("imposte_totali"))
     ssn_r = _num(data.get("contributo_ssn")) or 0.0
     diritti_r = _num(data.get("diritti")) or 0.0
-    if lordo_r and netto_r is not None and (imp_r is None or imp_r == 0):
+    if lordo_r and netto_r is not None:
         residuo = round(lordo_r - netto_r - ssn_r - diritti_r, 2)
-        if residuo > 0.01:
-            data["imposte_totali"] = residuo
+        if residuo >= -0.01:
+            mismatch = abs((netto_r + (imp_r or 0.0) + ssn_r + diritti_r) - lordo_r)
+            # imposte mancanti/zero -> deduci; imposte incoerenti (scarto > 0,50 €) -> correggi
+            if imp_r is None or imp_r == 0 or mismatch > 0.5:
+                data["imposte_totali"] = round(max(residuo, 0.0), 2)

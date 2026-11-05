@@ -548,3 +548,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Il link "Visualizza firma" e le anteprime firma aprivano l'URL storage senza token → 401.
 - Fix: avvolti con imgUrl() (aggiunge ?token=) i link/immagini firma in Librerie.jsx (Visualizza firma utente), AnagraficaDetail.jsx e PrivacyConsensiDialog.jsx (firma_cliente_url). La firma resta PRIVATA (non pubblica): si apre solo con token valido, 401 senza auth, 403 se non proprietario/non admin.
 - Verificato: firma 200 con ?token (admin), 401 senza auth.
+
+## 2026-06 — Fix OCR imposte raddoppiate (polizza es. 184643597)
+- Bug: l'OCR polizza poteva restituire imposte errate (es. 50,86 = 2×25,43, conteggio doppio); la riconciliazione correggeva solo se garanzie itemizzate o imposte a 0, non verificando l'identità netto+imposte+SSN=lordo.
+- Fix in ocr_polizza.py _riconcilia_premi: guardia di coerenza finale — se netto+imposte+SSN+diritti ≠ lordo (scarto >0,50€), imposte ricalcolate come residuo dal lordo. Verificato: 205,43/25,43/19,14/250,00.
+- Nota: vale per i nuovi OCR; le polizze già salvate con valore errato vanno corrette a mano nel campo Imposte.
