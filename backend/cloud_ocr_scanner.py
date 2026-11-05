@@ -665,7 +665,7 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
     Ritorna un report {letti, abbinati, in_attesa, errori: [...], entries: [...]}.
     """
     from routes.cloud_storage import (
-        _fresh_access_token, _find_folder, _ensure_folder_path,
+        _fresh_access_token, _ensure_folder_path,
         _resolve_category_path,
     )
     conn = await db.cloud_connections.find_one({
@@ -679,16 +679,17 @@ async def scan_tenant_inbox(db, tenant_id: str, provider: str,
     except Exception as e:
         return {"skipped": True, "reason": f"Token refresh fallito: {e}", "letti": 0}
 
-    # 1) Trova la cartella INBOX
+    # 1) Trova (o crea) la cartella INBOX, rispettando l'eventuale cartella radice
+    #    custom scelta dall'agenzia (connection.folder_id + root_is_custom).
     inbox_segments = await _resolve_category_path("inbox", {})
-    parent = None
-    for seg in inbox_segments:
-        fid = await _find_folder(provider, token, seg, parent)
-        if not fid:
-            return {"skipped": True, "reason": "Cartella INBOX non ancora creata",
-                    "letti": 0}
-        parent = fid
-    inbox_id = parent
+    try:
+        inbox_id = await _ensure_folder_path(provider, token, inbox_segments, tenant_id)
+    except Exception as e:
+        return {"skipped": True, "reason": f"Cartella INBOX non raggiungibile: {e}",
+                "letti": 0}
+    if not inbox_id:
+        return {"skipped": True, "reason": "Cartella INBOX non ancora creata",
+                "letti": 0}
 
     # 1b) Assicura le sottocartelle canoniche (Polizze, Quietanze, ecc.).
     # Le creiamo sempre per rendere l'inserimento file più guidato all'utente.

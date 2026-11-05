@@ -354,3 +354,21 @@ Fix implementati:
 - `routes/documenti_inbox.py::_do_save`: ora fa il **mirror su Drive** del file archiviato dalla funzione Inbox (sia card anagrafica sia allegato), con `cloud_sync`/`storage_provider`; se cloud assente o mirror fallito → `pending_sync=True` (ripresa da `sync_pending`).
 Verifica: `_init_structure_for_tenant` testato end-to-end sul Drive reale (preview, tenant-principale-schiantarelli) → crea/riusa struttura completa + 18 sottocartelle INBOX. Frontend compila, nessun loop (idempotente). Mirror inbox riusa lo stesso `cloud_doc_sync.mirror_document` del path upload manuale già funzionante.
 NOTA: fix lato PRODUZIONE — effettivi solo dopo deploy/publish. Dopo il deploy, aprendo Librerie → Cloud Storage sul tenant c5ae2d0e la struttura+INBOX si crea da sola (auto-init). I documenti già caricati come "emergent" PRIMA del collegamento non si sincronizzano retroattivamente (serve il pulsante sync-pending).
+
+### 2026-11-05 (follow-up 8) — Drive: struttura DENTRO la cartella scelta + backfill documenti storici + riepilogo sync
+Problema segnalato (screenshot): l'utente ha scelto come cartella Drive "VISION360 - GESTIONALE" ma le sottocartelle venivano create altrove (sotto `Assicura CRM` nella root del Drive), lasciando vuota la cartella scelta.
+Causa radice: `_ensure_folder_path` partiva SEMPRE dalla root del Drive (parent=None) col segmento "Assicura CRM", ignorando `folder_id` scelto dall'agenzia.
+Fix implementati:
+- `routes/cloud_storage.py`:
+  - `_ensure_folder_path`: se la connessione ha `root_is_custom=True`, usa la cartella scelta come base e SALTA il segmento "Assicura CRM" → struttura creata DENTRO la cartella scelta. Cache key per-root.
+  - `_init_structure_for_tenant`: non sovrascrive più `folder_name/folder_id` quando c'è una cartella custom (preserva "VISION360 - GESTIONALE").
+  - `/set-folder`: dopo aver salvato la cartella scelta imposta `root_is_custom=True`, SVUOTA `cloud_folder_cache` del tenant e RICREA la struttura+INBOX dentro la cartella scelta.
+  - `/sync-pending`: nuovo param `include_all` → BACKFILL completo dei documenti caricati PRIMA del collegamento (storage interno "emergent" senza `cloud_sync`), non solo `pending_sync`. Ritorna `remaining` per il loop a blocchi.
+  - `/sync-status` (nuovo): conteggio `synced`/`pending`/`total` (allegati + documenti card anagrafica).
+- `cloud_ocr_scanner.py::scan_tenant_inbox`: la ricerca della cartella INBOX usa ora `_ensure_folder_path` → rispetta la cartella custom (prima non trovava INBOX se la root era custom).
+- `cloud_doc_sync.py`:
+  - `mirror_document`: se `resolve_entity_name` è vuoto (polizze senza numero / entità senza nome / id mancante) ora usa FALLBACK (`entita_id` o "Senza riferimento") invece di scartare silenziosamente → nessun documento perso nel backfill. Logging diagnostico su tutti gli skip.
+  - `sync_pending_for_tenant(include_all)` + `sync_status_for_tenant` + log dei file interni mancanti.
+- `frontend/src/pages/Librerie.jsx` (CloudStorageSezione): card "Sincronizzazione documenti" con contatori (X sul Drive / Y da sincronizzare / totali), pulsante "Carica documenti precedenti sul Drive" (backfill a blocchi, disabilitato se 0 pendenti), "Aggiorna riepilogo".
+Verifica end-to-end su Drive REALE (preview): set-folder su "VISION360 - GESTIONALE" → struttura + 17 sottocartelle INBOX create DENTRO la cartella scelta, `folder_name` preservato, `structure_initialized_at` valorizzato. Backfill: 8/8 documenti caricati (incluse 2 polizze senza numero + 1 anagrafica id-null via fallback), `/sync-status` → synced=8 pending=0. UI confermata: "8 sul Drive / 0 da sincronizzare", pulsante correttamente disabilitato.
+NOTA: effettivo in PRODUZIONE solo dopo deploy/publish. In produzione il tenant c5ae2d0e dovrà (1) ri-selezionare/confermare la cartella "VISION360 - GESTIONALE" (→ ricrea struttura dentro) e (2) premere "Carica documenti precedenti sul Drive" per il backfill degli storici.

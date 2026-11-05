@@ -476,14 +476,31 @@ async def set_folder(
     folder_name: Optional[str] = Form(None),
     user=Depends(current_user),
 ):
-    """Salva la cartella di destinazione (o root se folder_id=None). Per l'intera agenzia."""
+    """Salva la cartella di destinazione (o root se folder_id=None) e ricrea la
+    struttura (sottocartelle + INBOX) DENTRO la cartella scelta. Per l'intera agenzia."""
+    tenant = _tenant_id(user)
     r = await db.cloud_connections.update_one(
-        {"tenant_id": _tenant_id(user), "provider": provider},
-        {"$set": {"folder_id": folder_id or None, "folder_name": folder_name or None}},
+        {"tenant_id": tenant, "provider": provider},
+        {"$set": {
+            "folder_id": folder_id or None,
+            "folder_name": folder_name or None,
+            "root_is_custom": bool(folder_id),
+            "structure_initialized_at": None,
+        }},
     )
     if r.matched_count == 0:
         raise HTTPException(404, "Account non collegato")
-    return {"ok": True, "folder_id": folder_id, "folder_name": folder_name}
+    # La radice è cambiata → invalida la cache dei percorsi e ricrea la struttura
+    # dentro la cartella scelta (INBOX + sottocartelle comprese).
+    await db.cloud_folder_cache.delete_many({"tenant_id": tenant, "provider": provider})
+    structure = None
+    try:
+        structure = await _init_structure_for_tenant(provider, tenant)
+    except Exception as e:
+        log.warning("Rebuild struttura dopo set-folder fallito (tenant=%s): %s",
+                    tenant, str(e)[:300])
+    return {"ok": True, "folder_id": folder_id, "folder_name": folder_name,
+            "structure_created": bool(structure)}
 
 
 @router.get("/folders")
@@ -683,15 +700,30 @@ async def _create_folder(provider: str, token: str, name: str,
 
 async def _ensure_folder_path(provider: str, token: str, segments: list,
                               tenant_id: str) -> str:
-    """Naviga o crea ogni segmento del path. Usa cache per tenant."""
-    cache_key = "/".join(segments)
+    """Naviga o crea ogni segmento del path. Usa cache per tenant.
+
+    Se l'agenzia ha scelto una cartella di destinazione custom (connection.folder_id),
+    la struttura viene creata DENTRO quella cartella: la cartella scelta diventa la
+    radice e sostituisce il primo segmento "Assicura CRM".
+    """
+    conn = await db.cloud_connections.find_one(
+        {"tenant_id": tenant_id, "provider": provider},
+        {"_id": 0, "folder_id": 1, "root_is_custom": 1},
+    )
+    base_parent = (conn or {}).get("folder_id") if (conn or {}).get("root_is_custom") else None
+
+    segs = list(segments)
+    if base_parent and segs and segs[0] == "Assicura CRM":
+        segs = segs[1:]  # la cartella scelta È già la radice
+
+    cache_key = (f"@{base_parent}/" if base_parent else "") + "/".join(segments)
     cache = await db.cloud_folder_cache.find_one({
         "tenant_id": tenant_id, "provider": provider, "path": cache_key,
     })
     if cache and cache.get("folder_id"):
         return cache["folder_id"]
-    parent: Optional[str] = None
-    for seg in segments:
+    parent: Optional[str] = base_parent
+    for seg in segs:
         seg_clean = _sanitize_folder_name(seg)
         found = await _find_folder(provider, token, seg_clean, parent)
         parent = found or await _create_folder(provider, token, seg_clean, parent)
@@ -731,6 +763,7 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
     if not conn:
         raise HTTPException(409, "Account non collegato per questo provider")
     token = await _fresh_access_token(provider, conn)
+    custom_root = bool(conn.get("root_is_custom") and conn.get("folder_id"))
 
     created_paths = []
     initial = INIT_CATEGORIES + [
@@ -744,15 +777,22 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
             "category": cat, "path": "/".join(segments), "folder_id": fid,
         })
 
-    root_id = created_paths[0]["folder_id"]
-    await db.cloud_connections.update_one(
-        {"tenant_id": tenant, "provider": provider},
-        {"$set": {
-            "folder_id": root_id,
-            "folder_name": "Assicura CRM",
-            "structure_initialized_at": _now().isoformat(),
-        }},
-    )
+    if custom_root:
+        # La cartella scelta dall'agenzia È la radice: non sovrascrivere nome/id.
+        await db.cloud_connections.update_one(
+            {"tenant_id": tenant, "provider": provider},
+            {"$set": {"structure_initialized_at": _now().isoformat()}},
+        )
+    else:
+        root_id = created_paths[0]["folder_id"]
+        await db.cloud_connections.update_one(
+            {"tenant_id": tenant, "provider": provider},
+            {"$set": {
+                "folder_id": root_id,
+                "folder_name": "Assicura CRM",
+                "structure_initialized_at": _now().isoformat(),
+            }},
+        )
 
     # Crea anche le sottocartelle INBOX (Polizze, Quietanze, Libretti, ...)
     # così l'utente può trascinare i file direttamente nella cartella corretta.
@@ -793,13 +833,23 @@ async def init_structure(
 @router.post("/sync-pending")
 async def sync_pending(
     provider: str = Form("google_drive", regex="^(google_drive|onedrive)$"),
+    include_all: bool = Form(False),
     user=Depends(require_user("admin")),
 ):
     """Sposta sul cloud i documenti rimasti nel CRM in attesa (caricati prima del
-    collegamento del cloud). Eseguito nel contesto utente → scope per-agenzia garantito."""
+    collegamento del cloud). Eseguito nel contesto utente → scope per-agenzia garantito.
+
+    include_all=True → BACKFILL completo: include anche i documenti storici senza flag."""
     import cloud_doc_sync
     tenant = _tenant_id(user)
-    return await cloud_doc_sync.sync_pending_for_tenant(tenant)
+    return await cloud_doc_sync.sync_pending_for_tenant(tenant, include_all=include_all)
+
+
+@router.get("/sync-status")
+async def sync_status(user=Depends(current_user)):
+    """Riepilogo: quanti documenti sono sincronizzati sul cloud e quanti restano."""
+    import cloud_doc_sync
+    return await cloud_doc_sync.sync_status_for_tenant(_tenant_id(user))
 
 
 @router.post("/upload-document")

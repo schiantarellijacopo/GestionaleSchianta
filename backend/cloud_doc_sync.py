@@ -181,19 +181,26 @@ async def mirror_document(
 
         cat_info = _ENTITY_CATEGORY.get(entita_tipo)
         if not cat_info:
+            logger.warning("Mirror skip: categoria sconosciuta entita=%s id=%s", entita_tipo, entita_id)
             return None
         category, ctx_key = cat_info
 
         entity_name = await resolve_entity_name(entita_tipo, entita_id)
         if not entity_name:
-            return None
+            # Fallback: non perdiamo mai il documento. Usiamo l'id entità o una
+            # cartella generica così il file sale comunque sul Drive.
+            entity_name = entita_id or "Senza riferimento"
+            logger.info("Mirror fallback: nome entità assente, uso '%s' (entita=%s)",
+                        entity_name, entita_tipo)
 
         providers = [provider] if provider else await connected_providers(tenant_id)
         if not providers:
+            logger.warning("Mirror skip: nessun cloud per tenant=%s", tenant_id)
             return None
         prov = providers[0]
         token = await _token_for(tenant_id, prov)
         if not token:
+            logger.warning("Mirror skip: token assente tenant=%s prov=%s", tenant_id, prov)
             return None
 
         label = _sanitize_folder_name(doc_label_text or filename or "documento")
@@ -284,11 +291,18 @@ async def download_cloud_file(tenant_id: str, provider: str,
         return None
 
 
-async def sync_pending_for_tenant(tenant_id: str, limit: int = 500) -> dict:
-    """Sposta sul cloud i documenti rimasti nel CRM in attesa (pending_sync).
+async def sync_pending_for_tenant(tenant_id: str, limit: int = 500,
+                                  include_all: bool = False) -> dict:
+    """Sposta sul cloud i documenti rimasti nel CRM in attesa.
 
-    Chiamata quando l'agenzia collega un cloud. Best-effort: ogni documento che
-    riesce a salire viene rimosso dallo storage interno.
+    - default: solo i documenti con `pending_sync=True` (caricati dopo il collegamento
+      ma non ancora saliti, o in attesa perché il cloud non era collegato).
+    - include_all=True: BACKFILL completo — include anche i documenti "storici" caricati
+      PRIMA del collegamento del cloud (storage interno, senza `cloud_sync`), anche se
+      non hanno il flag `pending_sync`.
+
+    Best-effort: ogni documento che riesce a salire viene rimosso dallo storage interno.
+    Ritorna anche `remaining` (quanti ne restano oltre il limite di questa passata).
     """
     import storage as obj_storage
 
@@ -299,16 +313,31 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500) -> dict:
     moved = 0
     failed = 0
 
+    _entita = ["anagrafica", "polizza", "sinistro"]
+    if include_all:
+        al_filter = {
+            "is_deleted": {"$ne": True},
+            "entita_tipo": {"$in": _entita},
+            "cloud_sync.file_id": {"$exists": False},
+            "storage_path": {"$exists": True, "$nin": ["", None]},
+        }
+    else:
+        al_filter = {"pending_sync": True, "is_deleted": {"$ne": True}}
+
+    total_al = await db.allegati.count_documents(al_filter)
+
     # 1) Allegati generici (polizze/sinistri/anagrafica). Lo scope per-agenzia è
     # applicato automaticamente dal wrapper DB in base all'utente corrente.
-    cur = db.allegati.find(
-        {"pending_sync": True, "is_deleted": {"$ne": True}},
-        {"_id": 0},
-    ).limit(limit)
+    cur = db.allegati.find(al_filter, {"_id": 0}).limit(limit)
     async for al in cur:
+        if not al.get("storage_path"):
+            failed += 1
+            continue
         try:
             data, mime = obj_storage.get_object(al["storage_path"])
-        except Exception:
+        except Exception as e:
+            logger.warning("Backfill: file interno mancante (allegato id=%s, path=%s): %s",
+                           al.get("id"), al.get("storage_path"), str(e)[:160])
             failed += 1
             continue
         sync = await mirror_document(
@@ -339,14 +368,20 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500) -> dict:
     async for ana in cur2:
         docs = ana.get("documenti") or {}
         for tipo, entry in list(docs.items()):
-            if not isinstance(entry, dict) or not entry.get("pending_sync"):
+            if not isinstance(entry, dict):
+                continue
+            has_cloud = bool((entry.get("cloud_sync") or {}).get("file_id"))
+            eligible = entry.get("pending_sync") or (include_all and not has_cloud)
+            if not eligible or has_cloud:
                 continue
             sp = entry.get("storage_path")
             if not sp:
                 continue
             try:
                 data, mime = obj_storage.get_object(sp)
-            except Exception:
+            except Exception as e:
+                logger.warning("Backfill: file card mancante (anag=%s tipo=%s path=%s): %s",
+                               ana.get("id"), tipo, sp, str(e)[:160])
                 failed += 1
                 continue
             sync = await mirror_document(
@@ -371,7 +406,44 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500) -> dict:
             else:
                 failed += 1
 
-    return {"ok": True, "moved": moved, "failed": failed}
+    remaining = max(0, total_al - min(total_al, limit))
+    return {"ok": True, "moved": moved, "failed": failed, "remaining": remaining}
+
+
+async def sync_status_for_tenant(tenant_id: str) -> dict:
+    """Riepilogo sincronizzazione: quanti documenti sono sul cloud e quanti restano
+    nello storage interno (da sincronizzare). Conta allegati + documenti delle card
+    anagrafica. Lo scope per-agenzia è applicato dal wrapper DB in base all'utente."""
+    _entita = ["anagrafica", "polizza", "sinistro"]
+
+    synced = await db.allegati.count_documents({
+        "is_deleted": {"$ne": True},
+        "cloud_sync.file_id": {"$exists": True},
+    })
+    pending = await db.allegati.count_documents({
+        "is_deleted": {"$ne": True},
+        "entita_tipo": {"$in": _entita},
+        "cloud_sync.file_id": {"$exists": False},
+        "storage_path": {"$exists": True, "$nin": ["", None]},
+    })
+
+    # Documenti embedded nelle card anagrafica
+    async for ana in db.anagrafiche.find(
+        {"documenti": {"$exists": True}}, {"_id": 0, "documenti": 1}
+    ):
+        for entry in (ana.get("documenti") or {}).values():
+            items = entry if isinstance(entry, list) else [entry]
+            for e in items:
+                if not isinstance(e, dict):
+                    continue
+                if (e.get("cloud_sync") or {}).get("file_id"):
+                    synced += 1
+                elif e.get("storage_path"):
+                    pending += 1
+
+    total = synced + pending
+    return {"ok": True, "synced": synced, "pending": pending, "total": total}
+
 
 
 async def read_allegato_bytes(al: dict) -> tuple[bytes, str]:

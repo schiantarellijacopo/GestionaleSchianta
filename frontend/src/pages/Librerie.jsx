@@ -7583,6 +7583,39 @@ function CloudStorageSezione() {
         }
     };
 
+    const [syncStatus, setSyncStatus] = useState(null);
+    const [syncing, setSyncing] = useState(false);
+
+    const loadSyncStatus = async () => {
+        try {
+            const r = await api.get("/librerie/cloud-storage/sync-status");
+            setSyncStatus(r.data);
+        } catch { /* non bloccante */ }
+    };
+
+    const runBackfill = async (provider) => {
+        if (!window.confirm("Caricare su Google Drive anche i documenti archiviati PRIMA del collegamento? L'operazione procede a blocchi; i file saliti verranno rimossi dallo storage interno.")) return;
+        setSyncing(true);
+        try {
+            let totalMoved = 0, totalFailed = 0, passes = 0;
+            // Procede a blocchi finché restano documenti da sincronizzare (max 20 passate)
+            while (passes < 20) {
+                const fd = new FormData();
+                fd.append("provider", provider);
+                fd.append("include_all", "true");
+                const r = await api.post("/librerie/cloud-storage/sync-pending", fd);
+                totalMoved += r.data.moved || 0;
+                totalFailed += r.data.failed || 0;
+                passes += 1;
+                if (!r.data.remaining || r.data.remaining <= 0) break;
+            }
+            toast.success(`Backfill completato: ${totalMoved} documenti caricati sul Drive${totalFailed ? `, ${totalFailed} non riusciti` : ""}.`);
+            loadSyncStatus();
+        } catch (e) {
+            toast.error("Backfill non riuscito: " + errMsg(e));
+        } finally { setSyncing(false); }
+    };
+
     const load = async () => {
         try {
             const [cfg, st] = await Promise.all([
@@ -7593,6 +7626,7 @@ function CloudStorageSezione() {
             const conns = st.data.connections || [];
             setConnections(conns);
             maybeAutoInit(conns);
+            if (conns.length) loadSyncStatus();
         } catch (e) {
             toast.error("Errore caricamento cloud storage: " + errMsg(e));
         }
@@ -7779,6 +7813,53 @@ function CloudStorageSezione() {
                     );
                 })}
             </div>
+
+            {/* Riepilogo sincronizzazione + backfill documenti precedenti */}
+            {connections.length > 0 && (
+                <Card className="p-4" data-testid="cloud-sync-summary">
+                    <div className="flex items-start justify-between gap-4 flex-wrap">
+                        <div>
+                            <div className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+                                <Cloud size={14} className="text-sky-600" /> Sincronizzazione documenti
+                            </div>
+                            {syncStatus ? (
+                                <div className="flex items-center gap-4 mt-2 text-sm">
+                                    <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold" data-testid="sync-count-synced">
+                                        <CheckCircle2 size={13} /> {syncStatus.synced} sul Drive
+                                    </span>
+                                    <span className={`inline-flex items-center gap-1 font-semibold ${syncStatus.pending > 0 ? "text-amber-700" : "text-slate-400"}`} data-testid="sync-count-pending">
+                                        <AlertTriangle size={13} /> {syncStatus.pending} da sincronizzare
+                                    </span>
+                                    <span className="text-slate-400 text-xs">({syncStatus.total} totali)</span>
+                                </div>
+                            ) : (
+                                <div className="text-xs text-slate-400 mt-2">Caricamento riepilogo…</div>
+                            )}
+                            <p className="text-[11px] text-slate-500 mt-2 max-w-xl">
+                                I documenti caricati <strong>dopo</strong> il collegamento salgono automaticamente sul Drive.
+                                Usa il pulsante per caricare anche quelli archiviati <strong>prima</strong> del collegamento.
+                            </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                            <Button size="sm"
+                                    onClick={() => runBackfill("google_drive")}
+                                    disabled={syncing || !getConn("google_drive") || (syncStatus && syncStatus.pending === 0)}
+                                    className="bg-emerald-700 hover:bg-emerald-800"
+                                    data-testid="btn-backfill-sync">
+                                <Cloud size={13} className="mr-1" />
+                                {syncing ? "Sincronizzazione in corso…" : "Carica documenti precedenti sul Drive"}
+                            </Button>
+                            <Button size="sm" variant="ghost"
+                                    onClick={loadSyncStatus}
+                                    disabled={syncing}
+                                    className="text-slate-500 h-7"
+                                    data-testid="btn-refresh-sync">
+                                Aggiorna riepilogo
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            )}
 
             {/* Guida rapida configurazione OAuth per admin agenzia */}
             <Card className="p-4 bg-sky-50 border-sky-200">
