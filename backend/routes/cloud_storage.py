@@ -400,7 +400,10 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
             400,
             "Nessun refresh_token restituito. Revoca l'accesso dall'account provider e riprova.",
         )
-    # UPSERT per tenant (1 drive per agenzia)
+    # UPSERT per tenant (1 drive per agenzia). Al (ri)collegamento ripartiamo da uno
+    # stato PULITO: azzeriamo folder_id/root custom e svuotiamo la cache dei path,
+    # altrimenti se l'utente ha cancellato le cartelle dentro Drive la cache punterebbe
+    # a cartelle inesistenti e le cartelle NON verrebbero più rigenerate.
     await db.cloud_connections.update_one(
         {"tenant_id": st["tenant_id"], "provider": provider},
         {"$set": {
@@ -409,9 +412,14 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
             "connected_at": _now().isoformat(),
             "connected_by": st["user_id"],
             "folder_id": None,
+            "root_is_custom": False,
+            "folder_name": None,
+            "structure_initialized_at": None,
         }},
         upsert=True,
     )
+    await db.cloud_folder_cache.delete_many(
+        {"tenant_id": st["tenant_id"], "provider": provider})
     # Appena l'agenzia collega il Drive, crea subito la struttura cartelle + INBOX
     # (così "le funzioni devono funzionare appena viene collegato il Google Drive").
     init_ok = "1"
@@ -741,6 +749,72 @@ async def _create_folder(provider: str, token: str, name: str,
     return r.json()["id"]
 
 
+async def _move_folder(provider: str, token: str, folder_id: str,
+                       new_parent_id: str, old_parent_id: Optional[str]) -> bool:
+    """Sposta una cartella sotto un nuovo parent. Best-effort (ritorna False su errore)."""
+    try:
+        if provider == "google_drive":
+            params = {"addParents": new_parent_id, "fields": "id,parents"}
+            if old_parent_id:
+                params["removeParents"] = old_parent_id
+            async with httpx.AsyncClient(timeout=30) as x:
+                r = await x.patch(
+                    f"https://www.googleapis.com/drive/v3/files/{folder_id}",
+                    headers={"Authorization": f"Bearer {token}",
+                             "Content-Type": "application/json"},
+                    params=params, json={},
+                )
+            r.raise_for_status()
+            return True
+        # OneDrive
+        async with httpx.AsyncClient(timeout=30) as x:
+            r = await x.patch(
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{folder_id}",
+                headers={"Authorization": f"Bearer {token}",
+                         "Content-Type": "application/json"},
+                json={"parentReference": {"id": new_parent_id}},
+            )
+        r.raise_for_status()
+        return True
+    except Exception as e:
+        log.warning("Move cartella %s → %s fallito: %s", folder_id, new_parent_id, str(e)[:160])
+        return False
+
+
+# Cartelle d'archivio "legacy" create in radice PRIMA dell'introduzione di ARCHIVIO.
+_LEGACY_ROOT_ARCHIVE_FOLDERS = [
+    "Anagrafiche", "Contraenti", "Polizze", "Sinistri", "Quietanze", "Contabilità",
+    "Da smistare manualmente", "Trattative", "Titoli", "Disdette",
+    "Documenti Firmati", "Altri documenti",
+]
+
+
+async def _reorganize_root_into_archivio(provider: str, token: str,
+                                         base_root_id: str, tenant_id: str) -> dict:
+    """Sposta le cartelle d'archivio presenti in radice dentro una cartella "Archivio",
+    lasciando in radice solo INBOX + Archivio. I file dentro le cartelle vengono
+    preservati (lo spostamento è a livello di cartella). Idempotente."""
+    archivio_id = await _find_folder(provider, token, "Archivio", base_root_id)
+    if not archivio_id:
+        archivio_id = await _create_folder(provider, token, "Archivio", base_root_id)
+    moved = []
+    for name in _LEGACY_ROOT_ARCHIVE_FOLDERS:
+        src = await _find_folder(provider, token, name, base_root_id)
+        if not src or src == archivio_id:
+            continue
+        # Se "Archivio" contiene già una cartella con lo stesso nome, non spostiamo
+        # (eviteremmo duplicati/merge rischiosi): lasciamo quella vecchia in radice.
+        existing = await _find_folder(provider, token, name, archivio_id)
+        if existing:
+            continue
+        if await _move_folder(provider, token, src, archivio_id, base_root_id):
+            moved.append(name)
+    # La cache dei path va invalidata: i vecchi path puntavano alla radice.
+    await db.cloud_folder_cache.delete_many({"tenant_id": tenant_id, "provider": provider})
+    return {"archivio_id": archivio_id, "moved": moved}
+
+
+
 async def _ensure_folder_path(provider: str, token: str, segments: list,
                               tenant_id: str) -> str:
     """Naviga o crea ogni segmento del path. Usa cache per tenant.
@@ -808,6 +882,25 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
     token = await _fresh_access_token(provider, conn)
     custom_root = bool(conn.get("root_is_custom") and conn.get("folder_id"))
 
+    # Svuotiamo SEMPRE la cache dei path all'inizio dell'init: così la (ri)creazione
+    # delle cartelle riflette lo stato REALE del Drive. Senza questo, se l'utente ha
+    # cancellato cartelle dentro Drive, la cache punterebbe a id inesistenti e le
+    # cartelle non verrebbero rigenerate ("le cartelle non si generano").
+    await db.cloud_folder_cache.delete_many({"tenant_id": tenant, "provider": provider})
+
+    # Riorganizzazione: sposta le cartelle d'archivio già esistenti in radice dentro
+    # "Archivio", così in radice restano solo INBOX + Archivio. Da fare PRIMA di creare
+    # la struttura standard (altrimenti creeremmo doppioni vuoti sotto Archivio).
+    reorg = {"moved": []}
+    try:
+        if custom_root:
+            base_root_id = conn["folder_id"]
+        else:
+            base_root_id = await _ensure_folder_path(provider, token, ["Assicura CRM"], tenant)
+        reorg = await _reorganize_root_into_archivio(provider, token, base_root_id, tenant)
+    except Exception as e:
+        log.warning("Riorganizzazione Archivio fallita (non blocca init): %s", str(e)[:200])
+
     created_paths = []
     for cat in INIT_CATEGORIES:
         segments = await _resolve_category_path(cat, {})
@@ -850,7 +943,8 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
         # non blocca l'init: sono cartelle "hint", il flusso funziona anche senza
         created_paths.append({"category": "inbox_subfolders", "error": str(e)[:200]})
 
-    return {"ok": True, "provider": provider, "created": created_paths}
+    return {"ok": True, "provider": provider, "created": created_paths,
+            "reorganized": reorg.get("moved", [])}
 
 
 @router.post("/init-structure")

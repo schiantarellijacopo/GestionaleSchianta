@@ -643,3 +643,12 @@ un salvataggio da "Modifica premi" rende permanente la correzione sul record leg
 - Parser _parse_visura_json VALIDATO su JSON reale (root VisuraSoggettoAttuale → GruppoUnitaImmobiliari → ImmobileFabbricatiS/ImmobileTerreniS). Fabbricati OK: via, rendita (A/10=418,33 C/6=336,73 A/7=662,36), superficie, titolo (DirittiReali per CF), quota.
 - FIX BUG terreni: la classamento terreni è annidata in DatiClassamentoT.ClassamentoT[].@attributes (non @attributes diretto). Ora estrae Qualita (SEMINATIVO/BOSCO), RedditoDominicaleEuro (0,27/0,13/3,43) e SuperficieMQ, sommando le porzioni. Aggiunto helper _euro_to_float.
 - 10/10 immobili estratti correttamente con tutti i campi.
+
+## 2026-11-05 (3) — Drive: FIX "le cartelle non si generano" + deploy produzione
+- CAUSA: cancellando le cartelle direttamente dentro Google Drive, la cache `cloud_folder_cache` continuava a puntare agli id delle cartelle eliminate → `_ensure_folder_path` le credeva esistenti e NON le ricreava.
+- FIX (`backend/routes/cloud_storage.py`):
+  1. OAuth callback: al (ri)collegamento reset pulito della connessione (folder_id=None, root_is_custom=False, folder_name=None, structure_initialized_at=None) + `cloud_folder_cache.delete_many` per tenant+provider.
+  2. `_init_structure_for_tenant`: svuota SEMPRE la cache all'inizio, così la (ri)creazione riflette lo stato reale del Drive.
+- `_find_folder` esclude già i cestinati (trashed=false) → non ritrova cartelle eliminate.
+- VERIFICA E2E su Drive reale (preview, tenant-principale-schiantarelli): init rigenera tutte le cartelle/sottocartelle — INBOX (18 sottocartelle) + Archivio (Anagrafiche, Polizze, Sinistri, Trattative, Titoli, Disdette, Documenti Firmati, Altri documenti, Quietanze, Contabilità/{Prima Nota, Estratti Conto Compagnie, Estratti Conto Collaboratori}).
+- DEPLOY in produzione avviato (utente ha confermato). Dopo il deploy: Librerie → Cloud Storage → "Riorganizza (INBOX + ARCHIVIO)" oppure scollega/ricollega per rigenerare sul Drive reale.

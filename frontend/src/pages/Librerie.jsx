@@ -7846,6 +7846,27 @@ function CloudStorageSezione() {
                                             <FolderOpen size={12} className="mr-1" /> Crea sottocartelle INBOX
                                         </Button>
                                         <Button size="sm" variant="outline"
+                                                onClick={async () => {
+                                                    if (!window.confirm("Riorganizzo le cartelle su Drive: sposto Polizze, Anagrafiche, Sinistri, Quietanze, Contabilità e 'Da smistare' dentro un'unica cartella ARCHIVIO, lasciando in radice solo INBOX + ARCHIVIO. I file restano al loro posto. Procedo?")) return;
+                                                    try {
+                                                        setBusy(true);
+                                                        const fd = new FormData();
+                                                        fd.append("provider", p.key);
+                                                        const r = await api.post("/librerie/cloud-storage/init-structure", fd);
+                                                        const mv = (r.data.reorganized || []);
+                                                        toast.success(mv.length
+                                                            ? `Struttura riorganizzata: ${mv.length} cartelle spostate in ARCHIVIO (${mv.join(", ")}).`
+                                                            : "Struttura INBOX + ARCHIVIO verificata su Drive ✓");
+                                                        load();
+                                                    } catch (e) { toast.error(errMsg(e)); }
+                                                    finally { setBusy(false); }
+                                                }}
+                                                disabled={busy}
+                                                className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                                                data-testid={`btn-reorg-${p.key}`}>
+                                            <FolderOpen size={12} className="mr-1" /> Riorganizza (INBOX + ARCHIVIO)
+                                        </Button>
+                                        <Button size="sm" variant="outline"
                                                 onClick={() => disconnectProvider(p.key)}
                                                 disabled={busy}
                                                 className="border-rose-300 text-rose-700 hover:bg-rose-50"
