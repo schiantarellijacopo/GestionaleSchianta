@@ -4,6 +4,7 @@
  * con in più la tendina "Tipo PNT".
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -263,11 +264,11 @@ function PncDialog({ item, compagnie, filtroTipo, onClose }) {
                         </div>
                         <div>
                             <Label>Segno</Label>
-                            <select className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
+                            <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
                                 onChange={(e) => set("segno", e.target.value)} data-testid="pnc-segno">
                                 <option value="+">+ Alimenta il saldo</option>
                                 <option value="-">− Riduce il saldo</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div>
                             <Label>Importo € *</Label>

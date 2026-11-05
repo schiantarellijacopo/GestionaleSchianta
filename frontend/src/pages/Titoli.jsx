@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
@@ -607,12 +608,12 @@ export default function Titoli({ storicoMode = false } = {}) {
                         <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="titoli-page-prev">‹ Prec.</Button>
                         <span className="text-xs text-slate-600">Pagina {page} di {pages} · {total} titoli</span>
                         <Button variant="outline" size="sm" disabled={page >= pages} onClick={() => setPage((p) => Math.min(pages, p + 1))} data-testid="titoli-page-next">Succ. ›</Button>
-                        <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
+                        <SearchableSelect value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}
                             className="ml-2 text-xs border border-slate-200 rounded px-2 py-1 bg-white" data-testid="titoli-page-size">
                             <option value={50}>50 / pagina</option>
                             <option value={100}>100 / pagina</option>
                             <option value={200}>200 / pagina</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                 )}
             </div>

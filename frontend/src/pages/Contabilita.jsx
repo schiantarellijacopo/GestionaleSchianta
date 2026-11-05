@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { PageHeader, Empty, Loading } from "@/components/Shared";
@@ -626,11 +627,11 @@ function SaldoCassaCompagnieDialog({ onClose }) {
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">Segno</Label>
-                        <select className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
+                        <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" value={f.segno}
                             onChange={(e) => set("segno", e.target.value)} data-testid="saldo-cassa-segno">
                             <option value="+">+ debito</option>
                             <option value="-">− credito</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div className="col-span-2">
                         <Label className="text-xs">Importo € *</Label>

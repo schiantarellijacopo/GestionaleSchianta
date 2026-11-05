@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -233,12 +234,12 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                 {!firmato && (
                     <div className="flex flex-wrap items-center gap-2 mt-1 mb-1.5 p-2 bg-slate-50 border border-slate-200 rounded-md" data-testid="contratto-modelli-bar">
                         <span className="text-[11px] font-semibold text-slate-600">Libreria modelli:</span>
-                        <select onChange={(e) => { if (e.target.value) { applicaModello(e.target.value); e.target.value = ""; } }}
+                        <SearchableSelect onChange={(e) => { if (e.target.value) { applicaModello(e.target.value); e.target.value = ""; } }}
                             defaultValue="" className="text-[12px] border border-slate-300 rounded-md h-8 px-2 bg-white max-w-[240px]"
                             data-testid="contratto-modello-select">
                             <option value="">— Applica un modello —</option>
                             {modelli.map((m) => <option key={m.id} value={m.id}>{m.nome}</option>)}
-                        </select>
+                        </SearchableSelect>
                         <Button onClick={salvaModello} disabled={busy} size="sm" variant="outline"
                             className="h-8 text-[12px] border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                             data-testid="contratto-salva-modello">⭐ Salva come modello</Button>
@@ -300,11 +301,11 @@ export default function ContrattoConsulenzaTab({ anagrafica_id }) {
                     <div className="flex flex-wrap items-end gap-3">
                         <div>
                             <label className="text-xs text-slate-600">Canale invio codice</label>
-                            <select value={canale} onChange={(e) => setCanale(e.target.value)} className="block border border-slate-300 rounded-md h-10 px-2 text-sm" data-testid="contratto-canale">
+                            <SearchableSelect value={canale} onChange={(e) => setCanale(e.target.value)} className="block border border-slate-300 rounded-md h-10 px-2 text-sm" data-testid="contratto-canale">
                                 <option value="whatsapp">WhatsApp</option>
                                 <option value="email">Email</option>
                                 <option value="sms">SMS</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <Button onClick={inviaOtp} disabled={busy} className="bg-indigo-600 hover:bg-indigo-700" data-testid="contratto-invia-otp">Invia OTP al cliente</Button>
                         {otpInviato && (

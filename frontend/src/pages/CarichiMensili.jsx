@@ -8,6 +8,7 @@
  * - Column toggle salvato in localStorage
  */
 import { useEffect, useMemo, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { api, fmtEur, fmtDate } from "@/lib/api";
@@ -917,11 +918,11 @@ function AnnullaDialog({ ids, onClose }) {
                 <div className="space-y-3">
                     <div>
                         <Label>Motivo</Label>
-                        <select className="w-full border rounded h-9 px-2 text-sm"
+                        <SearchableSelect className="w-full border rounded h-9 px-2 text-sm"
                                 value={motivo} onChange={(e) => setMotivo(e.target.value)}
                                 data-testid="annulla-motivo">
                             {MOTIVI.map((m) => <option key={m} value={m}>{m}</option>)}
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <Label>Note (opzionale)</Label>
@@ -1082,7 +1083,7 @@ function ImportExcelDialog({ onClose, onImported }) {
                                                 {campo === "polizza_numero" && <span className="text-rose-500 ml-1">*</span>}
                                             </td>
                                             <td className="p-1.5">
-                                                <select
+                                                <SearchableSelect
                                                     value={mapping[campo] || ""}
                                                     onChange={(e) => setMapping({ ...mapping, [campo]: e.target.value || null })}
                                                     className="w-full text-xs border rounded h-7 px-1.5"
@@ -1092,7 +1093,7 @@ function ImportExcelDialog({ onClose, onImported }) {
                                                     {preview.headers.map((h) => (
                                                         <option key={h} value={h}>{h}</option>
                                                     ))}
-                                                </select>
+                                                </SearchableSelect>
                                             </td>
                                             <td className="p-1.5 text-[10px] text-slate-500 max-w-[200px] truncate">
                                                 {mapping[campo] && preview.sample_rows[0]
@@ -1130,7 +1131,7 @@ function ImportExcelDialog({ onClose, onImported }) {
                                         </div>
                                         <span className="text-[10px] text-slate-500">riga {u.riga}</span>
                                     </div>
-                                    <select
+                                    <SearchableSelect
                                         value={u.polizza_id || ""}
                                         onChange={(e) => {
                                             const next = [...manualMatches];
@@ -1148,7 +1149,7 @@ function ImportExcelDialog({ onClose, onImported }) {
                                                 {s.cliente_nome ? ` · ${s.cliente_nome}` : ""}
                                             </option>
                                         ))}
-                                    </select>
+                                    </SearchableSelect>
                                     {(u.suggerimenti || []).length === 0 && (
                                         <div className="text-[10px] text-slate-500 mt-1 italic">
                                             Nessun suggerimento trovato. La riga verrà scartata.

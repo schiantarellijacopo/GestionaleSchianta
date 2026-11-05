@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo, Fragment } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, API_BASE, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -821,7 +822,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                         <label className="text-[11px] font-semibold text-emerald-900 uppercase tracking-wide flex items-center gap-1.5 mb-1">
                             <MessageCircle size={12} /> Modello WhatsApp (per invio bulk WA)
                         </label>
-                        <select
+                        <SearchableSelect
                             className="w-full h-9 px-2 text-sm border border-emerald-200 rounded bg-white"
                             value={modelloWaId}
                             onChange={(e) => setModelloWaId(e.target.value)}
@@ -833,7 +834,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
                                     {m.nome}{m.default ? " · default" : ""}
                                 </option>
                             ))}
-                        </select>
+                        </SearchableSelect>
                         <div className="text-[10px] text-slate-600 mt-1">
                             Se scegli un modello, viene usato il suo corpo (con placeholder {"{cliente_nome}, {totale}, {numero_titoli}"}) al posto dell&apos;intro standard.
                         </div>
@@ -1054,7 +1055,7 @@ function StoricoAvvisiTab({ initialCanale = "" }) {
     return (
         <Card className="overflow-hidden" data-testid="storico-tab">
             <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2 flex-wrap">
-                <select value={canale} onChange={(e) => setCanale(e.target.value)}
+                <SearchableSelect value={canale} onChange={(e) => setCanale(e.target.value)}
                     className="text-sm border border-slate-300 rounded px-2 py-1" data-testid="storico-canale">
                     <option value="">Tutti i canali</option>
                     <option value="whatsapp">WhatsApp</option>
@@ -1062,7 +1063,7 @@ function StoricoAvvisiTab({ initialCanale = "" }) {
                     <option value="pdf">PDF</option>
                     <option value="sms">SMS</option>
                     <option value="pec">PEC</option>
-                </select>
+                </SearchableSelect>
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Cerca…"
                     className="text-sm border border-slate-300 rounded px-2 py-1 flex-1 max-w-xs" data-testid="storico-search" />
                 <div className="ml-auto text-xs text-slate-500 font-mono">{filtered.length} record</div>

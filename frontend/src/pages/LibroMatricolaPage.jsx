@@ -8,6 +8,7 @@
  * - pulsante "Nuova applicazione"
  */
 import { useEffect, useMemo, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link } from "react-router-dom";
 import { api, fmtEur } from "@/lib/api";
 import { Card } from "@/components/ui/card";
@@ -544,7 +545,7 @@ function AnnullaApplicazioneDialog({ app, onClose }) {
                 <div className="space-y-3">
                     <div>
                         <label className="text-xs font-medium text-slate-600 block mb-1">Motivo cessazione *</label>
-                        <select value={tipo} onChange={(e) => setTipo(e.target.value)}
+                        <SearchableSelect value={tipo} onChange={(e) => setTipo(e.target.value)}
                             className="w-full h-9 border border-slate-300 rounded px-2 text-sm" data-testid="lm-annulla-tipo">
                             <option value="venduta">🏷 Venduta</option>
                             <option value="demolita">🔨 Demolita</option>
@@ -552,7 +553,7 @@ function AnnullaApplicazioneDialog({ app, onClose }) {
                             <option value="rubata">🚨 Rubata</option>
                             <option value="sostituita">🔄 Sostituita</option>
                             <option value="cessata_altro">📋 Altro motivo</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <label className="text-xs font-medium text-slate-600 block mb-1">Data cessazione *</label>

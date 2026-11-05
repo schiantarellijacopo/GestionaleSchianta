@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -359,7 +360,7 @@ function AvvisiWhatsAppCard({ instances }) {
                 </div>
                 <div className="space-y-2">
                     <div className="text-xs text-slate-500 mb-1">Istanza WhatsApp da usare</div>
-                    <select className="w-full border rounded h-9 px-2 text-sm" data-testid="wa-avvisi-instance"
+                    <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" data-testid="wa-avvisi-instance"
                         value={az.notifica_scadenze_whatsapp_instance || ""}
                         onChange={(e) => set("notifica_scadenze_whatsapp_instance", e.target.value)}>
                         <option value="">Automatica (prima istanza connessa)</option>
@@ -368,7 +369,7 @@ function AvvisiWhatsAppCard({ instances }) {
                                 {i.agenzia_nome || i.instance_name} {i.state_live === "open" ? "· connessa" : ""}
                             </option>
                         ))}
-                    </select>
+                    </SearchableSelect>
                     <Button onClick={save} disabled={saving} size="sm" data-testid="wa-avvisi-save-btn">
                         {saving ? "Salvataggio…" : "Salva impostazioni avvisi"}
                     </Button>

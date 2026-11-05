@@ -2,6 +2,7 @@
  * Studio Marketing — Caroselli IG, Video Reel, Siti/Landing AI, Immagini.
  */
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, API_BASE, formatError } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -105,10 +106,10 @@ function CaroselliTab() {
                 </div>
                 <div>
                     <div className="text-xs font-semibold text-slate-600 mb-1">Slide</div>
-                    <select value={nSlides} onChange={(e) => setNSlides(Number(e.target.value))}
+                    <SearchableSelect value={nSlides} onChange={(e) => setNSlides(Number(e.target.value))}
                             className="border border-slate-300 rounded px-2 py-2 text-sm" data-testid="car-n-slides">
                         {[4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                    </SearchableSelect>
                 </div>
                 <Button onClick={genera} disabled={busy || !argomento.trim()}
                         className="bg-fuchsia-600 hover:bg-fuchsia-700" data-testid="car-genera-btn">
@@ -187,10 +188,10 @@ function VideoTab() {
                 </div>
                 <div>
                     <div className="text-xs font-semibold text-slate-600 mb-1">Scene (3s l'una)</div>
-                    <select value={nScene} onChange={(e) => setNScene(Number(e.target.value))}
+                    <SearchableSelect value={nScene} onChange={(e) => setNScene(Number(e.target.value))}
                             className="border border-slate-300 rounded px-2 py-2 text-sm" data-testid="vid-n-scene">
                         {[3, 4, 5, 6].map((n) => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                    </SearchableSelect>
                 </div>
                 <Button onClick={genera} disabled={busy || !argomento.trim()}
                         className="bg-fuchsia-600 hover:bg-fuchsia-700" data-testid="vid-genera-btn">

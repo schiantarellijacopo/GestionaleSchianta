@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useNavigate } from "react-router-dom";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -525,23 +526,23 @@ function NuovaAgenziaDialog({ onClose, onCreated }) {
                     <FormField label="Email" value={f.email} onChange={(v) => setF({ ...f, email: v })} testid="sa-form-email" />
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Piano</label>
-                        <select value={f.piano} onChange={(e) => setF({ ...f, piano: e.target.value })}
+                        <SearchableSelect value={f.piano} onChange={(e) => setF({ ...f, piano: e.target.value })}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white">
                             <option value="trial">Trial</option>
                             <option value="starter">Starter</option>
                             <option value="professional">Professional</option>
                             <option value="enterprise">Enterprise</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <FormField label="Prezzo mensile €" type="number" value={f.prezzo_mensile_eur} onChange={(v) => setF({ ...f, prezzo_mensile_eur: parseFloat(v) || 0 })} testid="sa-form-prezzo" />
                     <FormField label="Max utenti" type="number" value={f.max_utenti} onChange={(v) => setF({ ...f, max_utenti: parseInt(v) || 5 })} testid="sa-form-utenti" />
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Template</label>
-                        <select value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}
+                        <SearchableSelect value={f.template} onChange={(e) => setF({ ...f, template: e.target.value })}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white">
                             <option value="clean">Clean (vuoto)</option>
                             <option value="demo">Demo (con dati fittizi)</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                 </div>
                 <div className="border-t border-slate-100 mt-4 pt-3">
@@ -642,7 +643,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <label className="text-xs font-semibold text-slate-600 block mb-1">Piano</label>
-                            <select value={f.piano} onChange={(e) => set("piano", e.target.value)}
+                            <SearchableSelect value={f.piano} onChange={(e) => set("piano", e.target.value)}
                                 data-testid="ea-piano"
                                 className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
                                 <option value="trial">Trial</option>
@@ -650,11 +651,11 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                                 <option value="pro">Pro</option>
                                 <option value="enterprise">Enterprise</option>
                                 <option value="custom">Custom</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div>
                             <label className="text-xs font-semibold text-slate-600 block mb-1">Stato</label>
-                            <select value={f.stato_abbonamento} onChange={(e) => set("stato_abbonamento", e.target.value)}
+                            <SearchableSelect value={f.stato_abbonamento} onChange={(e) => set("stato_abbonamento", e.target.value)}
                                 data-testid="ea-stato"
                                 className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
                                 <option value="in_prova">In prova</option>
@@ -662,7 +663,7 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                                 <option value="sospesa">Sospesa</option>
                                 <option value="scaduta">Scaduta</option>
                                 <option value="cancellata">Cancellata</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <FormField label="Prezzo €/mese" value={f.prezzo_mensile_eur} onChange={(v) => set("prezzo_mensile_eur", v)} type="number" testid="ea-prezzo" />
                         <FormField label="Max utenti" value={f.max_utenti} onChange={(v) => set("max_utenti", v)} type="number" testid="ea-max-utenti" />
@@ -679,12 +680,12 @@ function EditAgenziaDialog({ agenzia, onClose, onSaved }) {
                     <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold mb-2 mt-4">Firma digitale</div>
                     <div className="mb-3">
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Provider di firma</label>
-                        <select value={f.firma_provider} onChange={(e) => set("firma_provider", e.target.value)}
+                        <SearchableSelect value={f.firma_provider} onChange={(e) => set("firma_provider", e.target.value)}
                             data-testid="ea-firma-provider"
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md">
                             <option value="yousign">YouSign</option>
                             <option value="openapi">eSignature OpenAPI</option>
-                        </select>
+                        </SearchableSelect>
                         <p className="text-[11px] text-slate-500 mt-1">
                             Servizio usato da questa agenzia per inviare i documenti a firma (OTP via SMS in entrambi i casi).
                         </p>
@@ -1246,22 +1247,22 @@ function ModuloForm({ modulo, onClose, onSaved }) {
                     </div>
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Tipo Modulo *</label>
-                        <select value={f.tipo_modulo} onChange={(e) => setF({ ...f, tipo_modulo: e.target.value, prezzo_eur: e.target.value === "core" ? 0 : f.prezzo_eur })}
+                        <SearchableSelect value={f.tipo_modulo} onChange={(e) => setF({ ...f, tipo_modulo: e.target.value, prezzo_eur: e.target.value === "core" ? 0 : f.prezzo_eur })}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
                             data-testid="sa-mkt-form-tipo-modulo">
                             <option value="core">Core (incluso nel pacchetto)</option>
                             <option value="estensione">Estensione (a pagamento)</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Modello prezzo</label>
-                        <select value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}
+                        <SearchableSelect value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
                             data-testid="sa-mkt-form-tipo">
                             <option value="ricorrente">Mensile ricorrente</option>
                             <option value="una_tantum">Una tantum</option>
                             <option value="consumo">A consumo (pacchetto)</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <FormField label="Prezzo €" type="number" value={f.prezzo_eur} onChange={(v) => setF({ ...f, prezzo_eur: parseFloat(v) || 0 })} testid="sa-mkt-form-prezzo" />
                     <FormField label="Categoria" value={f.categoria} onChange={(v) => setF({ ...f, categoria: v })} testid="sa-mkt-form-categoria" />
@@ -1331,20 +1332,20 @@ function LogsTab() {
                         className="w-full pl-9 pr-3 py-1.5 text-sm border border-slate-300 rounded-md"
                         data-testid="sa-logs-search" />
                 </div>
-                <select value={filter.action_type}
+                <SearchableSelect value={filter.action_type}
                     onChange={(e) => setFilter({ ...filter, action_type: e.target.value })}
                     className="px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
                     data-testid="sa-logs-action-filter">
                     <option value="">Tutte le azioni</option>
                     {actionTypes.map((a) => <option key={a.code} value={a.code}>{a.label}</option>)}
-                </select>
-                <select value={filter.agency_id}
+                </SearchableSelect>
+                <SearchableSelect value={filter.agency_id}
                     onChange={(e) => setFilter({ ...filter, agency_id: e.target.value })}
                     className="px-3 py-1.5 text-sm border border-slate-300 rounded-md bg-white"
                     data-testid="sa-logs-agency-filter">
                     <option value="">Tutte le agenzie</option>
                     {agenzie.map((a) => <option key={a.id} value={a.id}>{a.ragione_sociale}</option>)}
-                </select>
+                </SearchableSelect>
                 <div className="flex gap-1">
                     <button onClick={load}
                         className="flex-1 text-xs font-semibold px-3 py-1.5 rounded-md bg-slate-800 text-white hover:bg-slate-900"
@@ -1574,12 +1575,12 @@ function DominiCredenzialiDialog({ agenzia, onClose }) {
                                placeholder="admin@agenzia.it" type="email"
                                className="flex-1 border border-slate-300 rounded px-2 py-1.5 text-sm"
                                data-testid="sa-cred-email" />
-                        <select value={credRole} onChange={(e) => setCredRole(e.target.value)}
+                        <SearchableSelect value={credRole} onChange={(e) => setCredRole(e.target.value)}
                                 className="border border-slate-300 rounded px-2 py-1.5 text-xs">
                             <option value="admin">Admin</option>
                             <option value="collaboratore">Collaboratore</option>
                             <option value="dipendente">Dipendente</option>
-                        </select>
+                        </SearchableSelect>
                         <button onClick={generaCredenziali} disabled={savingCred}
                                 className="text-xs font-semibold px-3 py-1.5 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                                 data-testid="sa-cred-genera">
@@ -1846,12 +1847,12 @@ function ChiaviApiTab() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Ambiente</label>
-                        <select value={f.firma_environment || "sandbox"} onChange={(e) => set("firma_environment", e.target.value)}
+                        <SearchableSelect value={f.firma_environment || "sandbox"} onChange={(e) => set("firma_environment", e.target.value)}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none bg-white"
                             data-testid="sa-firma-env">
                             <option value="sandbox">Sandbox (demo)</option>
                             <option value="production">Produzione</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <FormField label="URL API Base" value={f.firma_base_url || ""} onChange={(v) => set("firma_base_url", v)} testid="sa-firma-url" />
                     <FormField label="API Token" type="password" value={f.firma_api_token || ""} onChange={(v) => set("firma_api_token", v)} testid="sa-firma-token" />
@@ -1866,12 +1867,12 @@ function ChiaviApiTab() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
                     <div>
                         <label className="text-xs font-semibold text-slate-600 block mb-1">Ambiente</label>
-                        <select value={f.yousign_environment || "sandbox"} onChange={(e) => set("yousign_environment", e.target.value)}
+                        <SearchableSelect value={f.yousign_environment || "sandbox"} onChange={(e) => set("yousign_environment", e.target.value)}
                             className="w-full px-3 py-1.5 text-sm border border-slate-300 rounded-md focus:border-violet-500 outline-none bg-white"
                             data-testid="sa-yousign-env">
                             <option value="sandbox">Sandbox (demo)</option>
                             <option value="production">Produzione</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div className="hidden md:block" />
                     <FormField label="API Key Sandbox" type="password" value={f.yousign_sandbox_api_key || ""} onChange={(v) => set("yousign_sandbox_api_key", v)} testid="sa-yousign-sandbox-key" />

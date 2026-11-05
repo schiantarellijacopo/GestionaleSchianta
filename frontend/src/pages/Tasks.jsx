@@ -3,6 +3,7 @@
  * Colonne per operatore, condivisione multi-operatore, allegati, stampa.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, fmtEur } from "@/lib/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -359,19 +360,19 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                         </div>
                         <div>
                             <Label>Priorità</Label>
-                            <select className="w-full h-10 rounded-md border border-slate-300 px-2 text-sm"
+                            <SearchableSelect className="w-full h-10 rounded-md border border-slate-300 px-2 text-sm"
                                 value={f.priorita || "normale"} onChange={(e) => set("priorita", e.target.value)}
                                 data-testid="task-edit-priorita">
                                 <option value="bassa">Bassa</option>
                                 <option value="normale">Normale</option>
                                 <option value="alta">Alta</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                     </div>
                     <div>
                         <Label className="flex items-center gap-1"><Link2 size={13} /> Collega a</Label>
                         <div className="flex gap-2 mt-1">
-                            <select className="h-9 rounded-md border border-slate-300 px-2 text-sm w-40"
+                            <SearchableSelect className="h-9 rounded-md border border-slate-300 px-2 text-sm w-40"
                                 value={f.collegamento_tipo || ""}
                                 onChange={(e) => { set("collegamento_tipo", e.target.value || null); set("collegamento_id", null); set("collegamento_label", null); setLinkResults([]); setLinkQ(""); setTitoloPol(null); setTitoliOpts([]); }}
                                 data-testid="task-link-tipo">
@@ -379,7 +380,7 @@ function TaskDialog({ task, operatori, currentUser, onClose, onSaved }) {
                                 <option value="anagrafica">Cliente / Anagrafica</option>
                                 <option value="polizza">Polizza</option>
                                 <option value="titolo">Titolo / Rata</option>
-                            </select>
+                            </SearchableSelect>
                             {f.collegamento_tipo && f.collegamento_id ? (
                                 <div className="flex-1 flex items-center gap-2 bg-emerald-50 border border-emerald-200 rounded px-2 text-sm" data-testid="task-link-selected">
                                     <span className="flex-1 truncate text-emerald-800">{f.collegamento_label}</span>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link } from "react-router-dom";
 import { api, fmtEur, fmtDate, API_BASE } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
@@ -131,7 +132,7 @@ export default function RegolazionePremio() {
                         data-testid="reg-search"
                     />
                 </div>
-                <select
+                <SearchableSelect
                     value={fCompagnia}
                     onChange={(e) => setFCompagnia(e.target.value)}
                     className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 min-w-[150px]"
@@ -139,8 +140,8 @@ export default function RegolazionePremio() {
                 >
                     <option value="">Tutte le compagnie</option>
                     {compagnieOpts.map((c) => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select
+                </SearchableSelect>
+                <SearchableSelect
                     value={fCollab}
                     onChange={(e) => setFCollab(e.target.value)}
                     className="h-9 rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-700 min-w-[150px]"
@@ -148,7 +149,7 @@ export default function RegolazionePremio() {
                 >
                     <option value="">Tutti i collaboratori</option>
                     {collabOpts.map(([id, nome]) => <option key={id} value={id}>{nome}</option>)}
-                </select>
+                </SearchableSelect>
                 <div className="flex items-center gap-1">
                     <Label className="text-[11px] text-slate-500">Scadenza dal</Label>
                     <Input type="date" value={fDal} onChange={(e) => setFDal(e.target.value)} className="h-9 w-[140px]" data-testid="reg-filter-dal" />

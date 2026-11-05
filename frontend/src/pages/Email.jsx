@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
 import { Button } from "@/components/ui/button";
@@ -132,13 +133,13 @@ function NuovaEmailDialog({ onClose }) {
             <div className="space-y-3 py-2">
                 <div>
                     <Label>Anagrafica (opzionale)</Label>
-                    <select className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                    <SearchableSelect className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
                         value={f.destinatario_anagrafica_id} onChange={(e) => pickAna(e.target.value)}>
                         <option value="">- Seleziona -</option>
                         {anagrafiche.map((a) => (
                             <option key={a.id} value={a.id}>{a.ragione_sociale} {a.email ? `(${a.email})` : ""}</option>
                         ))}
-                    </select>
+                    </SearchableSelect>
                 </div>
                 <div><Label>Destinatario *</Label><Input data-testid="email-to-input" value={f.destinatario_email} onChange={(e) => set("destinatario_email", e.target.value)} /></div>
                 <div><Label>Oggetto *</Label><Input data-testid="email-subject-input" value={f.oggetto} onChange={(e) => set("oggetto", e.target.value)} /></div>

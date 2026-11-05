@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, API_BASE, fmtImporto, imgUrl } from "@/lib/api";
 import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";import { Card } from "@/components/ui/card";
@@ -1737,7 +1738,7 @@ function TipoPagamentoForm({ section, editing, onClose }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <Label>Modalità *</Label>
-                            <select
+                            <SearchableSelect
                                 className="w-full border rounded h-9 px-2 text-sm"
                                 value={f.modalita_codice || ""}
                                 onChange={(e) => set("modalita_codice", e.target.value)}
@@ -1747,11 +1748,11 @@ function TipoPagamentoForm({ section, editing, onClose }) {
                                 {modalita.map((m) => (
                                     <option key={m.codice} value={m.codice}>{m.label}</option>
                                 ))}
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div>
                             <Label>Conto / Banca</Label>
-                            <select
+                            <SearchableSelect
                                 className="w-full border rounded h-9 px-2 text-sm"
                                 value={f.conto_id || ""}
                                 onChange={(e) => set("conto_id", e.target.value)}
@@ -1761,7 +1762,7 @@ function TipoPagamentoForm({ section, editing, onClose }) {
                                 {conti.map((c) => (
                                     <option key={c.id} value={c.id}>{c.nome}</option>
                                 ))}
-                            </select>
+                            </SearchableSelect>
                         </div>
                     </div>
                     <div>
@@ -1817,11 +1818,11 @@ function VoceBilancioForm({ section, editing, onClose }) {
                 <div className="grid grid-cols-2 gap-3">
                     <div>
                         <Label>Tipo</Label>
-                        <select className="w-full border rounded h-9 px-2 text-sm" value={f.tipo || "costo"}
+                        <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" value={f.tipo || "costo"}
                             onChange={(e) => set("tipo", e.target.value)} data-testid="vb-tipo">
                             <option value="costo">Costo</option>
                             <option value="ricavo">Ricavo</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <Label>Ordine</Label>
@@ -1873,7 +1874,7 @@ function MezzoPagamentoForm({ section, editing, onClose }) {
                     </div>
                     <div>
                         <Label>Tipo conto associato</Label>
-                        <select
+                        <SearchableSelect
                             className="w-full border rounded h-9 px-2 text-sm"
                             value={f.tipo_conto}
                             onChange={(e) => set("tipo_conto", e.target.value)}
@@ -1885,11 +1886,11 @@ function MezzoPagamentoForm({ section, editing, onClose }) {
                             <option value="rid">RID / SDD</option>
                             <option value="online">Online</option>
                             <option value="altro">Altro</option>
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <Label>Conto default (opzionale)</Label>
-                        <select
+                        <SearchableSelect
                             className="w-full border rounded h-9 px-2 text-sm"
                             value={f.conto_default_id || ""}
                             onChange={(e) => set("conto_default_id", e.target.value)}
@@ -1899,7 +1900,7 @@ function MezzoPagamentoForm({ section, editing, onClose }) {
                             {conti.map((c) => (
                                 <option key={c.id} value={c.id}>{c.nome} ({c.tipo})</option>
                             ))}
-                        </select>
+                        </SearchableSelect>
                     </div>
                     <div>
                         <Label>Ordine</Label>
@@ -2047,7 +2048,7 @@ function ProdottoForm({ section, editing, onClose }) {
                 </div>
                 <div className="bg-amber-50 border border-amber-200 rounded p-2">
                     <label className="block text-sm font-medium text-amber-900 mb-1">Campagna d'incentivazione</label>
-                    <select
+                    <SearchableSelect
                         className="w-full border rounded px-2 py-1.5 text-sm bg-white"
                         value={f.incentivazione_campagna || ""}
                         onChange={(e) => set("incentivazione_campagna", e.target.value || null)}
@@ -2057,7 +2058,7 @@ function ProdottoForm({ section, editing, onClose }) {
                         <option value="vita_investimento">Vita — Bisogno Investimento</option>
                         <option value="vita_protezione">Vita — Bisogno Protezione</option>
                         <option value="dna_danni">DNA — Danni</option>
-                    </select>
+                    </SearchableSelect>
                     <div className="text-[10px] text-amber-700 mt-1">
                         Assegna il prodotto a una campagna per includerlo nel calcolo della sezione <b>Incentivazioni</b>.
                     </div>
@@ -2299,11 +2300,11 @@ function UtenteForm({ section, editing, onClose }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <Label>Tipologia utente</Label>
-                            <select value={f.tipologia_utente || ""} onChange={(e) => set("tipologia_utente", e.target.value)}
+                            <SearchableSelect value={f.tipologia_utente || ""} onChange={(e) => set("tipologia_utente", e.target.value)}
                                 className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-tipologia">
                                 <option value="">— Seleziona —</option>
                                 {["Collaboratore di rete", "Dipendente interno", "Agente", "Sub-agente", "Produttore", "Broker", "Altro"].map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div><Label>Mansione</Label><Input value={f.mansione || ""} onChange={(e) => set("mansione", e.target.value)} data-testid="utente-mansione" /></div>
                     </div>
@@ -2338,12 +2339,12 @@ function UtenteForm({ section, editing, onClose }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <Label>Amministratore?</Label>
-                            <select value={f.role === "admin" ? "si" : "no"}
+                            <SearchableSelect value={f.role === "admin" ? "si" : "no"}
                                 onChange={(e) => set("role", e.target.value === "si" ? "admin" : (f.role === "admin" ? "collaboratore" : f.role || "dipendente"))}
                                 className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-amministratore">
                                 <option value="si">Sì</option>
                                 <option value="no">No</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div>
                             <Label>Ruolo (permessi software) *</Label>
@@ -2397,11 +2398,11 @@ function UtenteForm({ section, editing, onClose }) {
                             <div className="grid grid-cols-2 gap-3 bg-violet-50 border border-violet-200 rounded-md p-3">
                                 <div>
                                     <Label>Riporta a (sottorete — collaboratore sopra)</Label>
-                                    <select value={f.parent_collaboratore_id || ""} onChange={(e) => set("parent_collaboratore_id", e.target.value || null)}
+                                    <SearchableSelect value={f.parent_collaboratore_id || ""} onChange={(e) => set("parent_collaboratore_id", e.target.value || null)}
                                         className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-parent-collab">
                                         <option value="">— Nessuno (diretto agenzia) —</option>
                                         {staff.filter((u) => u.id !== editing?.id).map((u) => (<option key={u.id} value={u.id}>{u.name}</option>))}
-                                    </select>
+                                    </SearchableSelect>
                                 </div>
                                 <div>
                                     <Label>% provvigione al collaboratore sopra</Label>
@@ -2484,14 +2485,14 @@ function UtenteForm({ section, editing, onClose }) {
                     <div className="grid grid-cols-2 gap-3">
                         <div>
                             <Label>Albo</Label>
-                            <select value={f.rui_albo || "IVASS"} onChange={(e) => set("rui_albo", e.target.value)}
+                            <SearchableSelect value={f.rui_albo || "IVASS"} onChange={(e) => set("rui_albo", e.target.value)}
                                 className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-rui-albo">
                                 {["IVASS", "RUI", "OAM", "Altro"].map((o) => <option key={o} value={o}>{o}</option>)}
-                            </select>
+                            </SearchableSelect>
                         </div>
                         <div>
                             <Label>Sezione</Label>
-                            <select value={f.rui_sezione || ""} onChange={(e) => set("rui_sezione", e.target.value)}
+                            <SearchableSelect value={f.rui_sezione || ""} onChange={(e) => set("rui_sezione", e.target.value)}
                                 className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="utente-rui-sezione">
                                 <option value="">— Seleziona —</option>
                                 <option value="A">A - Agenti</option>
@@ -2500,7 +2501,7 @@ function UtenteForm({ section, editing, onClose }) {
                                 <option value="D">D - Banche / Intermediari finanziari</option>
                                 <option value="E">E - Collaboratori di intermediari (A, B, D)</option>
                                 <option value="F">F - Collaboratori di sez. E</option>
-                            </select>
+                            </SearchableSelect>
                         </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -3088,12 +3089,12 @@ function SchemaProvvForm({ section, editing, onClose }) {
 // =================== SI/NO SELECT ===================
 function SiNoSelect({ value, onChange, testid }) {
     return (
-        <select value={value || ""} onChange={(e) => onChange(e.target.value)}
+        <SearchableSelect value={value || ""} onChange={(e) => onChange(e.target.value)}
             className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid={testid}>
             <option value="">— n.d. —</option>
             <option value="Sì">Sì</option>
             <option value="No">No</option>
-        </select>
+        </SearchableSelect>
     );
 }
 
@@ -3136,11 +3137,11 @@ function AllegatoManager({ userId, categoria, titolo, icon: Icon = FileText, cam
                         <div key={c.key}>
                             <Label className="text-xs">{c.label}</Label>
                             {c.type === "select" ? (
-                                <select value={form[c.key] || ""} onChange={(e) => setF(c.key, e.target.value)}
+                                <SearchableSelect value={form[c.key] || ""} onChange={(e) => setF(c.key, e.target.value)}
                                     className="w-full h-9 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid={`allegato-${categoria}-${c.key}`}>
                                     <option value="">— Seleziona —</option>
                                     {c.options.map((o) => <option key={o} value={o}>{o}</option>)}
-                                </select>
+                                </SearchableSelect>
                             ) : (
                                 <Input type={c.type || "text"} value={form[c.key] || ""} onChange={(e) => setF(c.key, e.target.value)} data-testid={`allegato-${categoria}-${c.key}`} />
                             )}
@@ -3411,11 +3412,11 @@ function CorsiCollaboratore({ userId, corsi, onChange }) {
             {anni.length > 0 && (
                 <div className="flex items-center gap-2">
                     <Label className="text-xs">Filtra per anno</Label>
-                    <select value={filtroAnno} onChange={(e) => setFiltroAnno(e.target.value)}
+                    <SearchableSelect value={filtroAnno} onChange={(e) => setFiltroAnno(e.target.value)}
                         className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white" data-testid="corso-filtro-anno">
                         <option value="">Tutti</option>
                         {anni.map((a) => <option key={a} value={a}>{a}</option>)}
-                    </select>
+                    </SearchableSelect>
                 </div>
             )}
 
@@ -3840,7 +3841,7 @@ function WhatsAppSection({ f, set }) {
                     {instances.length > 1 && (
                         <div className="mt-3">
                             <Label>Istanza default per avvisi automatici</Label>
-                            <select
+                            <SearchableSelect
                                 value={f.whatsapp_default_instance || ""}
                                 onChange={(e) => set("whatsapp_default_instance", e.target.value || null)}
                                 className="w-full border border-emerald-300 rounded-md px-3 py-2 text-sm bg-white mt-1"
@@ -3852,7 +3853,7 @@ function WhatsAppSection({ f, set }) {
                                         {i.agenzia_nome} · {i.state_live || i.state}
                                     </option>
                                 ))}
-                            </select>
+                            </SearchableSelect>
                         </div>
                     )}
                 </div>
@@ -6676,25 +6677,25 @@ function UsaModelloDialog({ modello, mode, onClose }) {
                     {cliente && polizze.length > 0 && (
                         <div>
                             <Label>Polizza (opzionale, per i placeholder polizza)</Label>
-                            <select className="w-full border rounded h-9 px-2 text-sm" value={polizzaId}
+                            <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" value={polizzaId}
                                 onChange={(e) => setPolizzaId(e.target.value)} data-testid="usa-modello-polizza">
                                 <option value="">— nessuna —</option>
                                 {polizze.map((p) => (
                                     <option key={p.id} value={p.id}>{p.numero_polizza} · {p.ramo} · scad. {p.scadenza}</option>
                                 ))}
-                            </select>
+                            </SearchableSelect>
                         </div>
                     )}
                     {mode !== "wa" && (
                         <div>
                             <Label>Collaboratore (firma e dati operatore)</Label>
-                            <select className="w-full border rounded h-9 px-2 text-sm" value={operatoreId}
+                            <SearchableSelect className="w-full border rounded h-9 px-2 text-sm" value={operatoreId}
                                 onChange={(e) => setOperatoreId(e.target.value)} data-testid="usa-modello-operatore">
                                 <option value="">— nessuno —</option>
                                 {operatori.map((u) => (
                                     <option key={u.id} value={u.id}>{u.name || u.nome || u.email}{u.firma_digitale_url ? " ✍︎" : ""}</option>
                                 ))}
-                            </select>
+                            </SearchableSelect>
                             <p className="text-[10px] text-slate-400 mt-1">
                                 Compila i segnaposto <code className="bg-slate-100 px-1 rounded">{"{operatore_*}"}</code> e inserisce la <code className="bg-slate-100 px-1 rounded">{"{firma_operatore}"}</code> (✍︎ = firma caricata nel profilo).
                             </p>

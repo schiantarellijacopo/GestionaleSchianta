@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { X, Headphones, Send, Loader2, Plus, MessageSquare } from "lucide-react";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
@@ -99,21 +100,21 @@ export default function TicketDialog({ open, onClose }) {
                             <div className="grid grid-cols-2 gap-3">
                                 <div>
                                     <label className="text-xs font-semibold text-slate-600 block mb-1">Categoria</label>
-                                    <select value={form.categoria}
+                                    <SearchableSelect value={form.categoria}
                                         onChange={(e) => setForm({ ...form, categoria: e.target.value })}
                                         className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-white"
                                         data-testid="ticket-categoria-select">
                                         {CATEGORIE.map((c) => <option key={c.v} value={c.v}>{c.l}</option>)}
-                                    </select>
+                                    </SearchableSelect>
                                 </div>
                                 <div>
                                     <label className="text-xs font-semibold text-slate-600 block mb-1">Priorità</label>
-                                    <select value={form.priorita}
+                                    <SearchableSelect value={form.priorita}
                                         onChange={(e) => setForm({ ...form, priorita: e.target.value })}
                                         className="w-full px-3 py-2 text-sm border border-slate-300 rounded-md bg-white"
                                         data-testid="ticket-priorita-select">
                                         {PRIORITA.map((p) => <option key={p.v} value={p.v}>{p.l}</option>)}
-                                    </select>
+                                    </SearchableSelect>
                                 </div>
                             </div>
                             <div>

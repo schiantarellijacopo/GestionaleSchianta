@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { PenTool, Type, Trash2, Plus } from "lucide-react";
 
 // Editor visivo: posiziona campi (firma / dato / libero) sulle pagine di un PDF.
@@ -124,10 +125,10 @@ export default function FirmaDesigner({ pages = [], immagini = [], campi = [], o
                             </span>
                             <span className="text-slate-500">pag. {(c.page || 0) + 1}</span>
                             {c.tipo === "dato" && (
-                                <select value={c.chiave} onChange={(e) => patch(c.id, { chiave: e.target.value })}
+                                <SearchableSelect value={c.chiave} onChange={(e) => patch(c.id, { chiave: e.target.value })}
                                     className="border border-slate-300 rounded px-1 py-0.5 text-xs" data-testid={`fd-chiave-${c.id}`}>
                                     {campiDisp.map((k) => <option key={k.chiave} value={k.chiave}>{k.label}</option>)}
-                                </select>
+                                </SearchableSelect>
                             )}
                             {c.tipo === "libero" && (
                                 <input value={c.valore || ""} onChange={(e) => patch(c.id, { valore: e.target.value })}

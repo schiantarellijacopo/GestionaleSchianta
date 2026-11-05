@@ -9,6 +9,7 @@
  *   <TablePager page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} pages={pages} total={total} />
  */
 import { useEffect, useMemo, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Button } from "@/components/ui/button";
 
 export const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, "all"];
@@ -58,7 +59,7 @@ export default function TablePager({
             <Button variant="outline" size="sm" disabled={page >= pages}
                     onClick={() => setPage((p) => Math.min(pages, p + 1))}
                     data-testid={`${testid}-page-next`}>Succ. ›</Button>
-            <select value={pageSize} onChange={(e) => {
+            <SearchableSelect value={pageSize} onChange={(e) => {
                         const v = e.target.value;
                         setPageSize(v === "all" ? "all" : Number(v));
                     }}
@@ -69,7 +70,7 @@ export default function TablePager({
                 <option value={100}>100 / pagina</option>
                 <option value={200}>200 / pagina</option>
                 <option value="all">Tutte</option>
-            </select>
+            </SearchableSelect>
         </div>
     );
 }

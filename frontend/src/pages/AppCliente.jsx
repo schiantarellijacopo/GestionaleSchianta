@@ -3,6 +3,7 @@
  * Orari, team, numeri assistenza per compagnia, link utili, video, slogan.
  */
 import { useEffect, useRef, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api } from "@/lib/api";
 import { PageHeader, Loading } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -345,7 +346,7 @@ function TeamMemberRow({ r, i, onChange, onRemove, sedi = [] }) {
                            onChange={(e) => onChange({ telefono: e.target.value })} data-testid={`team-telefono-${i}`} />
                     <Input value={r.email || ""} placeholder="Email" className="h-8 text-xs bg-white"
                            onChange={(e) => onChange({ email: e.target.value })} data-testid={`team-email-${i}`} />
-                    <select
+                    <SearchableSelect
                         value={r.sede_id || ""}
                         onChange={(e) => onChange({ sede_id: e.target.value })}
                         className="h-8 text-xs bg-white border border-slate-200 rounded-md px-2 md:col-span-2"
@@ -355,7 +356,7 @@ function TeamMemberRow({ r, i, onChange, onRemove, sedi = [] }) {
                         {sedi.map((s, j) => (
                             <option key={s.id || j} value={s.id}>{s.nome || `Sede ${j + 1}`}</option>
                         ))}
-                    </select>
+                    </SearchableSelect>
                     <Textarea value={r.descrizione || ""} placeholder="Di cosa si occupa (es. gestione sinistri auto, preventivi vita, contabilità...)"
                               className="md:col-span-2 text-xs bg-white min-h-[44px]" rows={2}
                               onChange={(e) => onChange({ descrizione: e.target.value })}

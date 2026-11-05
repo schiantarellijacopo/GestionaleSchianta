@@ -6,6 +6,7 @@
  *  - Salvare una nota/sollecito
  */
 import { useEffect, useState, useRef } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
@@ -55,13 +56,13 @@ export default function DocumentiMancantiWidget() {
                     Documenti mancanti
                     {totale > 0 && <span className="ml-2 text-[11px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-mono">{totale}</span>}
                 </h3>
-                <select value={collabId} onChange={(e) => setCollabId(e.target.value)}
+                <SearchableSelect value={collabId} onChange={(e) => setCollabId(e.target.value)}
                     className="text-xs border border-amber-300 rounded px-2 py-1 bg-white" data-testid="docs-missing-collab-filter">
                     <option value="">Tutti i collaboratori</option>
                     {collaboratori.map((c) => (
                         <option key={c.id} value={c.id}>{c.name || c.email}</option>
                     ))}
-                </select>
+                </SearchableSelect>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                 <CardMissing label="Polizze senza PDF" count={polizze} icon={FileText} color="rose"
@@ -383,7 +384,7 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
                     <Input value={q} onChange={(e) => setQ(e.target.value)}
                         placeholder="Cerca…" className="flex-1 min-w-[180px]" data-testid="missing-search" />
                     {collaboratori && setCollabId && (
-                        <select
+                        <SearchableSelect
                             value={collabId || ""}
                             onChange={(e) => { setCollabId(e.target.value); }}
                             className="text-xs border border-slate-300 rounded px-2 py-1.5 bg-white h-9"
@@ -394,7 +395,7 @@ function ListaMancantiDialog({ tipo, data, collNome, note, setNote, onReload, on
                             {(collaboratori || []).map((c) => (
                                 <option key={c.id} value={c.id}>{c.name || c.email}</option>
                             ))}
-                        </select>
+                        </SearchableSelect>
                     )}
                     <Button size="sm" variant="outline" onClick={stampa} data-testid="missing-print">
                         <Printer size={13} className="mr-1" /> Stampa

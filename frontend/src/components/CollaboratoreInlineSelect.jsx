@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api } from "@/lib/api";
 import { UserCog } from "lucide-react";
 import { toast } from "sonner";
@@ -72,7 +73,7 @@ export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, 
 
     return (
         <div className="inline-flex items-center gap-1.5">
-            <select
+            <SearchableSelect
                 autoFocus
                 value={selValue}
                 onChange={(e) => setSelValue(e.target.value)}
@@ -86,7 +87,7 @@ export default function CollaboratoreInlineSelect({ entita, id, value, onSaved, 
                         {u.name || u.email}{u.attivo === false ? " (inattivo)" : ""}
                     </option>
                 ))}
-            </select>
+            </SearchableSelect>
             <button
                 type="button"
                 onClick={() => save(selValue)}

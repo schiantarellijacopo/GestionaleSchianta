@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, fmtDate, fmtEur } from "@/lib/api";
 import { PageHeader, StatusBadge, Loading } from "@/components/Shared";
@@ -2140,12 +2141,12 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                                 <td className="text-center text-slate-400">{i + 1}</td>
                                 <td>
                                     {canEdit ? (
-                                        <select value={r.collaboratore_id || ""} onChange={(e) => selezionaCollab(i, e.target.value)}
+                                        <SearchableSelect value={r.collaboratore_id || ""} onChange={(e) => selezionaCollab(i, e.target.value)}
                                             className="w-full h-8 px-1.5 text-xs border border-slate-200 rounded bg-white"
                                             data-testid={`provv-op-collab-${i}`}>
                                             <option value="">{r.operatore_nome || "— Seleziona —"}</option>
                                             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                                        </select>
+                                        </SearchableSelect>
                                     ) : (r.operatore_nome || "—")}
                                     {r.origine === "sottorete" && (
                                         <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-violet-100 text-violet-700">sottorete</span>
@@ -2155,12 +2156,12 @@ function ProvvigioniOperatoriEditor({ pol, canEdit, onSaved }) {
                                     )}
                                 </td>
                                 <td>
-                                    <select value={r.tipo} onChange={(e) => patch(i, { tipo: e.target.value })} disabled={!canEdit}
+                                    <SearchableSelect value={r.tipo} onChange={(e) => patch(i, { tipo: e.target.value })} disabled={!canEdit}
                                         className="w-full h-8 px-1 text-xs border border-slate-200 rounded bg-white"
                                         data-testid={`provv-op-tipo-${i}`}>
                                         <option value="percentuale">% su provv.</option>
                                         <option value="importo">Importo €</option>
-                                    </select>
+                                    </SearchableSelect>
                                 </td>
                                 <td>
                                     <Input type="number" step="0.01" value={r.valore}

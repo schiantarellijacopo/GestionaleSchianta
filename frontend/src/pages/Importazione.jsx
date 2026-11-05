@@ -11,6 +11,7 @@
  *  - Wizard interattivo mapping delle entità non mappate (compagnie/rami/operatori/prodotti/garanzie)
  */
 import { useEffect, useState, useRef, useCallback } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api, fmtDate } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
@@ -814,7 +815,7 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                                 </td>
                                 <td className="num">{it.occorrenze || 0}</td>
                                 <td>
-                                    <select
+                                    <SearchableSelect
                                         value={currentVal}
                                         onChange={(e) => onChange(it.id, e.target.value)}
                                         className={`w-full text-xs border rounded px-2 py-1.5 bg-white ${
@@ -827,7 +828,7 @@ function MappingRows({ items, candidates, edits, onChange, onRemove, tipo }) {
                                         {candidates.map((c) => (
                                             <option key={c.id} value={c.id}>{c.label}</option>
                                         ))}
-                                    </select>
+                                    </SearchableSelect>
                                 </td>
                                 <td>
                                     {isMapped && (
@@ -1134,7 +1135,7 @@ export function ImportTargheStub({ polizzaPreselezionata = null, onImportComplet
                                             <td className="font-medium text-slate-800">{h || `(col ${i + 1})`}</td>
                                             <td className="text-slate-500">{example || "—"}</td>
                                             <td>
-                                                <select
+                                                <SearchableSelect
                                                     value={mapping[h] || ""}
                                                     onChange={(e) => setHeaderMapping(h, e.target.value)}
                                                     className="w-full border rounded px-2 py-1 bg-white text-xs"
@@ -1146,7 +1147,7 @@ export function ImportTargheStub({ polizzaPreselezionata = null, onImportComplet
                                                             {c.label}{c.required ? " *" : ""}
                                                         </option>
                                                     ))}
-                                                </select>
+                                                </SearchableSelect>
                                             </td>
                                         </tr>
                                     );

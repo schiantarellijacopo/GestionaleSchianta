@@ -13,6 +13,7 @@
  * Flusso: 1) upload → 2) preview + mapping → 3) execute → 4) risultato
  */
 import { useRef, useState } from "react";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,7 +185,7 @@ export default function ImportExcelDialog({
                                         <tr key={d.header} className="border-b border-slate-100">
                                             <td className="p-1.5 font-mono text-[11px]">{d.header}</td>
                                             <td className="p-1.5">
-                                                <select
+                                                <SearchableSelect
                                                     value={mapping[d.header] || "__ignore__"}
                                                     onChange={(e) => setMapping({ ...mapping, [d.header]: e.target.value })}
                                                     className="w-full text-xs border rounded h-7 px-1.5"
@@ -196,7 +197,7 @@ export default function ImportExcelDialog({
                                                             {f}{required.includes(f) ? " *" : ""}
                                                         </option>
                                                     ))}
-                                                </select>
+                                                </SearchableSelect>
                                             </td>
                                             <td className="p-1.5 text-[10px] text-slate-500 max-w-[220px] truncate">
                                                 {preview.rows[0]?.raw?.[d.header] ?? "-"}
