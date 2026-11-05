@@ -708,6 +708,23 @@ async def _perc_provv_effettiva(cid: str):
     return 0.0
 
 
+def _titolo_override_quota(t: dict, cid: str):
+    """Quota provvigione del collaboratore 'portata dal titolo'.
+
+    Se il titolo è stato salvato/modificato dalla scheda titolo
+    (provv_collab_override=True), l'Estratto conto deve mostrare ESATTAMENTE
+    la provvigione del collaboratore riportata su `provvigioni_operatori`
+    (calcolata a mano o da schema, non cambia). Ritorna None quando non c'è
+    override → il chiamante usa lo schema provvigionale (titoli storici/import).
+    """
+    if not t.get("provv_collab_override"):
+        return None
+    for o in (t.get("provvigioni_operatori") or []):
+        if (o.get("operatore_id") or o.get("collaboratore_id")) == cid:
+            return round(float(o.get("provvigione") or 0.0), 2)
+    return None
+
+
 @api.get("/collaboratori/{cid}/estratto-provvigioni")
 async def estratto_provvigioni(
     cid: str, dal: Optional[str] = None, al: Optional[str] = None,
@@ -837,6 +854,15 @@ async def estratto_provvigioni(
             premio_lordo=t.get("importo_lordo") or t.get("premio_lordo"),
         )
         provv = _bk["provvigione_collaboratore"] or 0.0
+        _prov_tot_disp = _bk["provvigione_totale"]
+        _pct_disp = _bk["pct_collab"]
+        # "Porta la provvigione del titolo": per i titoli salvati/modificati dalla
+        # scheda titolo l'estratto mostra la quota collaboratore riportata sul titolo.
+        _ovr = _titolo_override_quota(t, cid)
+        if _ovr is not None:
+            provv = _ovr
+            _prov_tot_disp = round(float(t.get("provvigioni") or 0.0), 2)
+            _pct_disp = round(provv / _prov_tot_disp * 100, 2) if _prov_tot_disp else 0.0
         incassato = t.get("stato") == "incassato"
         gia_pagato = t["id"] in titoli_gia_pagati
         rows.append({
@@ -851,8 +877,8 @@ async def estratto_provvigioni(
             "incassato": incassato,
             "importo_lordo": t.get("importo_lordo", 0.0),
             "provvigione": provv,
-            "provvigione_totale": _bk["provvigione_totale"],
-            "provvigione_pct_collab": _bk["pct_collab"],
+            "provvigione_totale": _prov_tot_disp,
+            "provvigione_pct_collab": _pct_disp,
             "gia_pagato": gia_pagato,
             "in_bozza": t["id"] in titolo_bozza,
             "bozza_id": titolo_bozza.get(t["id"]),
@@ -1424,6 +1450,10 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
     lordo = 0.0
     for t in titoli:
         _p = _pol_map.get(t.get("polizza_id"), {})
+        _ovr = _titolo_override_quota(t, cid)
+        if _ovr is not None:
+            lordo += _ovr
+            continue
         _bk = await _provv_breakdown(
             float(t.get("provvigioni") or 0), cid, _p.get("compagnia_id"), _p.get("ramo"),
             schema_cache=_sc,
@@ -6998,6 +7028,10 @@ async def create_titolo(body: dict, user=Depends(require_user("admin", "collabor
     for _k in ("importo_lordo", "importo_netto", "imposte", "ssn", "diritti", "accessori", "provvigioni", "importo_da_pagare"):
         if body.get(_k) is not None:
             body[_k] = round(float(body[_k]), 2)
+    # Se la scheda titolo porta una ripartizione provvigione per collaboratore,
+    # l'Estratto conto dovrà mostrare ESATTAMENTE quella (no ricalcolo da schema).
+    if body.get("provvigioni_operatori"):
+        body["provv_collab_override"] = True
     obj = Titolo(**body)
     await db.titoli.insert_one(obj.model_dump())
     # 🆕 Aggiorna il Premio ANNUO della scheda polizza (solo tipi nuova/rinnovo/quietanza).
@@ -7032,6 +7066,10 @@ async def update_titolo(tid: str, body: dict, user=Depends(require_user("admin",
     if body.get("data_incasso"):
         await assert_giornata_aperta(body["data_incasso"], azione="impostare data incasso nel giorno")
     body["updated_at"] = _now_iso()
+    # Se la scheda titolo porta una ripartizione provvigione per collaboratore,
+    # l'Estratto conto dovrà mostrare ESATTAMENTE quella (no ricalcolo da schema).
+    if body.get("provvigioni_operatori"):
+        body["provv_collab_override"] = True
     # Regola: se la NOTA del titolo contiene "storno"/"stornato" → lo stato diventa "stornato".
     _nota_eff = body.get("nota", cur.get("nota")) or ""
     if "storn" in str(_nota_eff).lower():

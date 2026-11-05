@@ -1,5 +1,16 @@
 # Changelog — Axicura CRM
 
+## 2026-06 — Estratto conto collaboratore: "porta la provvigione del titolo"
+- **Bug utente**: modificando la provvigione del collaboratore nel titolo (ripartizione `provvigioni_operatori`), l'Estratto conto collaboratore NON la mostrava: ricalcolava sempre la quota dallo schema provvigionale (es. 4,5%), ignorando il valore salvato sul titolo.
+- **Scelta utente**: l'estratto deve mostrare ESATTAMENTE la provvigione riportata sul titolo (a mano o da schema, non cambia), **ma solo per i titoli modificati d'ora in avanti** (lo storico importato resta calcolato da schema).
+- **Fix** (`server.py`, `db_models.py`):
+  - nuovo campo `Titolo.provv_collab_override: bool` (default False).
+  - `create_titolo`/`update_titolo` impostano `provv_collab_override=True` quando il body porta `provvigioni_operatori` non vuoto (ogni salvataggio dalla scheda titolo).
+  - helper `_titolo_override_quota(t, cid)`: se il titolo ha l'override, ritorna la quota del collaboratore da `provvigioni_operatori`; altrimenti None → fallback schema `_provv_breakdown`.
+  - `estratto_provvigioni` (colonna Provvigione, totale e % del collaboratore) e l'endpoint di **pagamento provvigioni** (calcolo del lordo da pagare) usano l'override quando presente. L'export estratto usa la stessa funzione → coperto.
+- **Verifica** (in-process, tenant reale c5ae2d0e): titolo con override → estratto mostra il valore del titolo (100,80) invece dello schema (1,84); titoli senza flag → invariati (schema). Smoke test API endpoint 200, 30 righe. Retrocompatibile sui ~51k titoli storici (nessun flag).
+
+
 ## 2026-11 — Ritenute/PNC/Rappel solo mandato diretto, descrizione auto + promemoria disdette + titolo import multi-operatore
 - **Filtro mandato diretto** in Ritenute Compagnia, PNC e **Rappel**: helper condiviso `isCompagniaDiretta` (`lib/api.js`). Una compagnia è "diretta" (quindi visibile) SOLO se mandato diretto e NON collegata ad agenzie partner (`agenzia_partner_id`/`agenzie_partner_ids` vuoti). Le compagnie in **collaborazione o legate a un'agenzia partner (es. REDION) spariscono automaticamente**, senza interruttori manuali — gestito dal collegamento agenzia partner. Verificato su dati reali (8 dirette visibili, 5 collaborazione/partner escluse).
 - **Descrizione ritenuta auto-compilata**: "RITENUTA <COMPAGNIA> DEL <GG-MM-AAAA>" da compagnia+data selezionate, ma **sempre modificabile** (una volta editata a mano non viene più sovrascritta). `RitenuteCompagnia.jsx`.

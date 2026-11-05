@@ -617,6 +617,11 @@ class Titolo(BaseDoc):
     # Ripartizione provvigione su più collaboratori (come la polizza). Se vuoto → usa collaboratore_id/provvigioni.
     provvigioni_operatori: List[dict] = Field(default_factory=list)
     # [{operatore_id, operatore_nome, provvigione}]
+    # Se True, l'Estratto conto collaboratore mostra ESATTAMENTE la provvigione
+    # del collaboratore riportata sul titolo (provvigioni_operatori), senza
+    # ricalcolarla dallo schema. Impostato quando il titolo viene salvato/modificato
+    # dalla scheda titolo. I titoli storici (import) restano calcolati da schema.
+    provv_collab_override: bool = False
     id_titolo_exp: Optional[str] = None
     pagamento_in_direzione: bool = False   # premio pagato direttamente in compagnia (no cassa)
     fonte: Literal["manuale", "import_ania"] = "manuale"
