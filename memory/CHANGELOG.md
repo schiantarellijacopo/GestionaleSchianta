@@ -553,3 +553,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Bug: l'OCR polizza poteva restituire imposte errate (es. 50,86 = 2×25,43, conteggio doppio); la riconciliazione correggeva solo se garanzie itemizzate o imposte a 0, non verificando l'identità netto+imposte+SSN=lordo.
 - Fix in ocr_polizza.py _riconcilia_premi: guardia di coerenza finale — se netto+imposte+SSN+diritti ≠ lordo (scarto >0,50€), imposte ricalcolate come residuo dal lordo. Verificato: 205,43/25,43/19,14/250,00.
 - Nota: vale per i nuovi OCR; le polizze già salvate con valore errato vanno corrette a mano nel campo Imposte.
+
+## 2026-06 — Fix OCR imposte reso DETERMINISTICO (non-determinismo LLM)
+- La correzione precedente dipendeva dallo scarto col lordo; con letture non deterministiche di Gemini poteva ancora passare un valore doppio (50,86).
+- Riscritto _riconcilia_premi con priorità deterministica per le imposte: (1) somma imposte per-garanzia − contributo forzoso se itemizzato; (2) altrimenti RESIDUO dal totale letto (lordo − netto − SSN − diritti), ignorando il valore singolo (inaffidabile/raddoppiato); (3) altrimenti valore letto − forzoso. Quadratura finale di sicurezza se scarto > 0,50 €.
+- Testato: 6 scenari (itemizzato, doppio-no-garanzie, netto-sì/imposte-no, coerente, zero, no-lordo) → tutti 25,43. OCR live del PDF reale: 205,43 / 25,43 / 19,14 / 250,00.
+- Nota: polizza 184643597 già salvata col vecchio 50,86 NON presente nel DB preview → va corretta a mano o re-importata (ora corregge da sola).

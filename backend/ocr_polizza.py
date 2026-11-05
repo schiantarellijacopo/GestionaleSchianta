@@ -200,43 +200,42 @@ def _riconcilia_premi(data: dict) -> None:
     netti = [n for n in netti if n is not None]
     imposte = [i for i in imposte if i is not None]
 
-    ricalcolato = False
+    cf = _num(data.get("contributo_forzoso")) or 0.0
+    ssn = _num(data.get("contributo_ssn")) or 0.0
+    diritti = _num(data.get("diritti")) or 0.0
+    lordo_letto = _num(data.get("premio_lordo_totale"))  # totale letto dal PDF (ancora affidabile)
+
+    # NETTO: somma dal dettaglio garanzie se itemizzato
     if len(netti) >= 2:
         data["premio_netto_totale"] = round(sum(netti), 2)
-        ricalcolato = True
+    netto = _num(data.get("premio_netto_totale"))
+
+    # IMPOSTE (deterministico, a prova di letture non deterministiche dell'LLM):
+    #  1) se il dettaglio per-garanzia è itemizzato -> SOMMA delle imposte di riga − contributo forzoso
+    #  2) altrimenti, se abbiamo lordo letto e netto -> RESIDUO (lordo − netto − ssn − diritti):
+    #     il valore singolo letto non è affidabile (può essere raddoppiato), il totale sì
+    #  3) altrimenti -> valore letto − contributo forzoso
     if len(imposte) >= 2:
-        data["imposte_totali"] = round(sum(imposte), 2)
-        ricalcolato = True
+        data["imposte_totali"] = round(max(sum(imposte) - cf, 0.0), 2)
+    elif lordo_letto and netto is not None:
+        data["imposte_totali"] = round(max(lordo_letto - netto - ssn - diritti, 0.0), 2)
+    else:
+        imp_llm = _num(data.get("imposte_totali"))
+        if imp_llm is not None:
+            data["imposte_totali"] = round(max(imp_llm - cf, 0.0), 2)
 
-    # Contributo forzoso ex comma 63, L. 199/2025: va sottratto dalle imposte
-    cf = _num(data.get("contributo_forzoso"))
-    imp = _num(data.get("imposte_totali"))
-    if cf and cf > 0 and imp is not None:
-        data["imposte_totali"] = round(imp - cf, 2)
-        ricalcolato = True
-
-    if ricalcolato:
-        netto = _num(data.get("premio_netto_totale")) or 0.0
+    # LORDO: se non è stato letto dal PDF, ricomponilo dalle componenti
+    if not lordo_letto:
         imp = _num(data.get("imposte_totali")) or 0.0
-        ssn = _num(data.get("contributo_ssn")) or 0.0
-        diritti = _num(data.get("diritti")) or 0.0
-        data["premio_lordo_totale"] = round(netto + imp + ssn + diritti, 2)
+        data["premio_lordo_totale"] = round((netto or 0.0) + imp + ssn + diritti, 2)
 
-    # Guardia di coerenza finale: deve valere netto + imposte + ssn + diritti = lordo.
-    # Succede quando il PDF riporta il totale ma non itemizza le imposte riga per riga
-    # (imposte a 0 → le deduciamo), OPPURE quando l'LLM legge male le imposte con un
-    # valore NON zero palesemente incoerente col lordo (es. contate due volte): in
-    # entrambi i casi ricalcoliamo le imposte come residuo (lordo − netto − ssn − diritti)
-    # così la scomposizione quadra sempre col premio lordo da pagare.
+    # Quadratura finale: netto + imposte + ssn + diritti deve == lordo. Se lo scarto
+    # è > 0,50 € (es. una riga garanzia letta male/doppia), fidati del totale letto e
+    # deriva le imposte come residuo, così la scomposizione quadra sempre.
     lordo_r = _num(data.get("premio_lordo_totale"))
     netto_r = _num(data.get("premio_netto_totale"))
-    imp_r = _num(data.get("imposte_totali"))
-    ssn_r = _num(data.get("contributo_ssn")) or 0.0
-    diritti_r = _num(data.get("diritti")) or 0.0
+    imp_r = _num(data.get("imposte_totali")) or 0.0
     if lordo_r and netto_r is not None:
-        residuo = round(lordo_r - netto_r - ssn_r - diritti_r, 2)
-        if residuo >= -0.01:
-            mismatch = abs((netto_r + (imp_r or 0.0) + ssn_r + diritti_r) - lordo_r)
-            # imposte mancanti/zero -> deduci; imposte incoerenti (scarto > 0,50 €) -> correggi
-            if imp_r is None or imp_r == 0 or mismatch > 0.5:
-                data["imposte_totali"] = round(max(residuo, 0.0), 2)
+        residuo = round(lordo_r - netto_r - ssn - diritti, 2)
+        if residuo >= -0.01 and abs((netto_r + imp_r + ssn + diritti) - lordo_r) > 0.5:
+            data["imposte_totali"] = round(max(residuo, 0.0), 2)
