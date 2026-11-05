@@ -717,3 +717,8 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - SaluteFiscaleTab.jsx: aggiunti pulsanti "PDF riclass. 3 anni" / "PDF riclass. 5 anni"
   (data-testid sf-riclass-pdf-3-btn / sf-riclass-pdf-5-btn) accanto alle anteprime stampabili.
 - Testato e2e con login admin + anagrafica seed: HTTP 200, application/pdf valido (3 e 5 anni). Record temp rimosso.
+
+## 2026-06 — Visura: estrazione soci con percentuali
+- ocr_visura.py: il prompt Gemini ora estrae anche l'array `soci` (denominazione/nome/cognome, codice_fiscale, quota_percentuale, tipo accomandatario/accomandante/unico...).
+- applica_visura (extras_p1p2.py): i soci estratti vengono mappati in openapi_data.company.soci come {nome, quota, tipo, codice_fiscale}; la scheda Info Azienda → Soci/Azionisti li mostra con torta e percentuali. Nessuna modifica frontend necessaria.
+- Testato e2e: applica-visura con 2 soci (90%/10%) → persistiti correttamente in company.soci, ragione_sociale preservata.

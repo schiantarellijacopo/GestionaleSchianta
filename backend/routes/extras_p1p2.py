@@ -1733,11 +1733,41 @@ async def applica_visura(
     if fg and "individuale" not in fg and "ditta" not in fg:
         upd["tipo"] = "persona_giuridica"
 
+    # soci con percentuali → scheda Info Azienda (openapi_data.company.soci)
+    def _num(x):
+        try:
+            if x in (None, ""):
+                return None
+            return float(str(x).replace("%", "").replace(",", ".").strip())
+        except (TypeError, ValueError):
+            return None
+
+    soci_list = []
+    for s in (v.get("soci") or []):
+        nome = s.get("denominazione") or " ".join(
+            x for x in [s.get("nome"), s.get("cognome")] if x).strip() or None
+        if not nome:
+            continue
+        soci_list.append({
+            "nome": nome,
+            "quota": _num(s.get("quota_percentuale")),
+            "tipo": s.get("tipo"),
+            "codice_fiscale": s.get("codice_fiscale"),
+        })
+    if soci_list:
+        company = dict((ana.get("openapi_data") or {}).get("company") or {})
+        company["soci"] = soci_list
+        if not company.get("ragione_sociale"):
+            company["ragione_sociale"] = v.get("ragione_sociale")
+        openapi_data = dict(ana.get("openapi_data") or {})
+        openapi_data["company"] = company
+        upd["openapi_data"] = openapi_data
+
     upd["visura_camerale_dati"] = {**v, "estratto_il": _now_iso()}
     upd["updated_at"] = _now_iso()
     await db.anagrafiche.update_one({"id": aid}, {"$set": upd})
     return {"ok": True, "aggiornati": [k for k in upd if k not in ("updated_at",)],
-            "amministratori": amm, "legale_rappresentante": nome_lr}
+            "amministratori": amm, "soci": soci_list, "legale_rappresentante": nome_lr}
 # ===========================================================
 class RaccoltaDatiBody(BaseModel):
     raccolta_dati: dict

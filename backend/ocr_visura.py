@@ -34,6 +34,16 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
   "stato_attivita": "attiva | inattiva | cessata | null",
   "data_inizio_attivita": "YYYY-MM-DD o null",
   "numero_dipendenti": "intero o null",
+  "soci": [
+    {
+      "denominazione": "ragione sociale del socio se persona giuridica, altrimenti null",
+      "cognome": "stringa o null (se persona fisica)",
+      "nome": "stringa o null (se persona fisica)",
+      "codice_fiscale": "stringa o null",
+      "quota_percentuale": "numero percentuale di possesso es 60 (senza simbolo %) o null",
+      "tipo": "socio accomandatario | socio accomandante | socio unico | socio | nudo proprietario | usufruttuario | altro"
+    }
+  ],
   "amministratori": [
     {
       "ruolo": "Amministratore unico | Presidente | Consigliere | Socio | Legale rappresentante | altro",
@@ -56,6 +66,8 @@ Regole:
 - Ragione sociale e cognomi/nomi in MAIUSCOLO senza accenti speciali
 - Date sempre in formato YYYY-MM-DD
 - Per amministratori restituisci array (anche con un solo elemento o vuoto se nessuno)
+- Nella sezione "SOCI" / "TITOLARI DI DIRITTI SU QUOTE E AZIONI" / soci accomandatari e accomandanti estrai TUTTI i soci con la relativa quota di possesso in percentuale (campo quota_percentuale, solo il numero). Se la quota è espressa in valore (euro) e non in percentuale, calcolala sul capitale sociale quando possibile, altrimenti null.
+- Per soci restituisci array (vuoto se non presenti)
 - Non aggiungere testo prima o dopo il JSON
 - Non includere markdown ```json```
 """
@@ -102,8 +114,11 @@ async def estrai_dati_visura(image_bytes: bytes, mime_type: str = "image/jpeg") 
     # normalizza valori vuoti
     def _clean(v):
         return v if v not in ("", "null", None) else None
-    out = {k: _clean(v) for k, v in data.items() if k != "amministratori"}
+    out = {k: _clean(v) for k, v in data.items() if k not in ("amministratori", "soci")}
     out["amministratori"] = [
         {k: _clean(v) for k, v in a.items()} for a in (data.get("amministratori") or [])
+    ]
+    out["soci"] = [
+        {k: _clean(v) for k, v in s.items()} for s in (data.get("soci") or [])
     ]
     return out
