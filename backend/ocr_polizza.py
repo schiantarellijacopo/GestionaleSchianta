@@ -91,6 +91,8 @@ Regole:
 - TARGA (PRIORITÀ MASSIMA): la targa del veicolo è riportata IN ALTO nell'INTESTAZIONE del documento, accanto al numero di polizza, nella riga "Targa / Telaio n. XXXXXXXX" (es. "Polizza n. 184643597  Targa / Telaio n. VA164193" → targa = VA164193). USA SEMPRE questo valore come veicolo.targa: ha PRIORITÀ ASSOLUTA su qualsiasi altra targa o codice veicolo trovato altrove nel documento (tabelle, sezioni dati veicolo, ecc.). Copia il valore ESATTAMENTE come stampato nell'intestazione.
 - Durata: se vedi "dalle ore 24 del GG/MM/AAAA alle ore 24 del GG/MM/AAAA" (oppure "dal GG/MM/AAAA al GG/MM/AAAA"), la PRIMA data è data_decorrenza, la SECONDA è data_scadenza.
 - Premi (converti virgola→punto): "premio netto"→premio_netto_totale; "imposte"/"tasse"→imposte_totali; "diritti"→diritti; "totale" / "totale da pagare" / "premio lordo"→premio_lordo_totale.
+- premio_lordo_totale è OBBLIGATORIO: riporta SEMPRE il totale del contratto, cercando "Totale", "Totale da pagare", "Premio da pagare", "Premio annuale totale", "Premio lordo". È il numero più grande della sezione premi. Non lasciarlo mai null se nel documento compare un totale.
+- NON DUPLICARE le righe garanzia: ogni garanzia va elencata UNA SOLA VOLTA in `garanzie`. Non ripetere la stessa riga (stessa descrizione/importi) più volte.
 - DETTAGLIO PER GARANZIA: le polizze auto/multirischio hanno una tabella con una RIGA PER GARANZIA (RCA, Incendio, Furto, Eventi Atmosferici, Grandine, Kasko, Cristalli, Assistenza, ecc.) con per ciascuna il premio netto e le imposte. Per OGNI garanzia compila SEMPRE `premio_netto` e `imposte` con i valori di QUELLA riga.
 - premio_netto_totale = SOMMA dei `premio_netto` di TUTTE le garanzie. imposte_totali (prima del contributo forzoso) = SOMMA delle `imposte` di TUTTE le garanzie. NON usare un singolo valore letto male: calcola la somma riga per riga.
 - Contributo forzoso: la voce "Contributo forzoso ex comma 63, L. n. 199/2025" (o "ex comma 63") va messa in `contributo_forzoso` e VA SOTTRATTA dalle imposte. Quindi imposte_totali = (somma imposte garanzie) − contributo_forzoso.
@@ -196,43 +198,64 @@ def _riconcilia_premi(data: dict) -> None:
       ricostruito le componenti)
     """
     gar = data.get("garanzie") or []
-    netti = [_num(g.get("premio_netto")) for g in gar if isinstance(g, dict)]
-    imposte = [_num(g.get("imposte")) for g in gar if isinstance(g, dict)]
-    netti = [n for n in netti if n is not None]
-    imposte = [i for i in imposte if i is not None]
+    # DE-DUPLICA le righe garanzia: l'LLM (gemini) a volte ripete la STESSA riga,
+    # gonfiando le somme (netto/imposte raddoppiati). Teniamo una sola riga per chiave.
+    seen = set()
+    gar_u = []
+    for g in gar:
+        if not isinstance(g, dict):
+            continue
+        key = (
+            str(g.get("descrizione") or g.get("garanzia") or g.get("ramo") or g.get("nome") or "").strip().upper(),
+            _num(g.get("premio_netto")),
+            _num(g.get("imposte")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        gar_u.append(g)
+    netti = [n for n in (_num(g.get("premio_netto")) for g in gar_u) if n is not None]
+    imposte = [i for i in (_num(g.get("imposte")) for g in gar_u) if i is not None]
 
     cf = _num(data.get("contributo_forzoso")) or 0.0
     ssn = _num(data.get("contributo_ssn")) or 0.0
     diritti = _num(data.get("diritti")) or 0.0
-    lordo_letto = _num(data.get("premio_lordo_totale"))  # totale letto dal PDF (ancora affidabile)
+    lordo_letto = _num(data.get("premio_lordo_totale"))  # totale letto dal PDF
 
-    # NETTO: somma dal dettaglio garanzie se itemizzato
+    # NETTO: dalle garanzie de-duplicate se itemizzato, altrimenti dal totale letto
     if len(netti) >= 2:
         data["premio_netto_totale"] = round(sum(netti), 2)
     netto = _num(data.get("premio_netto_totale"))
+    if netto is None and netti:
+        netto = round(sum(netti), 2)
+        data["premio_netto_totale"] = netto
+
+    imposte_righe = round(sum(imposte), 2) if len(imposte) >= 2 else None
+
+    # LORDO di riferimento: se non è stato letto dal PDF, ricostruiscilo dalle garanzie
+    # DE-DUPLICATE, così abbiamo SEMPRE un ancoraggio affidabile per la regola primaria.
+    lordo_ref = lordo_letto
+    if lordo_ref is None and netto is not None and imposte_righe is not None:
+        lordo_ref = round(netto + max(imposte_righe - cf, 0.0) + ssn + diritti, 2)
+        data["premio_lordo_totale"] = lordo_ref
 
     # IMPOSTE — REGOLA PRIMARIA richiesta: Imposte = Lordo − Netto − SSN − Diritti.
-    # Quando abbiamo il premio lordo (totale da pagare) e il netto, le imposte si
-    # DERIVANO SEMPRE da quel calcolo: è deterministico e immune alle letture
-    # non deterministiche dell'LLM (che a volte raddoppia il valore o somma righe
-    # duplicate). Solo se manca il lordo usiamo la somma delle garanzie o il valore letto.
-    if lordo_letto and netto is not None:
-        data["imposte_totali"] = round(max(lordo_letto - netto - ssn - diritti, 0.0), 2)
-    elif len(imposte) >= 2:
-        data["imposte_totali"] = round(max(sum(imposte) - cf, 0.0), 2)
+    # Deterministica e immune al non-determinismo dell'LLM (valori doppi/righe ripetute).
+    if lordo_ref is not None and netto is not None:
+        data["imposte_totali"] = round(max(lordo_ref - netto - ssn - diritti, 0.0), 2)
+    elif imposte_righe is not None:
+        data["imposte_totali"] = round(max(imposte_righe - cf, 0.0), 2)
+        if lordo_letto is None and netto is not None:
+            data["premio_lordo_totale"] = round(netto + data["imposte_totali"] + ssn + diritti, 2)
     else:
         imp_llm = _num(data.get("imposte_totali"))
         if imp_llm is not None:
             data["imposte_totali"] = round(max(imp_llm - cf, 0.0), 2)
+        if lordo_letto is None and netto is not None:
+            data["premio_lordo_totale"] = round(netto + (data.get("imposte_totali") or 0.0) + ssn + diritti, 2)
 
-    # LORDO: se non è stato letto dal PDF, ricomponilo dalle componenti
-    if not lordo_letto:
-        imp = _num(data.get("imposte_totali")) or 0.0
-        data["premio_lordo_totale"] = round((netto or 0.0) + imp + ssn + diritti, 2)
-
-    # Quadratura finale: netto + imposte + ssn + diritti deve == lordo. Se lo scarto
-    # è > 0,50 € (es. una riga garanzia letta male/doppia), fidati del totale letto e
-    # deriva le imposte come residuo, così la scomposizione quadra sempre.
+    # Collapse di sicurezza: se netto+imposte+ssn+diritti non quadra col lordo (scarto
+    # > 0,50 €, tipico di righe duplicate non colte), deriva le imposte come residuo.
     lordo_r = _num(data.get("premio_lordo_totale"))
     netto_r = _num(data.get("premio_netto_totale"))
     imp_r = _num(data.get("imposte_totali")) or 0.0

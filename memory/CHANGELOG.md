@@ -576,3 +576,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - File: frontend/src/pages/Polizze.jsx onOcrPolizza — early return su d.polizza_esistente.
 - Verificato e2e in preview: inserita polizza fittizia 184643597 → OCR restituisce polizza_esistente → blocco; dummy poi rimossa.
 - NB: va pubblicato in produzione per essere attivo lì.
+
+## 2026-06 — RCA deployer: causa vera imposte 50,86 = righe garanzie DUPLICATE + lordo mancante
+- Produzione eseguiva il codice giusto, ma quando Gemini NON leggeva premio_lordo_totale, _riconcilia sommava righe garanzie DUPLICATE dall'LLM → imposte doppie (50,86); la guardia non scattava perché il lordo ricalcolato era coerente col doppio.
+- Fix in ocr_polizza.py: (1) DE-DUPLICA le righe garanzia prima di sommare; (2) se manca il lordo, lo ricostruisce dalle garanzie de-duplicate come ancoraggio; (3) regola primaria Imposte = Lordo − Netto − SSN − Diritti sempre; (4) collapse di sicurezza su scarto >0,50€. Prompt: premio_lordo_totale OBBLIGATORIO + niente righe duplicate.
+- Regressione: /app/backend/tests/test_ocr_imposte.py (6 test, incluso duplicate+no-lordo) → PASS. OCR live 3× consecutivi → sempre 25,43.
+- Richiede redeploy (il codice deployato precedente aveva ancora il bug del path no-lordo).
