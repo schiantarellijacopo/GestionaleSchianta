@@ -99,6 +99,7 @@ export default function BrogliaccioTab({ refreshKey }) {
         const catRevert = ["incasso_premio", "incasso_coperto", "incasso_premio_direzione", "copertura_titolo"];
         const isTitoloLinked = mov.titolo_id && catRevert.includes(mov.categoria);
         const isPagComp = mov.categoria === "pagamento_compagnia";
+        const isPagProvv = mov.categoria === "provvigioni" && mov.tipo === "uscita";
         let msg = isGiro
             ? `Eliminare il giroconto "${mov.contraente || mov.descrizione}"?\nVerranno cancellati entrambi i movimenti collegati.`
             : `Eliminare il movimento "${mov.contraente || mov.descrizione}" di ${fmtEur(mov.totale)}?`;
@@ -111,6 +112,8 @@ export default function BrogliaccioTab({ refreshKey }) {
             msg += `\n\n⚠️ Questo ripristinerà anche il titolo collegato: ${dest}.`;
         } else if (isPagComp) {
             msg += `\n\n⚠️ Questo annullerà il versamento: titoli e voci torneranno NON saldati.`;
+        } else if (isPagProvv) {
+            msg += `\n\n⚠️ Questo annullerà il pagamento provvigioni: l'importo tornerà ARRETRATO (da pagare) nell'estratto conto collaboratori. Se proveniva da una lista, la lista tornerà tra quelle da pagare.`;
         }
         if (!window.confirm(msg)) return;
         try {
@@ -735,24 +738,49 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
     const [saving, setSaving] = useState(false);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
 
+    // Movimenti con importo VINCOLATO: si possono modificare SOLO data e banca/metodo
+    // di pagamento. Importo, categoria, tipo e descrizione sono bloccati perché derivano
+    // da un'altra sezione:
+    //   • pagamento provvigioni collaboratore (estratto conto collaboratori);
+    //   • registrazione/incasso di un titolo o rientro di un sospeso.
+    // Per cambiare l'importo l'utente deve cancellare e rifare l'operazione.
+    const isPagProvv = movimento.categoria === "provvigioni" && (movimento.tipo === "uscita");
+    const isTitoloLink = !!movimento.titolo_id && [
+        "incasso_premio", "incasso_coperto", "incasso_premio_direzione",
+        "copertura_titolo", "anticipo",
+    ].includes(movimento.categoria);
+    const importoBloccato = isPagProvv || isTitoloLink;
+
     const save = async () => {
         if (!f.descrizione) { toast.error("Descrizione obbligatoria"); return; }
-        const imp = parseFloat(f.importo);
-        if (!imp || imp <= 0) { toast.error("Importo deve essere positivo"); return; }
+        if (!importoBloccato) {
+            const imp0 = parseFloat(f.importo);
+            if (!imp0 || imp0 <= 0) { toast.error("Importo deve essere positivo"); return; }
+        }
         setSaving(true);
         try {
             // Deriva il conto/banca dal tipo pagamento selezionato (come in Nuovo movimento).
             const tp = tipiPag.find((t) => t.label === f.mezzo_pagamento);
-            await api.put(`/contabilita/movimenti/${movimento.id}`, {
-                data_movimento: f.data_movimento,
-                tipo: f.tipo,
-                categoria: f.categoria,
-                importo: imp,
-                descrizione: f.descrizione,
-                mezzo_pagamento: f.mezzo_pagamento || null,
-                conto_cassa_id: tp?.conto_id || (f.mezzo_pagamento ? null : (f.conto_cassa_id || null)),
-                numero_documento: f.numero_documento || null,
-            });
+            if (importoBloccato) {
+                // Solo data + banca/metodo di pagamento. Importo/categoria/tipo/descrizione
+                // sono immutabili (vincolati a titolo/estratto conto).
+                await api.put(`/contabilita/movimenti/${movimento.id}`, {
+                    data_movimento: f.data_movimento,
+                    mezzo_pagamento: f.mezzo_pagamento || null,
+                    conto_cassa_id: tp?.conto_id || (f.mezzo_pagamento ? null : (f.conto_cassa_id || null)),
+                });
+            } else {
+                await api.put(`/contabilita/movimenti/${movimento.id}`, {
+                    data_movimento: f.data_movimento,
+                    tipo: f.tipo,
+                    categoria: f.categoria,
+                    importo: parseFloat(f.importo),
+                    descrizione: f.descrizione,
+                    mezzo_pagamento: f.mezzo_pagamento || null,
+                    conto_cassa_id: tp?.conto_id || (f.mezzo_pagamento ? null : (f.conto_cassa_id || null)),
+                    numero_documento: f.numero_documento || null,
+                });
+            }
             toast.success("Movimento aggiornato");
             onClose(true);
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
@@ -773,6 +801,11 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                         per evitare incoerenze sulla coppia.
                     </div>
                 )}
+                {importoBloccato && (
+                    <div className="text-xs bg-sky-50 border border-sky-200 rounded p-2 mb-2 text-sky-800" data-testid="brog-edit-locked-note">
+                        🔒 {isPagProvv ? "Pagamento provvigioni" : "Registrazione collegata a un titolo"}: si possono modificare <b>solo la Data e la Banca/metodo di pagamento</b>. Per cambiare l'importo cancella la registrazione e rifà l'operazione.
+                    </div>
+                )}
                 <div className="grid grid-cols-2 gap-3 py-2">
                     <div>
                         <Label>Data *</Label>
@@ -784,7 +817,7 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                     </div>
                     <div>
                         <Label>Tipo *</Label>
-                        <Select value={f.tipo} onValueChange={(v) => set("tipo", v)}>
+                        <Select value={f.tipo} onValueChange={(v) => set("tipo", v)} disabled={importoBloccato}>
                             <SelectTrigger data-testid="brog-edit-tipo"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="entrata">Entrata</SelectItem>
@@ -794,7 +827,7 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                     </div>
                     <div>
                         <Label>Categoria</Label>
-                        <Select value={f.categoria} onValueChange={(v) => set("categoria", v)}>
+                        <Select value={f.categoria} onValueChange={(v) => set("categoria", v)} disabled={importoBloccato}>
                             <SelectTrigger data-testid="brog-edit-cat"><SelectValue /></SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="incasso_premio">Incasso premio</SelectItem>
@@ -815,6 +848,9 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                             type="number" step="0.01" min="0"
                             value={f.importo}
                             onChange={(e) => set("importo", e.target.value)}
+                            disabled={importoBloccato}
+                            readOnly={importoBloccato}
+                            className={importoBloccato ? "bg-slate-100 cursor-not-allowed" : ""}
                             data-testid="brog-edit-imp"
                         />
                     </div>
@@ -823,6 +859,9 @@ function EditMovimentoDialog({ movimento, conti, onClose }) {
                         <Input
                             value={f.descrizione}
                             onChange={(e) => set("descrizione", e.target.value)}
+                            disabled={importoBloccato}
+                            readOnly={importoBloccato}
+                            className={importoBloccato ? "bg-slate-100 cursor-not-allowed" : ""}
                             data-testid="brog-edit-desc"
                         />
                     </div>

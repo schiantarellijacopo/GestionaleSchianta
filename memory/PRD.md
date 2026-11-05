@@ -329,3 +329,12 @@ Fix:
 - Nuovo endpoint `DELETE /api/collaboratori/{cid}/pagamenti/{pid}` (annulla dallo Storico, elimina anche il movimento; blocca se giornata PN chiusa).
 - Frontend Provvigioni: pulsante "Annulla" (cestino) per riga Storico (testid `storico-pag-annulla-{id}`), colonna Annulla, colSpan aggiornato; PagaDialog invia `bozza_nome` quando si paga una lista.
 Verifica: logica revert testata in isolamento su DB (voce→non pagata, pagamento/movimento/ritenuta rimossi, lista ricreata). RECUPERO del -66,47 già orfano: usare il nuovo pulsante Annulla nello Storico. NB: e2e UI non verificabile col login di anteprima (tenant senza dati provvigionali) → confermare sui dati reali.
+
+### 2026-06 (follow-up 5) — Prima Nota: importo VINCOLATO su movimenti collegati
+Requisito utente: in Prima Nota, su un pagamento provvigioni, su una registrazione/incasso titolo e su un rientro di un sospeso NON si può modificare l'importo (né categoria/tipo/descrizione): per cambiarlo si cancella la registrazione e si rifà. Si possono modificare SOLO Data e Banca/metodo di pagamento.
+- Backend `update_movimento` (`PUT /api/contabilita/movimenti/{mid}`): se movimento è pagamento provvigioni (`categoria=="provvigioni"` & uscita) OPPURE legato a titolo (`titolo_id` & categoria in incasso_premio/incasso_coperto/incasso_premio_direzione/copertura_titolo/anticipo) → rimuove da `body` i campi importo/categoria/tipo/descrizione (ignorati silenziosamente).
+- `_propaga_modifica_movimento`: nuovo ramo provvigioni → riallinea `pagamenti_provvigioni` (data_pagamento, mezzo_pagamento, conto_cassa_id) su modifica data/banca.
+- Brogliaccio: riga ora include `pagamento_provvigioni_id`.
+- Frontend `EditMovimentoDialog` (BrogliaccioTab.jsx): `importoBloccato` disabilita Importo/Tipo/Categoria/Descrizione (readOnly, sfondo grigio), avviso 🔒 (testid `brog-edit-locked-note`); salva solo data+mezzo. Conferma eliminazione provvigioni avvisa "torna ARRETRATO (da pagare)".
+Verifica: test backend su DB — pagamento provvigioni e titolo-link: importo/categoria/tipo/descrizione invariati, data+mezzo applicati, propagazione a pagamenti_provvigioni OK. Frontend compila senza errori.
+Il revert-a-arretrato su cancellazione PN (requisito 1) era già implementato (follow-up 4) e qui riconfermato.

@@ -9669,6 +9669,21 @@ async def update_movimento(mid: str, body: dict, user=Depends(require_user("admi
         raise HTTPException(404, "Movimento non trovato")
     if cur.get("chiusura_id"):
         raise HTTPException(400, "Movimento in giornata chiusa - riaprire la chiusura per modificare")
+    # Movimenti con importo VINCOLATO: l'importo (e categoria/tipo/descrizione) NON può
+    # essere modificato dalla Prima Nota, perché deriva da un'altra sezione:
+    #   • pagamento provvigioni collaboratore (categoria "provvigioni", uscita);
+    #   • registrazione/incasso di un titolo o rientro di un sospeso (movimento legato a un titolo).
+    # Per cambiare l'importo l'utente deve cancellare la registrazione e rifare l'operazione.
+    # Si possono cambiare solo la DATA e la BANCA/metodo di pagamento. Ignoriamo
+    # silenziosamente eventuali campi non consentiti inviati dal client.
+    _cat = cur.get("categoria")
+    _is_pag_provv = _cat == "provvigioni" and cur.get("tipo") == "uscita"
+    _is_titolo_link = bool(cur.get("titolo_id")) and _cat in (
+        "incasso_premio", "incasso_coperto", "incasso_premio_direzione",
+        "copertura_titolo", "anticipo")
+    if _is_pag_provv or _is_titolo_link:
+        for _k in ("importo", "categoria", "tipo", "descrizione"):
+            body.pop(_k, None)
     body["updated_at"] = _now_iso()
     # Riallinea conto e flag "in direzione" quando cambia il metodo di pagamento.
     # Per gli incassi, passare da/ a "direzione" cambia categoria, conto e is_direzione
@@ -9738,6 +9753,20 @@ async def _propaga_modifica_movimento(mov: dict, body: dict) -> Optional[str]:
             await db.rappel.update_one(q, {"$set": {
                 "data": nuova_data, "data_incasso": nuova_data, "updated_at": now}})
             azione = "rappel riallineato"
+    elif cat == "provvigioni" and mov.get("tipo") == "uscita":
+        # Pagamento provvigioni collaboratore: riallinea data pagamento e banca/conto
+        # sul record dello Storico (pagamenti_provvigioni), così l'estratto conto resta coerente.
+        pid = mov.get("pagamento_provvigioni_id")
+        q = {"id": pid} if pid else {"movimento_id": mid}
+        upd: dict = {"updated_at": now}
+        if nuova_data:
+            upd["data_pagamento"] = nuova_data
+        if "mezzo_pagamento" in body:
+            upd["mezzo_pagamento"] = body.get("mezzo_pagamento") or None
+        if "conto_cassa_id" in body:
+            upd["conto_cassa_id"] = body.get("conto_cassa_id") or None
+        await db.pagamenti_provvigioni.update_one(q, {"$set": upd})
+        azione = "pagamento provvigioni riallineato (data/banca)"
 
     # Titoli: data incasso/copertura + metodo di pagamento + conto
     tid = mov.get("titolo_id")
@@ -10436,6 +10465,7 @@ async def _compute_brogliaccio(data_giorno: str, apply_snapshot: bool = True) ->
             "categoria": cat,
             "tipo": m["tipo"],
             "titolo_id": m.get("titolo_id"),
+            "pagamento_provvigioni_id": m.get("pagamento_provvigioni_id"),
             "compagnia": (compagnia_riga or {}).get("ragione_sociale"),
             "compagnia_id": (compagnia_riga or {}).get("id"),
             "collaboratore_id": (polizza_riga or {}).get("collaboratore_id") or m.get("collaboratore_id"),
