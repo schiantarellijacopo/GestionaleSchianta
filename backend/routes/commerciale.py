@@ -16,7 +16,7 @@ Tre moduli distinti tutti in negativo/avere sul piano contabile:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -47,6 +47,15 @@ class TrattativaBody(BaseModel):
     checklist: list = []  # [{id, testo, done}]
     polizza_id: Optional[str] = None  # polizza collegata (post-vendita)
     visibili_cliente: bool = False
+    assegnatari: List[str] = []  # operatori con cui è condivisa (possono vederla e modificarla)
+
+
+def _puo_accedere_trattativa(t: dict, user: dict) -> bool:
+    """True se l'utente è admin, proprietario o fra gli operatori condivisi."""
+    if user.get("role") == "admin":
+        return True
+    uid = user.get("id")
+    return t.get("collaboratore_id") == uid or uid in (t.get("assegnatari") or [])
 
 
 async def _enrich_trattativa(t: dict) -> dict:
@@ -73,6 +82,16 @@ async def _enrich_trattativa(t: dict) -> dict:
         {"entita_tipo": "trattativa", "entita_id": t["id"], "is_deleted": False},
         {"_id": 0, "id": 1, "nome_file": 1, "content_type": 1, "size": 1, "created_at": 1},
     ).sort("created_at", -1).to_list(100)
+    # nomi operatore proprietario + condivisi (per visualizzazione)
+    ids = [i for i in ([t.get("collaboratore_id")] + (t.get("assegnatari") or [])) if i]
+    if ids:
+        names = {u["id"]: (u.get("name") or u.get("email") or "—")
+                 async for u in db.users.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "name": 1, "email": 1})}
+        t["collaboratore_nome"] = names.get(t.get("collaboratore_id"), "")
+        t["assegnatari_nomi"] = [{"id": i, "name": names.get(i, "—")} for i in (t.get("assegnatari") or [])]
+    else:
+        t["collaboratore_nome"] = ""
+        t["assegnatari_nomi"] = []
     return t
 
 
@@ -81,15 +100,18 @@ async def list_trattative(
     stato: Optional[str] = None,
     anagrafica_id: Optional[str] = None,
     polizza_id: Optional[str] = None,
+    tutti: bool = False,
     user=Depends(current_user),
 ) -> list[dict]:
     flt: dict = {}
     if stato: flt["stato"] = stato
     if anagrafica_id: flt["anagrafica_id"] = anagrafica_id
     if polizza_id: flt["polizza_id"] = polizza_id
-    # visibility: collaboratore vede solo i propri
-    if user.get("role") == "collaboratore":
-        flt["collaboratore_id"] = user.get("id")
+    # Visibilità: ognuno vede solo le proprie + quelle condivise con lui.
+    # Solo l'admin (agente) può chiedere `tutti=true` per vedere quelle di tutta l'agenzia.
+    if not (tutti and user.get("role") == "admin"):
+        uid = user.get("id")
+        flt["$or"] = [{"collaboratore_id": uid}, {"assegnatari": uid}]
     items = await db.trattative.find(flt, {"_id": 0}).sort("created_at", -1).to_list(2000)
     for t in items:
         await _enrich_trattativa(t)
@@ -101,6 +123,8 @@ async def get_trattativa(tid: str, user=Depends(current_user)) -> dict:
     t = await db.trattative.find_one({"id": tid}, {"_id": 0})
     if not t:
         raise HTTPException(404, "Trattativa non trovata")
+    if not _puo_accedere_trattativa(t, user):
+        raise HTTPException(403, "Non hai accesso a questa trattativa")
     return await _enrich_trattativa(t)
 
 
@@ -129,11 +153,15 @@ async def update_trattativa(
     tid: str, body: TrattativaBody,
     user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
+    existing = await db.trattative.find_one({"id": tid}, {"_id": 0})
+    if not existing:
+        raise HTTPException(404, "Trattativa non trovata")
+    if not _puo_accedere_trattativa(existing, user):
+        raise HTTPException(403, "Non hai accesso a questa trattativa")
     data = body.model_dump()
     data["updated_at"] = _now_iso()
-    res = await db.trattative.update_one({"id": tid}, {"$set": data})
-    if res.matched_count == 0:
-        raise HTTPException(404, "Trattativa non trovata")
+    data.pop("collaboratore_id", None)  # il proprietario non cambia mai
+    await db.trattative.update_one({"id": tid}, {"$set": data})
     doc = await db.trattative.find_one({"id": tid}, {"_id": 0})
     return await _enrich_trattativa(doc)
 
@@ -142,9 +170,13 @@ async def update_trattativa(
 async def delete_trattativa(
     tid: str, user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
-    res = await db.trattative.delete_one({"id": tid})
-    if res.deleted_count == 0:
+    existing = await db.trattative.find_one({"id": tid}, {"_id": 0, "collaboratore_id": 1})
+    if not existing:
         raise HTTPException(404, "Trattativa non trovata")
+    # Solo admin o proprietario possono eliminare
+    if user.get("role") != "admin" and existing.get("collaboratore_id") != user.get("id"):
+        raise HTTPException(403, "Solo il proprietario o l'agente possono eliminare")
+    await db.trattative.delete_one({"id": tid})
     return {"ok": True}
 
 

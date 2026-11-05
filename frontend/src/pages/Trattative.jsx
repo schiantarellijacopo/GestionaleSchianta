@@ -3,9 +3,10 @@
  * (prima che si trasformino in polizze): dati cliente, compagnia di provenienza,
  * premio attuale vs proposto, stato, allegati visibili/non al cliente.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { api, fmtEur } from "@/lib/api";
+import { api, fmtEur, API_BASE } from "@/lib/api";
+import { useAuth } from "@/contexts/AuthContext";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, Briefcase, ArrowRight, Paperclip, Mail, MessageCircle, Link2, Send } from "lucide-react";
+import { Plus, Edit, Trash2, Briefcase, ArrowRight, Paperclip, Mail, MessageCircle, Link2, Send, Share2, Users, Eye, Download, Upload, Loader2, FileText } from "lucide-react";
 import { toast } from "sonner";
-import AllegatiCell from "@/components/AllegatiCell";
 import DateInputIt from "@/components/DateInputIt";
 
 const STATI = [
@@ -29,16 +29,23 @@ const STATI = [
 ];
 
 export default function Trattative() {
+    const { user } = useAuth();
+    const isAdmin = user?.role === "admin";
     const [list, setList] = useState(null);
     const [stato, setStato] = useState("all");
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
+    const [viewAll, setViewAll] = useState(false);
+    const [operatori, setOperatori] = useState([]);
 
     const load = () => {
-        const params = stato !== "all" ? { stato } : {};
+        const params = { ...(stato !== "all" ? { stato } : {}), tutti: viewAll };
         api.get("/trattative", { params }).then((r) => setList(r.data));
     };
-    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato]);
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [stato, viewAll]);
+    useEffect(() => {
+        api.get("/tasks/operatori").then((r) => setOperatori(r.data)).catch(() => setOperatori([]));
+    }, []);
 
     const totali = useMemo(() => {
         const src = list || [];
@@ -52,7 +59,17 @@ export default function Trattative() {
 
     const del = async (id) => {
         if (!window.confirm("Eliminare la trattativa?")) return;
-        await api.delete(`/trattative/${id}`); toast.success("Eliminata"); load();
+        try {
+            await api.delete(`/trattative/${id}`); toast.success("Eliminata"); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const cambiaStato = async (id, nuovo) => {
+        try {
+            await api.post(`/pipeline/trattative/${id}/move`, { nuovo_stato: nuovo });
+            toast.success("Stato aggiornato");
+            setList((prev) => (prev || []).map((t) => (t.id === id ? { ...t, stato: nuovo } : t)));
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };
 
     return (
@@ -68,6 +85,7 @@ export default function Trattative() {
                             </Button>
                         </DialogTrigger>
                         <TrattativaDialog key={editing?.id || "new"} editing={editing}
+                            operatori={operatori} currentUser={user}
                             onClose={() => { setOpen(false); setEditing(null); load(); }} />
                     </Dialog>
                 }
@@ -94,7 +112,7 @@ export default function Trattative() {
             </div>
 
             {/* Filtri */}
-            <Card className="p-3 flex gap-2 items-center">
+            <Card className="p-3 flex gap-2 items-center flex-wrap">
                 <span className="text-xs text-slate-500 font-medium">Stato:</span>
                 <button onClick={() => setStato("all")}
                     className={`text-xs px-2 py-1 rounded border ${stato === "all" ? "bg-sky-600 text-white border-sky-600" : "border-slate-300"}`}
@@ -104,6 +122,13 @@ export default function Trattative() {
                         className={`text-xs px-2 py-1 rounded border ${stato === s.v ? `bg-${s.color}-600 text-white border-${s.color}-600` : "border-slate-300"}`}
                         data-testid={`tr-f-${s.v}`}>{s.l}</button>
                 ))}
+                {isAdmin && (
+                    <button onClick={() => setViewAll((v) => !v)}
+                        className={`text-xs px-2.5 py-1 rounded-full border ml-auto inline-flex items-center gap-1.5 transition-colors ${viewAll ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"}`}
+                        data-testid="tr-view-all" title="Mostra le trattative di tutta l'agenzia">
+                        <Users size={13} /> {viewAll ? "Vedi tutte: ON" : "Vedi tutte"}
+                    </button>
+                )}
             </Card>
 
             {/* Tabella */}
@@ -116,12 +141,12 @@ export default function Trattative() {
                             <th className="text-right">Premio attuale</th>
                             <th className="text-right">Premio proposto</th>
                             <th className="text-right">Risparmio</th>
+                            <th>Operatore</th>
                             <th>Stato</th><th>Visibile cliente</th><th className="w-20"></th>
                         </tr></thead>
                         <tbody>
                             {list.map((t) => {
                                 const risp = (t.premio_corrente || 0) - (t.premio_proposto || 0);
-                                const st = STATI.find((s) => s.v === t.stato) || STATI[0];
                                 return (
                                     <tr key={t.id} data-testid={`tr-row-${t.id}`}>
                                         <td className="font-medium">{t.titolo}</td>
@@ -134,7 +159,26 @@ export default function Trattative() {
                                         <td className={`text-right font-mono font-bold ${risp >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                                             {risp >= 0 ? "" : ""}{fmtEur(risp)}
                                         </td>
-                                        <td><span className={`badge badge-${st.color === "emerald" ? "success" : st.color === "rose" ? "danger" : st.color === "amber" ? "warning" : "info"}`}>{st.l}</span></td>
+                                        <td>
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className="text-[11px] text-slate-600">{t.collaboratore_nome || "—"}</span>
+                                                {(t.assegnatari_nomi || []).length > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] text-violet-700" title={(t.assegnatari_nomi || []).map((o) => o.name).join(", ")}>
+                                                        <Share2 size={10} /> condivisa · {(t.assegnatari_nomi || []).length}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <Select value={t.stato || "aperta"} onValueChange={(v) => cambiaStato(t.id, v)}>
+                                                <SelectTrigger className="h-7 w-[150px] text-xs" data-testid={`tr-stato-${t.id}`}>
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {STATI.map((s) => <SelectItem key={s.v} value={s.v} className="text-xs">{s.l}</SelectItem>)}
+                                                </SelectContent>
+                                            </Select>
+                                        </td>
                                         <td>{t.visibili_cliente ? <span className="text-emerald-700">✓ sì</span> : <span className="text-slate-400">no</span>}</td>
                                         <td className="text-right space-x-1">
                                             <button onClick={() => { setEditing(t); setOpen(true); }}
@@ -156,7 +200,7 @@ export default function Trattative() {
     );
 }
 
-function TrattativaDialog({ editing, onClose }) {
+function TrattativaDialog({ editing, operatori = [], currentUser, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [compagnie, setCompagnie] = useState([]);
     const [polizze, setPolizze] = useState([]);
@@ -168,7 +212,15 @@ function TrattativaDialog({ editing, onClose }) {
         ramo: "", compagnia_di_provenienza: "", compagnia_target_id: "",
         data_scadenza_corrente: "", premio_corrente: 0, premio_proposto: 0,
         stato: "aperta", note: "", polizza_id: "", visibili_cliente: false,
+        assegnatari: [],
     });
+    // operatori selezionabili per la condivisione (escluso il proprietario della trattativa)
+    const ownerId = editing?.collaboratore_id || currentUser?.id;
+    const altriOperatori = operatori.filter((o) => o.id !== ownerId);
+    const toggleAssegnatario = (id) => {
+        const cur = f.assegnatari || [];
+        set("assegnatari", cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+    };
     useEffect(() => {
         api.get("/compagnie").then((r) => setCompagnie(r.data));
     }, []);
@@ -310,14 +362,34 @@ function TrattativaDialog({ editing, onClose }) {
                     <Checkbox checked={!!f.visibili_cliente} onCheckedChange={(v) => set("visibili_cliente", !!v)} id="tr-vis" />
                     <Label htmlFor="tr-vis" className="text-xs">📂 Trattativa visibile al cliente (nel suo portale)</Label>
                 </div>
+                <div className="col-span-2">
+                    <Label className="text-xs flex items-center gap-1"><Share2 size={12} /> Condividi con operatori</Label>
+                    {altriOperatori.length === 0 ? (
+                        <p className="text-[10px] text-slate-400 mt-1">Nessun altro operatore disponibile.</p>
+                    ) : (
+                        <div className="flex flex-wrap gap-1.5 mt-1" data-testid="tr-condividi">
+                            {altriOperatori.map((o) => {
+                                const on = (f.assegnatari || []).includes(o.id);
+                                return (
+                                    <button key={o.id} type="button" onClick={() => toggleAssegnatario(o.id)}
+                                        className={`text-xs px-2 py-1 rounded-full border transition-colors ${on ? "bg-violet-600 text-white border-violet-600" : "bg-white text-slate-600 border-slate-300 hover:border-violet-400"}`}
+                                        data-testid={`tr-share-${o.id}`}>
+                                        {o.name}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                    <p className="text-[10px] text-slate-400 mt-1">Gli operatori selezionati potranno vedere e modificare questa trattativa.</p>
+                </div>
                 {editing?.id && (
                     <div className="col-span-2 mt-2 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-3" data-testid="tr-azioni-extra">
                         <div className="flex items-center justify-between">
                             <div className="text-xs font-semibold uppercase tracking-wide text-slate-600 flex items-center gap-1.5">
                                 <Paperclip size={13} /> Documenti / Preventivo
                             </div>
-                            <AllegatiCell entita_tipo="trattativa" entita_id={editing.id} compact={false} hint="Allega preventivo/doc" />
                         </div>
+                        <DocumentiCards entita_id={editing.id} />
                         <div className="flex items-center gap-2">
                             <span className="text-xs text-slate-500">Invia preventivo:</span>
                             <Button type="button" size="sm" variant="outline" disabled={invio === "email"}
@@ -339,5 +411,102 @@ function TrattativaDialog({ editing, onClose }) {
                 </Button>
             </DialogFooter>
         </DialogContent>
+    );
+}
+
+
+function formatSize(bytes) {
+    if (!bytes) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Gestione documenti della trattativa come card (carica, anteprima/scarica, elimina).
+ *  L'upload passa da /api/allegati che sincronizza automaticamente il file su Google Drive. */
+function DocumentiCards({ entita_id }) {
+    const [items, setItems] = useState(null);
+    const [uploading, setUploading] = useState(false);
+    const inputRef = useRef(null);
+
+    const load = async () => {
+        try {
+            const r = await api.get("/allegati", { params: { entita_tipo: "trattativa", entita_id } });
+            setItems((r.data || []).filter((i) => !i.is_deleted));
+        } catch { setItems([]); }
+    };
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [entita_id]);
+
+    const upload = async (file) => {
+        if (!file) return;
+        setUploading(true);
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            await api.post(`/allegati?entita_tipo=trattativa&entita_id=${entita_id}`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Documento caricato (sincronizzato su Drive)");
+            await load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore upload");
+        } finally {
+            setUploading(false);
+            if (inputRef.current) inputRef.current.value = "";
+        }
+    };
+
+    const rimuovi = async (aid) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/allegati/${aid}`);
+            toast.success("Documento eliminato");
+            await load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+
+    const downloadUrl = (aid) => `${API_BASE}/allegati/${aid}/download`;
+
+    return (
+        <div data-testid="tr-documenti-cards">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {(items || []).map((it) => (
+                    <div key={it.id} className="rounded-lg border border-slate-200 bg-white p-2.5 flex flex-col gap-1.5 hover:border-sky-300 transition-colors"
+                        data-testid={`tr-doc-${it.id}`}>
+                        <div className="flex items-start gap-2">
+                            <FileText size={18} className="text-sky-600 shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                                <div className="text-xs font-medium text-slate-700 truncate" title={it.nome_file}>{it.nome_file}</div>
+                                <div className="text-[10px] text-slate-400">
+                                    {formatSize(it.size)}{it.created_at ? ` · ${String(it.created_at).slice(0, 10)}` : ""}
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-1 mt-auto pt-1 border-t border-slate-100">
+                            <a href={downloadUrl(it.id)} target="_blank" rel="noreferrer"
+                                className="flex-1 inline-flex items-center justify-center gap-1 text-[11px] text-sky-700 hover:bg-sky-50 rounded py-1"
+                                data-testid={`tr-doc-view-${it.id}`}><Eye size={12} /> Apri</a>
+                            <a href={downloadUrl(it.id)} download
+                                className="flex-1 inline-flex items-center justify-center gap-1 text-[11px] text-slate-600 hover:bg-slate-50 rounded py-1"
+                                data-testid={`tr-doc-dl-${it.id}`}><Download size={12} /> Scarica</a>
+                            <button type="button" onClick={() => rimuovi(it.id)}
+                                className="inline-flex items-center justify-center text-rose-500 hover:bg-rose-50 rounded py-1 px-1.5"
+                                data-testid={`tr-doc-del-${it.id}`}><Trash2 size={12} /></button>
+                        </div>
+                    </div>
+                ))}
+                <button type="button" onClick={() => inputRef.current?.click()} disabled={uploading}
+                    className="rounded-lg border-2 border-dashed border-slate-300 hover:border-sky-400 hover:bg-sky-50/50 p-2.5 flex flex-col items-center justify-center gap-1 text-slate-500 min-h-[76px] transition-colors"
+                    data-testid="tr-doc-upload">
+                    {uploading
+                        ? <><Loader2 size={18} className="animate-spin" /><span className="text-[11px]">Caricamento…</span></>
+                        : <><Upload size={18} /><span className="text-[11px]">Carica documento</span></>}
+                </button>
+            </div>
+            <input ref={inputRef} type="file" className="hidden"
+                onChange={(e) => upload(e.target.files?.[0])} data-testid="tr-doc-input" />
+            {items !== null && items.length === 0 && (
+                <p className="text-[10px] text-slate-400 mt-1.5">Nessun documento. Carica un PDF/preventivo: verrà sincronizzato su Drive nella cartella della trattativa.</p>
+            )}
+        </div>
     );
 }

@@ -380,3 +380,14 @@ NOTA: effettivo in PRODUZIONE solo dopo deploy/publish. In produzione il tenant 
 - **File modificati**: `backend/cloud_doc_sync.py` (helper auto-backfill), `backend/routes/cloud_storage.py` (schedule in callback + set-folder), `frontend/src/pages/Librerie.jsx` (testo + polling).
 - **Verifica**: auto_backfill_tenant testato → allegato interno storico spostato automaticamente su `Polizze/TTEST-001/...` (provider=google_drive, storage_path svuotato). Sinistri → cartella per numero + sottocartella categoria confermata.
 - **NOTA PRODUZIONE**: effettivo dopo deploy. In prod il tenant dovrà ricollegare/confermare il Drive: da quel momento gli storici partono da soli, senza interventi manuali.
+
+## 2026-11-05 — Trattative: visibilità per utente, condivisione operatori, documenti a card, stato rapido
+- **Visibilità own+shared**: `GET /trattative` ora mostra di default solo le trattative di cui l'utente è proprietario (`collaboratore_id`) o fra gli operatori condivisi (`assegnatari`), per TUTTI i ruoli (admin incluso). L'admin (agente) può passare `?tutti=true` per vedere quelle di tutta l'agenzia.
+- **Tasto "Vedi tutte"** (solo admin) nella pagina Trattative: toggle che ricarica con `tutti=true`.
+- **Condivisione con operatori** (`assegnatari: List[str]` su `TrattativaBody`, come i Task): gli operatori selezionati possono VEDERE e MODIFICARE la trattativa. Chip "Condividi con operatori" nel form (lista da `/tasks/operatori`, escluso il proprietario).
+- **Controlli accesso**: `get/update` → admin|owner|assegnatario (403 altrimenti); `delete` → admin|owner; `pipeline_move` trattative → stessa regola. `collaboratore_id` (proprietario) non viene mai sovrascritto in update.
+- **Pipeline**: kanban drag&drop già esistente (pagina Pipeline) + nuovo **menù rapido di stato** (dropdown) direttamente in ogni riga della lista Trattative → `POST /pipeline/trattative/{id}/move`. `pipeline_data` trattative ora filtra own+shared per i non-admin.
+- **Documenti a card** (`DocumentiCards` in Trattative.jsx): ogni documento è una card con Apri (anteprima), Scarica, Elimina + card "Carica documento". Upload via `/api/allegati` (entita_tipo=trattativa) → sincronizzazione automatica su Google Drive nella cartella della trattativa.
+- **Colonna Operatore** in lista: mostra proprietario + indicatore "condivisa · N".
+- File: `backend/routes/commerciale.py`, `backend/server.py` (pipeline_move + pipeline_data trattative), `frontend/src/pages/Trattative.jsx`.
+- **Verifica end-to-end (preview)**: admin own=13 vs tutti=14 (1 altrui nascosta); condivisione con collaboratore → appare nella sua lista (0→1), può modificarla e spostarla di stato; 403 su trattativa altrui non condivisa; operatori, delete, documenti card e toggle "Vedi tutte" OK. Account test invariati (admin@assicura.it/Admin123!, collaboratore@assicura.it/Collab123!).

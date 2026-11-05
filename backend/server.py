@@ -14242,6 +14242,13 @@ async def pipeline_move(
         validi = {"aperta", "proposta_inviata", "in_attesa", "vinta", "persa"}
         if nuovo not in validi:
             raise HTTPException(400, f"Stato trattativa non valido: {nuovo}")
+        if user.get("role") != "admin":
+            _t = await db.trattative.find_one({"id": eid}, {"_id": 0, "collaboratore_id": 1, "assegnatari": 1})
+            if not _t:
+                raise HTTPException(404, "Trattativa non trovata")
+            _uid = user.get("id")
+            if _t.get("collaboratore_id") != _uid and _uid not in (_t.get("assegnatari") or []):
+                raise HTTPException(403, "Non hai accesso a questa trattativa")
         res = await db.trattative.update_one({"id": eid}, {"$set": {"stato": nuovo, "updated_at": _now_iso()}})
         if res.matched_count == 0:
             raise HTTPException(404, "Trattativa non trovata")
@@ -14419,8 +14426,9 @@ async def pipeline_data(entita: str, user=Depends(current_user)):
         stages = [("aperta", "Aperte"), ("proposta_inviata", "Proposta inviata"),
                   ("in_attesa", "In attesa"), ("vinta", "Vinte"), ("persa", "Perse")]
         flt_t: dict = {}
-        if user.get("role") == "collaboratore":
-            flt_t["collaboratore_id"] = user.get("id")
+        if user.get("role") != "admin":
+            _uid = user.get("id")
+            flt_t["$or"] = [{"collaboratore_id": _uid}, {"assegnatari": _uid}]
         items = await db.trattative.find(flt_t, {"_id": 0}).sort("created_at", -1).to_list(5000)
         ana_ids = list({t.get("anagrafica_id") for t in items if t.get("anagrafica_id")})
         anas = {a["id"]: (a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip())
