@@ -20510,8 +20510,15 @@ async def startup():
         import asyncio as _aio_sched
         import scheduler_leader
         from database import raw_db as _raw_db_lock
+
+        async def _leader_heartbeat():
+            # Self-healing: la sincronizzazione email deve restare SEMPRE attiva.
+            await imap_poller.ensure_scheduler(db)
+
         _aio_sched.create_task(
-            scheduler_leader.run_leader(_raw_db_lock, _start_background_schedulers))
+            scheduler_leader.run_leader(
+                _raw_db_lock, _start_background_schedulers,
+                heartbeat_callback=_leader_heartbeat))
     except Exception as e:
         logger.warning("Avvio leader-election scheduler fallito: %s", e)
 

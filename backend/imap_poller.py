@@ -597,6 +597,27 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
         if typ != "OK":
             return {"ok": False, "errore": f"Cartella '{folder}' non aprita"}
 
+        # UIDVALIDITY: se il server rinumera gli UID (es. cartella ricreata o reset
+        # lato provider), il nostro last_uid diventa più alto di tutti gli UID reali
+        # e "UID last_uid+1:*" non trova MAI più nulla → la sincronizzazione resta
+        # ferma a una certa data (sintomo "stop al 3 novembre"). Se l'UIDVALIDITY è
+        # cambiato rispetto a quello memorizzato, azzeriamo last_uid e ri-bootstrappiamo.
+        uidvalidity = None
+        try:
+            uv_resp = M.response("UIDVALIDITY")
+            if uv_resp and uv_resp[1] and uv_resp[1][0]:
+                uidvalidity = int(uv_resp[1][0])
+        except Exception:
+            uidvalidity = None
+        stored_uv = az.get("imap_uidvalidity")
+        if uidvalidity is not None and stored_uv is not None and int(stored_uv) != uidvalidity:
+            logger.warning(
+                "IMAP UIDVALIDITY cambiato (%s → %s): reset last_uid per ri-sincronizzare",
+                stored_uv, uidvalidity,
+            )
+            last_uid = 0
+            max_uid_seen = 0
+
         # Cerca solo i messaggi con UID > last_uid (incrementale)
         # Se last_uid==0, fetch ultimi 50 messaggi (bootstrap)
         if last_uid > 0:
@@ -805,6 +826,8 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
         "imap_poller_last_run": _now_iso(),
         "imap_poller_last_uid": max_uid_seen,
     }
+    if uidvalidity is not None:
+        upd["imap_uidvalidity"] = uidvalidity
     if az.get("id"):
         await db.azienda_config.update_one({"id": az["id"]}, {"$set": upd})
 
@@ -950,6 +973,24 @@ def start_scheduler(db: AsyncIOMotorDatabase, *, minutes: int = 5) -> None:
         max_instances=1, coalesce=True,
     )
     logger.info("IMAP poller scheduler avviato (ogni %d minuti)", minutes)
+
+
+async def ensure_scheduler(db: AsyncIOMotorDatabase) -> None:
+    """Watchdog self-healing: ri-arma lo scheduler IMAP se risulta abilitato e
+    configurato ma non in esecuzione. Chiamato periodicamente dal loop del leader
+    così la sincronizzazione resta SEMPRE attiva anche senza cron esterni
+    (es. su Railway), sopravvivendo a riavvii e stalli."""
+    try:
+        az = await get_active_config(db)
+        if (az.get("imap_poller_enabled")
+                and az.get("imap_host")
+                and az.get("imap_user")
+                and az.get("imap_password")
+                and not is_running()):
+            start_scheduler(db, minutes=int(az.get("imap_poller_minutes") or 5))
+            logger.warning("IMAP poller RI-ARMATO dal watchdog leader (era spento)")
+    except Exception:
+        logger.exception("ensure_scheduler IMAP fallito")
 
 
 def stop_scheduler() -> None:

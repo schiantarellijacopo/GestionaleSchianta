@@ -692,3 +692,12 @@ un salvataggio da "Modifica premi" rende permanente la correzione sul record leg
 - **Richiesta utente**: se un documento non viene trovato/abbinato, metterlo comunque nella Inbox del CRM da associare manualmente e passare al file successivo.
 - Caso "non abbinato" già gestito (`_process_file` → `da_smistare` → `_push_to_manual_inbox`, loop prosegue).
 - **Nuovo**: nel loop di `scan_tenant_inbox` (cloud_ocr_scanner.py), quando `_process_file` solleva eccezione (OCR/download falliti, ecc.) il file viene ora inserito comunque in `documenti_inbox` (Inbox CRM, stato pending) via nuovo helper `_push_failed_to_manual_inbox` (download best-effort, classification "altro/bassa" con `scan_error`, dedup su `cloud_file_id` pending), poi lo scan continua col file successivo. Nessun file resta bloccato/perso.
+
+## 2026-11-05 — Sincronizzazione email (IMAP) sempre attiva + fix blocco UIDVALIDITY
+- **Problema utente**: "la posta stacca il sincro da solo, deve essere sempre attivo; si è fermata al 3 novembre".
+- **Causa 1 (sempre attivo)**: il poller IMAP gira con APScheduler in-memory; il watchdog che lo riarma è su `.emergent/crons.yml`, eseguito SOLO sull'host Emergent → su Railway nessun cron esterno lo riaccende dopo riavvio/stallo.
+  - Fix: self-healing in-process. `scheduler_leader.run_leader` accetta ora `heartbeat_callback` eseguito ad ogni heartbeat (~50s) mentre l'istanza è leader. `imap_poller.ensure_scheduler(db)` ri-arma lo scheduler se abilitato+configurato ma non in esecuzione. Non dipende da cron esterni → vale anche su Railway.
+- **Causa 2 (blocco al 3 nov)**: classico cambio UIDVALIDITY lato server IMAP → `last_uid` resta più alto di tutti gli UID reali e `UID last_uid+1:*` non trova mai più nulla.
+  - Fix: `poll_once` legge UIDVALIDITY dopo la SELECT, lo confronta con `imap_uidvalidity` salvato in `azienda_config`; se cambiato azzera `last_uid` e ri-bootstrappa. Persiste `imap_uidvalidity` ad ogni ciclo.
+- File: `backend/imap_poller.py`, `backend/scheduler_leader.py`, `backend/server.py` (lifespan).
+- Verifica: sintassi OK, backend riparte, loop leader gira senza errori, `/api/email/poller/status` risponde. Non testabile end-to-end in preview (credenziali IMAP solo sul tenant Railway). Da pubblicare su Railway via "Save to GitHub".

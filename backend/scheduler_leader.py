@@ -48,11 +48,14 @@ async def _try_acquire(raw_db) -> bool:
         return False  # un'altra istanza l'ha creato per prima
 
 
-async def run_leader(raw_db, start_callback) -> None:
+async def run_leader(raw_db, start_callback, heartbeat_callback=None) -> None:
     """Loop di elezione: avvia gli scheduler una sola volta quando questa istanza
-    diventa leader e mantiene il lock con heartbeat periodici."""
-    """Loop di elezione: avvia gli scheduler una sola volta quando questa istanza
-    diventa leader e mantiene il lock con heartbeat periodici."""
+    diventa leader e mantiene il lock con heartbeat periodici.
+
+    ``heartbeat_callback`` (opzionale) viene eseguito ad OGNI heartbeat mentre
+    questa istanza è leader: serve da watchdog self-healing per ri-armare gli
+    scheduler in-memory che fossero rimasti spenti (es. su Railway non esiste un
+    cron esterno che li riaccenda dopo uno stallo)."""
     started = False
     while True:
         try:
@@ -61,6 +64,11 @@ async def run_leader(raw_db, start_callback) -> None:
                 logger.info("[scheduler] istanza LEADER %s: avvio scheduler in background", INSTANCE_ID)
                 await start_callback()
                 started = True
+            if is_leader and heartbeat_callback is not None:
+                try:
+                    await heartbeat_callback()
+                except Exception:
+                    logger.exception("[scheduler] heartbeat watchdog fallito")
         except Exception as e:
             logger.warning("[scheduler] elezione leader fallita: %s", e)
         await asyncio.sleep(_HEARTBEAT_SEC)
