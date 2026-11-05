@@ -570,3 +570,9 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Verificato preview end-to-end sul PDF reale: targa VA164193, netto 205,43, imposte 25,43, SSN 19,14, lordo 250,00.
 - Confermato che il salvataggio (create/update_polizza + _fill_imposte_residuo) NON raddoppia: memorizza il valore ricevuto; _fill_imposte_residuo deduce solo se imposte 0/mancanti.
 - Causa del problema in produzione: runtime con build precedente alla fix imposte (targa ok, imposte no) → avviata ripubblicazione (deploy) per allineare il backend.
+
+## 2026-06 — Blocco anti-doppione import OCR polizza
+- In Polizze → "Riconoscimento polizza": se il numero polizza riconosciuto esiste già nel portafoglio (backend già restituisce polizza_esistente), l'import viene BLOCCATO: nessun form precompilato, toast rosso "Polizza GIÀ ESISTENTE: n° ... (stato ...). Importazione annullata per evitare un doppione".
+- File: frontend/src/pages/Polizze.jsx onOcrPolizza — early return su d.polizza_esistente.
+- Verificato e2e in preview: inserita polizza fittizia 184643597 → OCR restituisce polizza_esistente → blocco; dummy poi rimossa.
+- NB: va pubblicato in produzione per essere attivo lì.

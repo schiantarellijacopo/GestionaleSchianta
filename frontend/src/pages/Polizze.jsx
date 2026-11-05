@@ -717,6 +717,18 @@ function NuovaPolizzaDialog({ onClose }) {
             const r = await api.post("/utility/ocr-polizza", fd,
                 { headers: { "Content-Type": "multipart/form-data" }, timeout: 120000 });
             const d = r.data;
+            // BLOCCO ANTI-DOPPIONE: se la polizza (stesso numero) è già presente nel
+            // portafoglio, NON compiliamo il form e NON creiamo nulla: import bloccato.
+            if (d.polizza_esistente) {
+                setPolizzaFile(null);
+                toast.error(
+                    `Polizza GIÀ ESISTENTE: n° ${d.polizza_esistente.numero_polizza || d.numero_polizza || "?"}` +
+                    `${d.polizza_esistente.contraente_nome ? " · " + d.polizza_esistente.contraente_nome : ""}` +
+                    ` (stato: ${d.polizza_esistente.stato || "?"}). Importazione annullata per evitare un doppione.`,
+                    { duration: 7000 }
+                );
+                return;
+            }
             // Risolvi il RAMO sul nome ESATTO presente nella lista rami del backend
             // (es. OCR 'RCAUTO'/'RCA' → 'RC Auto'); altrimenti il Select resta vuoto.
             const normR = (s) => (s || "").toString().toUpperCase().replace(/[^A-Z0-9]/g, "");
