@@ -559,3 +559,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Riscritto _riconcilia_premi con priorità deterministica per le imposte: (1) somma imposte per-garanzia − contributo forzoso se itemizzato; (2) altrimenti RESIDUO dal totale letto (lordo − netto − SSN − diritti), ignorando il valore singolo (inaffidabile/raddoppiato); (3) altrimenti valore letto − forzoso. Quadratura finale di sicurezza se scarto > 0,50 €.
 - Testato: 6 scenari (itemizzato, doppio-no-garanzie, netto-sì/imposte-no, coerente, zero, no-lordo) → tutti 25,43. OCR live del PDF reale: 205,43 / 25,43 / 19,14 / 250,00.
 - Nota: polizza 184643597 già salvata col vecchio 50,86 NON presente nel DB preview → va corretta a mano o re-importata (ora corregge da sola).
+
+## 2026-06 — OCR targa dall'intestazione
+- L'OCR leggeva una targa sbagliata (es. EN376ZF) presa da sezioni interne; la targa corretta è nell'intestazione "Polizza n. ... Targa / Telaio n. XXXX".
+- Aggiunta regola nel prompt ocr_polizza.py: la targa va letta SEMPRE dall'intestazione in alto (riga "Targa / Telaio n."), con priorità assoluta su ogni altra targa/codice nel documento.
+- Verificato live sul PDF reale: targa = VA164193 (corretta), imposte 25,43.
