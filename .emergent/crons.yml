@@ -12,3 +12,9 @@ crons:
     endpoint: "{{BASE_URL}}/api/cron/disdette-reminder"
     method: POST
     enabled: true
+  - name: cloud-archive-sweep
+    description: "Ogni 30 min porta su Google Drive tutti i documenti del CRM non ancora archiviati, per ogni agenzia collegata"
+    cron: "*/30 * * * *"
+    endpoint: "{{BASE_URL}}/api/cron/cloud-archive-sweep"
+    method: POST
+    enabled: true

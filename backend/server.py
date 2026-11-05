@@ -16627,7 +16627,38 @@ async def cron_imap_poll(request: Request):
     return {"ok": True}
 
 
-@api.post("/cron/disdette-reminder")
+@api.post("/cron/cloud-archive-sweep")
+async def cron_cloud_archive_sweep(request: Request):
+    """Sweep periodico: porta sul Drive TUTTI i documenti del CRM non ancora
+    sincronizzati, per ogni agenzia che ha collegato un cloud. Garantisce che il
+    Drive resti l'archivio digitale COMPLETO anche per i documenti creati da flussi
+    che non impostano `pending_sync`. Chiamato dalla piattaforma (vedi crons.yml)."""
+    import hmac
+    import asyncio as _asyncio
+    secret = os.environ.get("WEBHOOK_CRON_SECRET", "")
+    auth = request.headers.get("Authorization", "")
+    token = auth[7:] if auth.startswith("Bearer ") else ""
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(401, "Unauthorized")
+
+    async def _bg():
+        try:
+            from database import raw_db
+            import cloud_doc_sync
+            tenants = await raw_db.cloud_connections.distinct("tenant_id")
+            for t in tenants:
+                if not t:
+                    continue
+                try:
+                    await cloud_doc_sync.auto_backfill_tenant(t)
+                except Exception:
+                    logger.exception("Cloud archive sweep errore tenant=%s", t)
+            logger.info("Cloud archive sweep completato su %d tenant", len(tenants))
+        except Exception:
+            logger.exception("Cloud archive sweep errore")
+
+    _asyncio.create_task(_bg())
+    return {"ok": True}
 async def cron_disdette_reminder(request: Request):
     """Promemoria disdette: avvisa SOLO l'agenzia (utenti admin del tenant) qualche
     giorno prima della scadenza di invio di ogni disdetta ancora 'da_inviare'.

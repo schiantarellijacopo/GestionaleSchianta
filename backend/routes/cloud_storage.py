@@ -61,40 +61,66 @@ M_SCOPE = "openid profile offline_access Files.ReadWrite User.Read"
 # Struttura cartelle standard che il CRM crea automaticamente quando l'agenzia
 # clicca "Crea struttura cartelle" (o al primo upload di ogni categoria).
 # Ogni categoria è una tupla (path_segments, descrizione).
+#
+# Due radici nette:
+#   • INBOX   → SOLO ingresso: l'utente trascina qui i file da elaborare (OCR).
+#   • Archivio→ destinazione di TUTTI i documenti già lavorati nel gestionale.
+# Il Drive diventa così l'archivio digitale completo del CRM.
 STANDARD_FOLDER_STRUCTURE: dict = {
     "root": ["Assicura CRM"],
     "inbox": ["Assicura CRM", "INBOX"],
-    "da_smistare": ["Assicura CRM", "Da smistare manualmente"],
+    "archivio": ["Assicura CRM", "Archivio"],
+    "da_smistare": ["Assicura CRM", "Archivio", "Da smistare manualmente"],
     # ─ Anagrafiche: una cartella per cliente, i documenti dentro col nome della card.
-    "anagrafiche": ["Assicura CRM", "Anagrafiche"],
-    "anagrafica_cliente": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    "anagrafiche": ["Assicura CRM", "Archivio", "Anagrafiche"],
+    "anagrafica_cliente": ["Assicura CRM", "Archivio", "Anagrafiche", "{cliente}"],
     # Alias retrocompatibili (OCR): puntano alla stessa cartella piatta del cliente.
-    "contraenti": ["Assicura CRM", "Anagrafiche"],
-    "contraente_privacy": ["Assicura CRM", "Anagrafiche", "{cliente}"],
-    "contraente_identita": ["Assicura CRM", "Anagrafiche", "{cliente}"],
-    "contraente_codice_fiscale": ["Assicura CRM", "Anagrafiche", "{cliente}"],
-    "contraente_altri": ["Assicura CRM", "Anagrafiche", "{cliente}"],
+    "contraenti": ["Assicura CRM", "Archivio", "Anagrafiche"],
+    "contraente_privacy": ["Assicura CRM", "Archivio", "Anagrafiche", "{cliente}"],
+    "contraente_identita": ["Assicura CRM", "Archivio", "Anagrafiche", "{cliente}"],
+    "contraente_codice_fiscale": ["Assicura CRM", "Archivio", "Anagrafiche", "{cliente}"],
+    "contraente_altri": ["Assicura CRM", "Archivio", "Anagrafiche", "{cliente}"],
     # ─ Polizze: una cartella per numero polizza, documenti dentro.
-    "polizze": ["Assicura CRM", "Polizze"],
-    "polizza_cliente": ["Assicura CRM", "Polizze", "{polizza}"],
-    "polizza_condizioni": ["Assicura CRM", "Polizze", "{polizza}"],
-    "polizza_documenti": ["Assicura CRM", "Polizze", "{polizza}"],
+    "polizze": ["Assicura CRM", "Archivio", "Polizze"],
+    "polizza_cliente": ["Assicura CRM", "Archivio", "Polizze", "{polizza}"],
+    "polizza_condizioni": ["Assicura CRM", "Archivio", "Polizze", "{polizza}"],
+    "polizza_documenti": ["Assicura CRM", "Archivio", "Polizze", "{polizza}"],
     # ─ Sinistri: una cartella per numero sinistro.
-    "sinistri": ["Assicura CRM", "Sinistri"],
-    "sinistro_specifico": ["Assicura CRM", "Sinistri", "{sinistro}"],
-    # ─ Quietanze / Contabilità (per anno/mese).
-    "quietanze": ["Assicura CRM", "Quietanze"],
-    "quietanze_anno": ["Assicura CRM", "Quietanze", "{anno}"],
-    "contabilita": ["Assicura CRM", "Contabilità"],
-    "contabilita_prima_nota": ["Assicura CRM", "Contabilità", "Prima Nota", "{anno}", "{mese}"],
-    "contabilita_estratti": ["Assicura CRM", "Contabilità", "Estratti Conto Compagnie", "{anno}"],
-    "contabilita_provvigioni": ["Assicura CRM", "Contabilità", "Provvigioni Collaboratori", "{anno}"],
+    "sinistri": ["Assicura CRM", "Archivio", "Sinistri"],
+    "sinistro_specifico": ["Assicura CRM", "Archivio", "Sinistri", "{sinistro}"],
+    # ─ Trattative / Titoli / Disdette: altri documenti del CRM.
+    "trattative": ["Assicura CRM", "Archivio", "Trattative"],
+    "trattativa_specifica": ["Assicura CRM", "Archivio", "Trattative", "{cliente}"],
+    "titoli": ["Assicura CRM", "Archivio", "Titoli"],
+    "titolo_specifico": ["Assicura CRM", "Archivio", "Titoli", "{polizza}"],
+    "disdette": ["Assicura CRM", "Archivio", "Disdette"],
+    "disdetta_specifica": ["Assicura CRM", "Archivio", "Disdette", "{polizza}"],
+    # ─ Documenti firmati digitalmente (FEA / e-signature).
+    "firme": ["Assicura CRM", "Archivio", "Documenti Firmati"],
+    # ─ Catch-all: qualunque documento di un'entità non mappata finisce comunque qui.
+    "altri_documenti": ["Assicura CRM", "Archivio", "Altri documenti"],
+    "altro_specifico": ["Assicura CRM", "Archivio", "Altri documenti", "{cliente}"],
+    # ─ Quietanze (per anno).
+    "quietanze": ["Assicura CRM", "Archivio", "Quietanze"],
+    "quietanze_anno": ["Assicura CRM", "Archivio", "Quietanze", "{anno}"],
+    # ─ Contabilità: estratti conto compagnia/collaboratore e prima nota storici.
+    "contabilita": ["Assicura CRM", "Archivio", "Contabilità"],
+    "contabilita_prima_nota_root": ["Assicura CRM", "Archivio", "Contabilità", "Prima Nota"],
+    "contabilita_prima_nota": ["Assicura CRM", "Archivio", "Contabilità", "Prima Nota", "{anno}", "{mese}"],
+    "contabilita_estratti_root": ["Assicura CRM", "Archivio", "Contabilità", "Estratti Conto Compagnie"],
+    "contabilita_estratti": ["Assicura CRM", "Archivio", "Contabilità", "Estratti Conto Compagnie", "{anno}"],
+    "contabilita_provvigioni_root": ["Assicura CRM", "Archivio", "Contabilità", "Estratti Conto Collaboratori"],
+    "contabilita_provvigioni": ["Assicura CRM", "Archivio", "Contabilità", "Estratti Conto Collaboratori", "{anno}"],
 }
 
-# Categorie che vengono create SUBITO al primo setup (senza placeholder).
+# Categorie che vengono create SUBITO al primo setup (senza placeholder),
+# così la struttura INBOX + Archivio (con Contabilità) esiste già sul Drive.
 INIT_CATEGORIES = [
-    "root", "inbox", "da_smistare", "anagrafiche", "polizze",
-    "quietanze", "sinistri", "contabilita",
+    "root", "inbox", "archivio", "da_smistare", "anagrafiche", "polizze",
+    "sinistri", "trattative", "titoli", "disdette", "firme", "altri_documenti",
+    "quietanze", "contabilita",
+    "contabilita_prima_nota_root", "contabilita_estratti_root",
+    "contabilita_provvigioni_root",
 ]
 
 _fernet: Optional[Fernet] = None
@@ -783,11 +809,7 @@ async def _init_structure_for_tenant(provider: str, tenant: str) -> dict:
     custom_root = bool(conn.get("root_is_custom") and conn.get("folder_id"))
 
     created_paths = []
-    initial = INIT_CATEGORIES + [
-        "contabilita_prima_nota", "contabilita_estratti",
-        "contabilita_provvigioni", "quietanze_anno",
-    ]
-    for cat in initial:
+    for cat in INIT_CATEGORIES:
         segments = await _resolve_category_path(cat, {})
         fid = await _ensure_folder_path(provider, token, segments, tenant)
         created_paths.append({
@@ -867,6 +889,68 @@ async def sync_status(user=Depends(current_user)):
     """Riepilogo: quanti documenti sono sincronizzati sul cloud e quanti restano."""
     import cloud_doc_sync
     return await cloud_doc_sync.sync_status_for_tenant(_tenant_id(user))
+
+
+@router.post("/migrate-tenant")
+async def migrate_tenant(
+    source_tenant_id: str = Form(""),
+    dry_run: bool = Form(False),
+    user=Depends(require_user("admin")),
+):
+    """Migra il collegamento Google Drive/OCR da un tenant legacy al tenant ATTIVO
+    dell'utente corrente.
+
+    Caso d'uso: lo stesso studio opera come tenant UUID ma la configurazione Drive
+    era agganciata a un vecchio tenant. L'admin consolida tutto sul proprio tenant
+    attuale, senza dover ricollegare Drive manualmente.
+
+    `source_tenant_id` vuoto → usa il tenant principale legacy per default.
+    Sposta: cloud_connections, cloud_folder_cache, cloud_scan_history, documenti_inbox.
+    Aggiorna sia `tenant_id` sia `agenzia_tenant_id` così le query scoped per-agenzia
+    trovano subito la connessione. Idempotente. Usa dry_run=true per un'anteprima.
+    """
+    from database import raw_db
+    from tenant import TENANT_PRINCIPALE_ID
+
+    target = _tenant_id(user)
+    source = (source_tenant_id or "").strip() or TENANT_PRINCIPALE_ID
+    if source == target:
+        raise HTTPException(400, "Il tenant di origine coincide con quello attivo: nulla da migrare")
+
+    # Il tenant di origine deve avere una connessione cloud da migrare.
+    src_conn = await raw_db.cloud_connections.find_one(
+        {"$or": [{"tenant_id": source}, {"agenzia_tenant_id": source}]}, {"_id": 0, "provider": 1})
+    if not src_conn:
+        raise HTTPException(404, f"Nessun collegamento cloud trovato per il tenant di origine '{source}'")
+
+    # Se il tenant attivo ha GIÀ una connessione, non sovrascriviamo (sicurezza).
+    tgt_conn = await raw_db.cloud_connections.find_one(
+        {"$or": [{"tenant_id": target}, {"agenzia_tenant_id": target}]}, {"_id": 0})
+    if tgt_conn:
+        raise HTTPException(409, "Il tenant attivo ha già un collegamento cloud: migrazione non necessaria")
+
+    collections_tenant_keyed = [
+        "cloud_connections", "cloud_folder_cache", "cloud_scan_history",
+    ]
+    src_match = {"$or": [{"tenant_id": source}, {"agenzia_tenant_id": source}]}
+    report: dict = {"source": source, "target": target, "dry_run": dry_run, "migrated": {}}
+
+    for coll in collections_tenant_keyed:
+        c = getattr(raw_db, coll)
+        count = await c.count_documents(src_match)
+        if not dry_run and count:
+            await c.update_many(src_match, {"$set": {"tenant_id": target, "agenzia_tenant_id": target}})
+        report["migrated"][coll] = count
+
+    # documenti_inbox è scoped solo per agenzia_tenant_id
+    inbox_match = {"agenzia_tenant_id": source}
+    inbox_count = await raw_db.documenti_inbox.count_documents(inbox_match)
+    if not dry_run and inbox_count:
+        await raw_db.documenti_inbox.update_many(inbox_match, {"$set": {"agenzia_tenant_id": target}})
+    report["migrated"]["documenti_inbox"] = inbox_count
+
+    report["ok"] = True
+    return report
 
 
 @router.post("/upload-document")

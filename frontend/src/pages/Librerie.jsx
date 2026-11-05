@@ -7585,7 +7585,36 @@ function CloudStorageSezione() {
 
     const [syncStatus, setSyncStatus] = useState(null);
     const [syncing, setSyncing] = useState(false);
+    const [migrating, setMigrating] = useState(false);
     const syncPollRef = useRef(null);
+
+    const runMigration = async () => {
+        // Anteprima (dry_run) → conferma → migrazione reale
+        setMigrating(true);
+        try {
+            const dfd = new FormData();
+            dfd.append("dry_run", "true");
+            const preview = await api.post("/librerie/cloud-storage/migrate-tenant", dfd);
+            const m = preview.data.migrated || {};
+            const tot = Object.values(m).reduce((a, b) => a + (b || 0), 0);
+            if (!tot) {
+                toast.info("Nessuna configurazione Drive precedente da recuperare.");
+                return;
+            }
+            if (!window.confirm(
+                `Trovata una configurazione Google Drive su un profilo precedente ` +
+                `(${m.cloud_connections || 0} collegamento, ${m.documenti_inbox || 0} documenti INBOX). ` +
+                `Vuoi collegarla all'agenzia attuale senza ricollegare Drive manualmente?`
+            )) return;
+            const fd = new FormData();
+            const r = await api.post("/librerie/cloud-storage/migrate-tenant", fd);
+            toast.success("Collegamento Google Drive recuperato sull'agenzia attuale ✓");
+            load();
+            void r;
+        } catch (e) {
+            toast.error("Recupero non riuscito: " + errMsg(e));
+        } finally { setMigrating(false); }
+    };
 
     const loadSyncStatus = async () => {
         try {
@@ -7727,7 +7756,21 @@ function CloudStorageSezione() {
                 </div>
             </Card>
 
-            {/* Card provider */}
+            {/* Recupero collegamento Drive da un profilo/tenant precedente */}
+            {connections.length === 0 && (
+                <Card className="p-3 bg-sky-50 border-sky-200 flex items-start gap-2" data-testid="cloud-migrate-banner">
+                    <Cloud size={16} className="text-sky-600 mt-0.5" />
+                    <div className="text-xs text-sky-900 flex-1">
+                        <strong>Avevi già collegato Google Drive?</strong> Se il collegamento era su un profilo
+                        precedente della tua agenzia, puoi recuperarlo qui senza doverlo rifare da zero.
+                    </div>
+                    <Button size="sm" variant="outline" className="shrink-0"
+                        disabled={migrating} onClick={runMigration} data-testid="cloud-migrate-btn">
+                        {migrating ? "Recupero…" : "Recupera collegamento"}
+                    </Button>
+                </Card>
+            )}
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {[
                     { key: "google_drive", name: "Google Drive",

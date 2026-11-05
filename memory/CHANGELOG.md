@@ -1,5 +1,16 @@
 # Changelog — Axicura CRM
 
+## 2026-11 — Drive = archivio digitale COMPLETO del CRM (INBOX + ARCHIVIO)
+- **Richiesta utente**: "IL DRIVE DEVE ESSERE IL MIO ARCHIVIO DIGITALE DI TUTTI I DOCUMENTI DEL CRM", con cartella principale INBOX (ingresso OCR) + cartella principale ARCHIVIO (documenti lavorati, con Contabilità). Archiviare anche i PDF firmati digitalmente e i documenti di trattative/titoli/disdette.
+- **Struttura cartelle** (`routes/cloud_storage.py` → `STANDARD_FOLDER_STRUCTURE`): tutte le destinazioni d'archivio spostate sotto `Assicura CRM/Archivio/...` (Anagrafiche, Polizze, Sinistri, Trattative, Titoli, Disdette, Documenti Firmati, Altri documenti, Quietanze, Contabilità). `INBOX` resta dedicata al solo ingresso. `Contabilità` con sottocartelle Prima Nota, Estratti Conto Compagnie, Estratti Conto Collaboratori (create al setup). `INIT_CATEGORIES` aggiornato.
+- **Mirror universale** (`cloud_doc_sync.py`): `_ENTITY_CATEGORY` esteso (trattativa, titolo, disdetta, applicazione_matricola) + fallback `_DEFAULT_ENTITY_CATEGORY` → qualsiasi entità non mappata finisce in "Altri documenti": nessun documento viene mai saltato. Backfill e `sync-status` ora includono TUTTI i tipi di entità (rimosso filtro `_entita`).
+- **PDF firmati** (`routes/esignature_it.py` → `_finalizza`): il documento firmato viene mirrorato subito su Drive (best-effort) e marcato `pending_sync` come rete di sicurezza.
+- **Sweep periodico** (`server.py` + `.emergent/crons.yml`): nuovo cron `POST /api/cron/cloud-archive-sweep` ogni 30 min → backfill `include_all` per ogni tenant collegato, così ogni documento creato da QUALSIASI flusso raggiunge il Drive.
+- **Migrazione tenant** (`routes/cloud_storage.py` → `POST /migrate-tenant`): consolida il collegamento Drive/OCR da un tenant legacy (default `tenant-principale-schiantarelli`) al tenant ATTIVO dell'admin, aggiornando `tenant_id` + `agenzia_tenant_id` su cloud_connections/cloud_folder_cache/cloud_scan_history/documenti_inbox. Idempotente, con dry_run; rifiuta se il tenant attivo ha già una connessione. Pulsante frontend "Recupera collegamento" (`Librerie.jsx`) visibile solo quando l'agenzia non ha Drive collegato.
+- **Test**: 35 categorie risolvono tutte sotto Archivio; entity mapping+fallback validi; logica migrazione verificata su dati sintetici; endpoint sync-status/migrate-tenant testati via curl; pagina Cloud Storage renderizza senza errori.
+- **Nota produzione**: la migrazione effettiva dello split tenant va eseguita sull'app LIVE (il preview è un mirror) — jacopo@schiantarelli.it: Librerie → Cloud Storage → "Recupera collegamento". I documenti già archiviati nelle vecchie cartelle in radice restano dove sono (scelta utente "defaults"); i nuovi vanno sotto ARCHIVIO.
+
+
 ## 2026-06 — Voci manuali collaboratore: CRUD libero a Prima Nota chiusa
 - **Richiesta utente**: creare/modificare/eliminare una voce manuale nell'Estratto conto collaboratore anche con Prima Nota chiusa (la voce entra in Prima Nota solo col pagamento dell'estratto).
 - **Backend** (`server.py`): rimosso `assert_giornata_aperta` da `delete_voce_manuale_collab`; nuovo endpoint `PUT /collaboratori/{cid}/voci-manuali/{vid}` (data/causale/importo/note) senza blocco giornata. Entrambi restano bloccati solo se la voce è già `pagata`.

@@ -52,7 +52,16 @@ _ENTITY_CATEGORY = {
     "anagrafica": ("anagrafica_cliente", "cliente"),
     "polizza": ("polizza_cliente", "polizza"),
     "sinistro": ("sinistro_specifico", "sinistro"),
+    "trattativa": ("trattativa_specifica", "cliente"),
+    "titolo": ("titolo_specifico", "polizza"),
+    "disdetta": ("disdetta_specifica", "polizza"),
+    "applicazione_matricola": ("polizza_cliente", "polizza"),
 }
+
+# Qualunque entità non mappata finisce comunque sul Drive, sotto
+# "Archivio/Altri documenti/{entità}": il Drive è l'archivio COMPLETO del CRM,
+# nessun documento viene mai saltato.
+_DEFAULT_ENTITY_CATEGORY = ("altro_specifico", "cliente")
 
 PROVIDER_PRIORITY = ("google_drive", "onedrive")
 
@@ -181,8 +190,8 @@ async def mirror_document(
 
         cat_info = _ENTITY_CATEGORY.get(entita_tipo)
         if not cat_info:
-            logger.warning("Mirror skip: categoria sconosciuta entita=%s id=%s", entita_tipo, entita_id)
-            return None
+            cat_info = _DEFAULT_ENTITY_CATEGORY
+            logger.info("Mirror: entità '%s' non mappata → archivio in 'Altri documenti'", entita_tipo)
         category, ctx_key = cat_info
 
         entity_name = await resolve_entity_name(entita_tipo, entita_id)
@@ -313,11 +322,11 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500,
     moved = 0
     failed = 0
 
-    _entita = ["anagrafica", "polizza", "sinistro"]
+    # Il Drive è l'archivio COMPLETO del CRM: includiamo TUTTI i tipi di entità
+    # (polizze, anagrafiche, sinistri, trattative, titoli, disdette, firme, ...).
     if include_all:
         al_filter = {
             "is_deleted": {"$ne": True},
-            "entita_tipo": {"$in": _entita},
             "cloud_sync.file_id": {"$exists": False},
             "storage_path": {"$exists": True, "$nin": ["", None]},
         }
@@ -414,15 +423,12 @@ async def sync_status_for_tenant(tenant_id: str) -> dict:
     """Riepilogo sincronizzazione: quanti documenti sono sul cloud e quanti restano
     nello storage interno (da sincronizzare). Conta allegati + documenti delle card
     anagrafica. Lo scope per-agenzia è applicato dal wrapper DB in base all'utente."""
-    _entita = ["anagrafica", "polizza", "sinistro"]
-
     synced = await db.allegati.count_documents({
         "is_deleted": {"$ne": True},
         "cloud_sync.file_id": {"$exists": True},
     })
     pending = await db.allegati.count_documents({
         "is_deleted": {"$ne": True},
-        "entita_tipo": {"$in": _entita},
         "cloud_sync.file_id": {"$exists": False},
         "storage_path": {"$exists": True, "$nin": ["", None]},
     })

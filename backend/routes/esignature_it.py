@@ -466,7 +466,28 @@ async def _finalizza(rec: dict) -> Optional[str]:
         tenant_id = (orig or {}).get("agenzia_tenant_id")
     if tenant_id:
         doc["agenzia_tenant_id"] = tenant_id
+    # Flag di sync: il documento firmato deve finire anche nel Drive (archivio
+    # digitale completo). Se il mirror inline fallisce, lo sweep periodico lo recupera.
+    doc["pending_sync"] = True
     await db.allegati.insert_one(doc)
+    # Mirror immediato su Drive (best-effort, non blocca la firma).
+    if tenant_id:
+        try:
+            import cloud_doc_sync
+            sync = await cloud_doc_sync.mirror_document(
+                tenant_id=tenant_id, entita_tipo=rec["entita_tipo"],
+                entita_id=rec["entita_id"], doc_label_text=rec.get("categoria") or "Documento firmato",
+                doc_id=al.id, data=content, mime="application/pdf", filename=fname,
+            )
+            if sync:
+                from database import raw_db
+                await raw_db.allegati.update_one(
+                    {"id": al.id},
+                    {"$set": {"storage_provider": sync["provider"], "cloud_sync": sync,
+                              "pending_sync": False}},
+                )
+        except Exception as e:
+            logger.warning("Mirror firma su Drive fallito (allegato=%s): %s", al.id, str(e)[:160])
     await db.firma_requests.update_one(
         {"id": rec["id"]},
         {"$set": {"stato": "DONE", "allegato_firmato_id": al.id, "updated_at": _now_iso()}},
