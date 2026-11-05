@@ -491,6 +491,7 @@ export default function Provvigioni() {
                         voci_sel={(data.voci_manuali || []).filter((v) => validVociIds.includes(v.id))}
                         conti={conti}
                         bozzaId={payBozza.id}
+                        bozzaNome={payBozza.nome}
                         onClose={() => { setPayBozza(null); setStoricoKey((k) => k + 1); load(); }}
                     />
                 );
@@ -624,7 +625,7 @@ function NuovaVoceDialog({ collab, onClose }) {
     );
 }
 
-function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozzaId, onClose }) {
+function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozzaId, bozzaNome, onClose }) {
     const { mezzi } = useMezziPagamento();
     const today = new Date().toISOString().slice(0, 10);
     const lordo = rows.reduce((s, r) => s + (r.provvigione || 0), 0);
@@ -651,6 +652,7 @@ function PagaDialog({ collab, titoli_ids, voci_ids, rows, voci_sel, conti, bozza
                 perc_ritenuta: parseFloat(percRit) || 0,
                 override_ritenuta: rit,
                 override_contributi: parseFloat(contr) || 0,
+                bozza_nome: bozzaNome || undefined,
             });
             toast.success(`Pagamento di ${fmtEur(r.data.pagamento.netto_pagato)} registrato (ritenuta ${fmtEur(rit)} auto-salvata)`);
             if (bozzaId) {
@@ -787,12 +789,13 @@ function StoricoPagamentiCollab({ collab, refreshKey }) {
                             <th className="text-center">Titoli</th>
                             <th className="text-center">Allegati</th>
                             <th className="text-center">Stampa</th>
+                            <th className="text-center">Annulla</th>
                         </tr>
                     </thead>
                     <tbody>
                         {items.map((p) => (
                             <RowPagamentoCollab
-                                key={p.id} p={p}
+                                key={p.id} p={p} collabId={collab.id}
                                 expanded={!!expanded[p.id]}
                                 detail={details[p.id]}
                                 onToggle={() => toggle(p.id)}
@@ -806,7 +809,18 @@ function StoricoPagamentiCollab({ collab, refreshKey }) {
     );
 }
 
-function RowPagamentoCollab({ p, expanded, detail, onToggle, onChange }) {
+function RowPagamentoCollab({ p, collabId, expanded, detail, onToggle, onChange }) {
+    const annulla = async (e) => {
+        e.stopPropagation();
+        if (!window.confirm(`Annullare questo pagamento di ${fmtEur(p.netto_pagato)}?\n\nI titoli e le voci torneranno "da pagare", la ritenuta automatica verrà rimossa, il movimento di Prima Nota eliminato e l'eventuale lista ripristinata.`)) return;
+        try {
+            const r = await api.delete(`/collaboratori/${collabId}/pagamenti/${p.id}`);
+            toast.success(r.data?.azione || "Pagamento annullato");
+            onChange && onChange();
+        } catch (err) {
+            toast.error(err.response?.data?.detail || "Errore nell'annullamento");
+        }
+    };
     return (
         <>
             <tr className="cursor-pointer hover:bg-slate-50" onClick={onToggle} data-testid={`storico-pag-${p.id}`}>
@@ -844,10 +858,20 @@ function RowPagamentoCollab({ p, expanded, detail, onToggle, onChange }) {
                         </button>
                     </a>
                 </td>
+                <td className="text-center" onClick={(e) => e.stopPropagation()}>
+                    <button
+                        onClick={annulla}
+                        title="Annulla pagamento (riporta voci/titoli da pagare)"
+                        data-testid={`storico-pag-annulla-${p.id}`}
+                        className="inline-flex items-center justify-center h-7 w-7 rounded border border-rose-200 text-rose-600 hover:bg-rose-50"
+                    >
+                        <Trash2 size={12} />
+                    </button>
+                </td>
             </tr>
             {expanded && (
                 <tr className="bg-slate-50">
-                    <td colSpan={11} className="p-3">
+                    <td colSpan={12} className="p-3">
                         {!detail ? <div className="text-xs text-slate-400">Caricamento…</div> : (
                             <div className="space-y-3">
                                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">

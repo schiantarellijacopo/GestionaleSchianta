@@ -318,3 +318,14 @@ Backlog (non bloccante): `sync_pending_for_tenant` usa get/delete sincroni in lo
 - **Export Excel/CSV/PDF** sia della lista corrente (`solo_da_pagare` + ricerca `q`) sia di ogni lista salvata (`bozza_id`). Endpoint: `GET /api/collaboratori/{cid}/estratto-provvigioni/export?formato=xlsx|csv` e `GET /api/stampa/provvigioni/{cid}` (PDF, ora landscape con colonne Data copertura/Data incasso, supporta base/bozza_id/q/solo_da_pagare). Fix: `stampa_provvigioni` ora passa correttamente `base`/`user`.
 - **Aggiungi titolo sfuggito a una lista salvata**: endpoint `POST /api/collaboratori/{cid}/liste-bozze/{bid}/aggiungi` ({titoli_ids,voci_ids} con dedup e ricalcolo totali); frontend: pulsante "＋ lista" per riga (testid `add-to-lista-{titolo_id}`) + dialog con elenco liste.
 - Verifica: export XLSX/CSV/PDF producono file validi; filtro data_copertura corretto su dati reali; UI (search + 3 export) renderizzata. NB: colonna Data copertura e dialog aggiungi visibili solo con dati/liste presenti (il tenant admin@assicura.it di anteprima ha pochi dati provvigionali).
+
+### 2026-11-05 (follow-up 4) — BUGFIX: annullo pagamento provvigioni / cancellazione Prima Nota
+Causa radice: cancellando da Prima Nota il movimento di un pagamento provvigioni, il pagamento NON veniva annullato (nessun ramo "provvigioni" in `_revert_entita_da_movimento`; il movimento non era collegato al pagamento → il blocco su `pagamento_provvigioni_id` non scattava). Risultato: voci/titoli restavano "pagati" e non tornavano "da pagare" (es. -66,47 € bloccato nello Storico).
+Fix:
+- `paga_provvigioni`: collega movimento↔pagamento (`movimento.pagamento_provvigioni_id`) e salva `origine_lista_nome` sul pagamento (per ripristinare la lista).
+- Nuovo helper `_revert_pagamento_provvigioni(pag, user, drop_movimento)`: voci→non pagate, ritenuta auto rimossa, lista ricreata come "da pagare" (bozza), pagamento eliminato (titoli tornano da pagare automaticamente).
+- `_revert_entita_da_movimento`: nuovo ramo `categoria=="provvigioni"` → eliminando il movimento di Prima Nota il pagamento si annulla a cascata.
+- `delete_movimento`: rimosso il blocco (ora cascade revert).
+- Nuovo endpoint `DELETE /api/collaboratori/{cid}/pagamenti/{pid}` (annulla dallo Storico, elimina anche il movimento; blocca se giornata PN chiusa).
+- Frontend Provvigioni: pulsante "Annulla" (cestino) per riga Storico (testid `storico-pag-annulla-{id}`), colonna Annulla, colSpan aggiornato; PagaDialog invia `bozza_nome` quando si paga una lista.
+Verifica: logica revert testata in isolamento su DB (voce→non pagata, pagamento/movimento/ritenuta rimossi, lista ricreata). RECUPERO del -66,47 già orfano: usare il nuovo pulsante Annulla nello Storico. NB: e2e UI non verificabile col login di anteprima (tenant senza dati provvigionali) → confermare sui dati reali.

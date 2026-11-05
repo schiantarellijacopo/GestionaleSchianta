@@ -1489,7 +1489,14 @@ async def paga_provvigioni(cid: str, body: dict, user=Depends(require_user("admi
         voci_manuali_ids=voci_ids,
         note=body.get("note"),
     )
-    await db.pagamenti_provvigioni.insert_one(pag.model_dump())
+    pag_dict = pag.model_dump()
+    # Traccia l'eventuale lista di provenienza, così annullando il pagamento la
+    # lista può tornare "da pagare" (non resta solo nello storico).
+    if body.get("bozza_nome"):
+        pag_dict["origine_lista_nome"] = body.get("bozza_nome")
+    await db.pagamenti_provvigioni.insert_one(pag_dict)
+    # Collega il movimento al pagamento (per tracciabilità e revert da Prima Nota).
+    await db.movimenti.update_one({"id": mov.id}, {"$set": {"pagamento_provvigioni_id": pag.id}})
     # AUTO-REGISTRA la ritenuta d'acconto in /api/ritenute se > 0
     if ritenuta > 0:
         await db.ritenute.insert_one({
@@ -1548,6 +1555,30 @@ async def list_pagamenti(cid: str, user=Depends(require_user("admin", "collabora
         p["n_titoli"] = len(p.get("titoli_ids") or [])
         p["n_voci_manuali"] = len(p.get("voci_manuali_ids") or [])
     return items
+
+
+@api.delete("/collaboratori/{cid}/pagamenti/{pid}")
+async def annulla_pagamento(cid: str, pid: str,
+                            user=Depends(require_user("admin", "collaboratore"))):
+    """Annulla un pagamento provvigioni dallo Storico: elimina il movimento di Prima
+    Nota collegato, riporta voci/titoli a 'da pagare', rimuove la ritenuta automatica e,
+    se il pagamento proveniva da una lista, ricrea la lista come 'da pagare'."""
+    if user.get("role") == "collaboratore" and cid != user.get("id"):
+        raise HTTPException(403, "Non autorizzato")
+    pag = await db.pagamenti_provvigioni.find_one({"id": pid, "collaboratore_id": cid}, {"_id": 0})
+    if not pag:
+        raise HTTPException(404, "Pagamento non trovato")
+    # Se il movimento è in una giornata di Prima Nota chiusa, blocca.
+    if pag.get("movimento_id"):
+        mv = await db.movimenti.find_one({"id": pag["movimento_id"]}, {"_id": 0, "chiusura_id": 1})
+        if mv and mv.get("chiusura_id"):
+            raise HTTPException(400, "Movimento in giornata chiusa — riaprire la chiusura prima di annullare")
+    azione = await _revert_pagamento_provvigioni(pag, user, drop_movimento=True)
+    # rimuovi anche eventuale ritenuta collegata per pagamento_id (non auto)
+    await db.ritenute.delete_many({"pagamento_id": pid})
+    await log_attivita(user, "annulla", "pagamento_provvigioni", pid, azione)
+    return {"ok": True, "azione": azione}
+
 
 
 @api.get("/collaboratori/{cid}/pagamenti/{pid}")
@@ -9729,6 +9760,55 @@ async def _propaga_modifica_movimento(mov: dict, body: dict) -> Optional[str]:
     return azione
 
 
+async def _revert_pagamento_provvigioni(pag: dict, user: dict,
+                                        drop_movimento: bool = False) -> str:
+    """Annulla un pagamento provvigioni: le voci manuali e i titoli tornano 'da pagare',
+    la ritenuta auto-generata viene rimossa e, se il pagamento proveniva da una lista,
+    la lista viene ricreata come 'da pagare'. NON solleva: best-effort."""
+    pid = pag.get("id")
+    cid = pag.get("collaboratore_id")
+    voci_ids = pag.get("voci_manuali_ids") or []
+    titoli_ids = pag.get("titoli_ids") or []
+    # 1) voci manuali → non pagate
+    if voci_ids:
+        await db.voci_manuali_collab.update_many(
+            {"id": {"$in": voci_ids}, "collaboratore_id": cid},
+            {"$set": {"pagata": False, "updated_at": _now_iso()},
+             "$unset": {"pagamento_id": ""}})
+    # 2) ritenuta auto-generata collegata → rimossa
+    await db.ritenute.delete_many({"pagamento_id": pid, "auto_generata": True})
+    # 3) lista di provenienza → ricreata come 'da pagare'
+    lista_nome = pag.get("origine_lista_nome")
+    lista_ripristinata = False
+    if lista_nome and (titoli_ids or voci_ids):
+        try:
+            lordo_b = 0.0
+            if titoli_ids:
+                _t = await db.titoli.find({"id": {"$in": titoli_ids}}, {"_id": 0, "provvigioni": 1}).to_list(5000)
+                lordo_b = sum(float(x.get("provvigioni") or 0.0) for x in _t)
+            tot_voci_b = 0.0
+            if voci_ids:
+                _v = await db.voci_manuali_collab.find({"id": {"$in": voci_ids}}, {"_id": 0, "importo": 1}).to_list(500)
+                tot_voci_b = sum(float(x.get("importo") or 0.0) for x in _v)
+            await db.provvigioni_bozze.insert_one({
+                "id": str(uuid.uuid4()), "collaboratore_id": cid,
+                "nome": lista_nome, "titoli_ids": titoli_ids, "voci_ids": voci_ids,
+                "lordo": round(lordo_b, 2), "voci_totale": round(tot_voci_b, 2),
+                "n_righe": len(titoli_ids) + len(voci_ids),
+                "created_at": _now_iso(), "ripristinata_da_annullamento": True,
+            })
+            lista_ripristinata = True
+        except Exception:
+            pass
+    # 4) movimento Prima Nota collegato (se richiesto)
+    if drop_movimento and pag.get("movimento_id"):
+        await db.movimenti.delete_one({"id": pag["movimento_id"]})
+    # 5) elimina il pagamento → i titoli tornano automaticamente 'da pagare'
+    await db.pagamenti_provvigioni.delete_one({"id": pid})
+    return (f"pagamento provvigioni annullato ({len(titoli_ids)} titoli, {len(voci_ids)} voci tornano da pagare"
+            + (", lista ripristinata" if lista_ripristinata else "") + ")")
+
+
 async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
     """All'eliminazione di un movimento di Prima Nota, ripristina lo stato precedente
     dell'entità collegata (titolo/copertura/incasso direzione/regolazione/pagamento
@@ -9861,6 +9941,14 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
             "$unset": {"movimento_id": "", "data_incasso": ""}})
         azione = "rappel ripristinato a 'da incassare'"
 
+    # --- Pagamento provvigioni collaboratore: voci/titoli tornano 'da pagare' ---
+    if cat == "provvigioni" and mov.get("tipo") == "uscita":
+        pag = await db.pagamenti_provvigioni.find_one({"movimento_id": mov.get("id")}, {"_id": 0})
+        if not pag and mov.get("pagamento_provvigioni_id"):
+            pag = await db.pagamenti_provvigioni.find_one({"id": mov.get("pagamento_provvigioni_id")}, {"_id": 0})
+        if pag:
+            azione = await _revert_pagamento_provvigioni(pag, user)
+
     return azione
 
 
@@ -9892,10 +9980,9 @@ async def delete_movimento(mid: str, user=Depends(require_user("admin", "collabo
         return {"ok": True, "deleted_pair": True}
     # se collegato a un rappel, ripristina il rappel a 'da incassare' (revert sotto)
     # (eliminazione consentita direttamente dalla Prima Nota, come ritenute/PNT)
-    # se è un pagamento collaboratore, blocca eliminazione
-    if cur.get("categoria") == "provvigioni" and cur.get("tipo") == "uscita":
-        if cur.get("pagamento_provvigioni_id"):
-            raise HTTPException(400, "Movimento collegato a Pagamento Provvigioni: elimina dal modulo Provvigioni")
+    # se è un pagamento provvigioni collaboratore: eliminando il movimento di Prima Nota
+    # il pagamento viene annullato a cascata (voci/titoli tornano da pagare) — vedi
+    # _revert_entita_da_movimento, categoria "provvigioni".
     res = await db.movimenti.delete_one({"id": mid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Movimento non trovato")
