@@ -4,7 +4,7 @@
  * canvas firma digitale e download PDF firmato.
  */
 import { useState, useRef, useEffect } from "react";
-import { api } from "@/lib/api";
+import { api, imgUrl } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -269,7 +269,7 @@ export default function PrivacyConsensiDialog({ open, onOpenChange, anagrafica_i
                         {hasSign && ana?.firma_cliente_url && (
                             <div className="text-xs text-emerald-700 mb-2 flex items-center gap-2">
                                 ✓ Firma esistente in archivio:
-                                <img src={ana.firma_cliente_url} alt="firma" className="h-8 bg-white rounded border" />
+                                <img src={imgUrl(ana.firma_cliente_url)} alt="firma" className="h-8 bg-white rounded border" />
                             </div>
                         )}
 

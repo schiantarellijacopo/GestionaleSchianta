@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import RecordStoria from "@/components/RecordStoria";
-import { api, fmtDate, fmtEur, sendWhatsApp } from "@/lib/api";
+import { api, fmtDate, fmtEur, sendWhatsApp, imgUrl } from "@/lib/api";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, Loading, StatusBadge } from "@/components/Shared";
 import IconForRamo from "@/components/IconForRamo";
@@ -2562,7 +2562,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     <div className="font-medium text-sm flex items-center gap-2 mb-2">
                         ✍️ Firma digitale del cliente
                     </div>
-                    <img src={ana.firma_cliente_url} alt="firma" className="bg-white rounded-md border max-h-24" />
+                    <img src={imgUrl(ana.firma_cliente_url)} alt="firma" className="bg-white rounded-md border max-h-24" />
                 </Card>
             )}
 

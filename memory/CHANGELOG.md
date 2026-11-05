@@ -543,3 +543,8 @@ Problema: il login del portale cercava l'anagrafica globalmente per email+CF e p
 - Soluzione: endpoint /api/storage ora serve PUBBLICAMENTE (senza auth) solo le immagini di branding/profilo — loghi (path /azienda/) e avatar (file avatar_*) — con Cache-Control 1 giorno. Tutto il resto (documenti, scansioni, PDF) resta protetto: 401 senza auth.
 - Aggiunto auth.optional_current_user (non solleva, ritorna None).
 - Verificato: avatar/logo 200 senza token, documento privato 401 senza token; header mostra le immagini a video.
+
+## 2026-06 — Fix "Visualizza firma" (Non autenticato)
+- Il link "Visualizza firma" e le anteprime firma aprivano l'URL storage senza token → 401.
+- Fix: avvolti con imgUrl() (aggiunge ?token=) i link/immagini firma in Librerie.jsx (Visualizza firma utente), AnagraficaDetail.jsx e PrivacyConsensiDialog.jsx (firma_cliente_url). La firma resta PRIVATA (non pubblica): si apre solo con token valido, 401 senza auth, 403 se non proprietario/non admin.
+- Verificato: firma 200 con ?token (admin), 401 senza auth.

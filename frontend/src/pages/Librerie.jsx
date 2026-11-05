@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, memo } from "react";
-import { api, API_BASE, fmtImporto } from "@/lib/api";
+import { api, API_BASE, fmtImporto, imgUrl } from "@/lib/api";
 import CompagnieMergeTool from "@/components/CompagnieMergeTool";
 import { PageHeader, Loading, Empty } from "@/components/Shared";import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -3261,7 +3261,7 @@ function DocumentiCollaboratore({ userId, user, items, onChange }) {
                     <div>
                         <div className="text-sm font-medium">Firma digitale</div>
                         <div className="text-xs text-slate-500">
-                            {firmaUrl ? <a href={firmaUrl} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">Visualizza firma</a> : "Usata per firmare i moduli — nessuna firma caricata"}
+                            {firmaUrl ? <a href={imgUrl(firmaUrl)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">Visualizza firma</a> : "Usata per firmare i moduli — nessuna firma caricata"}
                         </div>
                     </div>
                 </div>
