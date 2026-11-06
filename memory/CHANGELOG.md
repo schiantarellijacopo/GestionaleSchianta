@@ -794,3 +794,11 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Barra scenari: selettore (+ Nuovo), nome, anno, pulsanti Salva (crea/aggiorna per id), Copia, Elimina, Stampa (apre finestra stampabile con tabella MDC + KPI). data-testid: mdc-scenario-select/nome/anno, sf-salva-scenari, mdc-copia/elimina/stampa.
 - Persistenza via PUT /anagrafiche/{id} (campo libero, già supportato). Testato: round-trip salute_fiscale_scenari_list 200 e riletto; UI verificata su AUTOTRASPORTI VIVIANI.
 - NB: resta aperta la richiesta "riclassificato con TUTTE le voci CEE di dettaglio" (schema completo OpenAPI) — grande, non ancora implementata.
+
+## 2026-06 — Riclassificato CEE completo (tutte le voci di dettaglio)
+- openapi_it_service.py: nuova _cee_detail(d) estrae TUTTE le voci dello schema CEE dall'IT-full (productionValue, productionCosts, revenuesFinancialCharges, annualResult, assets, inventory, credits, financialAssets, cashEquivalents, netWorth, debts, liabilities) come lista ordinata [{section, code, label, value}] usando le descrizioni fornite dall'API. company_financials ora ritorna bilancio_dettaglio_cee {anno, voci}.
+- extras_p1p2 da-openapi: persiste salute_fiscale_dati.bilancio_dettaglio_cee.
+- SaluteFiscaleTab.jsx: nuovo buildDettaglioCeeHTML; il pulsante "Completo ultimo anno" apre l'anteprima stampabile con TUTTE le voci CEE (sezioni + codici + importi, n.d. se mancanti).
+- report_azienda.py: endpoint riclassificato anni=1 → se esiste bilancio_dettaglio_cee genera _build_cee_detail_pdf (PDF A4 con tutte le voci). 3/5 anni restano aggregati.
+- Testato: _cee_detail su schema mock (11 voci, sezioni+label corretti); PDF completo endpoint anni=1 → 200.
+- LIMITE: il dettaglio completo è disponibile solo per l'ULTIMO bilancio depositato (IT-full); gli anni storici (3/5) restano aggregati. Serve ri-premere "Compila da OpenAPI" per popolare bilancio_dettaglio_cee.

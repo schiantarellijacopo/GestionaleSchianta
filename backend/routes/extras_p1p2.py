@@ -1658,6 +1658,7 @@ async def salute_fiscale_da_openapi(aid: str, user=Depends(current_user)) -> dic
             "indici_ufficiali": indici_raw,
             "storico": fin.get("storico") or [],
             "bilanci_riclassificati": fin.get("bilanci_riclassificati") or [],
+            "bilancio_dettaglio_cee": fin.get("bilancio_dettaglio_cee") or {},
             "score_rischio_default": rischio,
             "cross_sell_suggerito": list(dict.fromkeys(cross_sell)),
             "fonte": fin.get("provider"),

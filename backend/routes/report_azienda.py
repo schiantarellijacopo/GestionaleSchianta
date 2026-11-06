@@ -141,6 +141,16 @@ async def report_riclassificato_pdf(aid: str, anni: int = 5, user=Depends(curren
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
     sf = ana.get("salute_fiscale_dati") or {}
+    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    logo = await _logo_bytes()
+
+    # "Ultimo anno" → bilancio riclassificato COMPLETO (tutte le voci CEE) se disponibile
+    dett_cee = sf.get("bilancio_dettaglio_cee") or {}
+    if anni == 1 and (dett_cee.get("voci") or []):
+        pdf = _build_cee_detail_pdf(ana, dett_cee, sf.get("fonte"), az, logo)
+        return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
+                                 headers={"Content-Disposition": f'inline; filename="bilancio_completo_{aid[:8]}.pdf"'})
+
     riclass = sf.get("bilanci_riclassificati") or []
     if not riclass:
         # fallback: ricostruisci l'ultimo anno dal bilancio estratto (OCR/OpenAPI)
@@ -150,8 +160,6 @@ async def report_riclassificato_pdf(aid: str, anni: int = 5, user=Depends(curren
             riclass = [{**bil, "anno": bil.get("anno"), "completo": True}]
     if not riclass:
         raise HTTPException(400, "Nessun bilancio disponibile. Compila prima da OpenAPI o carica un bilancio.")
-    az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    logo = await _logo_bytes()
     pdf = _build_riclass_pdf(ana, riclass, anni, sf.get("fonte"), az, logo)
     return StreamingResponse(BytesIO(pdf), media_type="application/pdf",
                              headers={"Content-Disposition": f'inline; filename="bilancio_riclassificato_{anni}anni_{aid[:8]}.pdf"'})
@@ -339,6 +347,94 @@ def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
 
     doc.build(story, onFirstPage=_hdr, onLaterPages=_hdr)
     return buf.getvalue()
+
+
+def _build_cee_detail_pdf(ana, dett_cee, fonte, az, logo) -> bytes:
+    """PDF del bilancio riclassificato COMPLETO: tutte le voci dello schema CEE
+    (ultimo bilancio depositato, da OpenAPI IT-full)."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib import colors
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable)
+
+    navy = colors.HexColor("#0f2f4a")
+    ss = getSampleStyleSheet()
+    H1 = ParagraphStyle("H1", parent=ss["Title"], fontSize=15, leading=19, textColor=navy, alignment=TA_CENTER, spaceAfter=2)
+    sub = ParagraphStyle("sub", parent=ss["BodyText"], fontSize=9, alignment=TA_CENTER, textColor=colors.HexColor("#64748b"))
+    small = ParagraphStyle("s", parent=ss["BodyText"], fontSize=7, leading=9.5, textColor=colors.HexColor("#94a3b8"))
+
+    voci = dett_cee.get("voci") or []
+    anno = dett_cee.get("anno")
+
+    def fmt(v):
+        return "n.d." if v is None else "\u20ac " + f"{v:,.0f}".replace(",", ".")
+
+    data = [["Voce", "Importo"]]
+    styles = [
+        ("BACKGROUND", (0, 0), (-1, 0), navy),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.3),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
+    ]
+    ri, last_sec = 1, None
+    import re as _re
+    for x in voci:
+        sec = x.get("section")
+        if sec != last_sec:
+            data.append([sec, ""])
+            styles += [("SPAN", (0, ri), (-1, ri)),
+                       ("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#0f766e")),
+                       ("TEXTCOLOR", (0, ri), (-1, ri), colors.white),
+                       ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold")]
+            last_sec = sec
+            ri += 1
+        lbl = ((x.get("code") + "  ") if x.get("code") else "") + (x.get("label") or "")
+        data.append([lbl, fmt(x.get("value"))])
+        if _re.search(r"totale|total|risultato|valore della produzione|utile|perdita", (x.get("label") or ""), _re.I):
+            styles += [("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#f1f5f9")),
+                       ("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold")]
+        ri += 1
+
+    t = Table(data, colWidths=[13.0 * cm, 4.0 * cm], repeatRows=1)
+    t.setStyle(TableStyle(styles))
+    rag = (ana.get("ragione_sociale") or "").replace("&", "&amp;").replace("<", "&lt;")
+    story = [
+        Paragraph("Bilancio riclassificato completo \u2014 schema CEE", H1),
+        Paragraph("%s \u00b7 esercizio %s%s" % (rag, anno or "", (" \u00b7 fonte: " + fonte) if fonte else ""), sub),
+        HRFlowable(width="100%", thickness=1.2, color=navy, spaceBefore=6, spaceAfter=6),
+        t, Spacer(1, 8),
+        Paragraph("Dettaglio completo dell'ultimo bilancio depositato. " + NOTE_LEGALI, small),
+        Paragraph(NOTE_IA, small),
+    ]
+    buf = BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=2.2 * cm, bottomMargin=1.6 * cm,
+                            leftMargin=1.8 * cm, rightMargin=1.8 * cm, title="Bilancio completo")
+
+    def _hdr(canvas, d):
+        canvas.saveState()
+        W, H = A4
+        if logo:
+            try:
+                from reportlab.lib.utils import ImageReader
+                img = ImageReader(BytesIO(logo))
+                iw, ih = img.getSize(); lw = 2.6 * cm; lh = lw * ih / iw
+                canvas.drawImage(img, W - 1.8 * cm - lw, H - 0.9 * cm - lh, lw, lh, preserveAspectRatio=True, mask="auto")
+            except Exception:
+                pass
+        canvas.setFont("Helvetica", 7); canvas.setFillColor(colors.HexColor("#94a3b8"))
+        canvas.drawString(1.8 * cm, 1.0 * cm, "Documento riservato \u00b7 Bilancio riclassificato completo")
+        canvas.drawRightString(W - 1.8 * cm, 1.0 * cm, f"Pag. {d.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_hdr, onLaterPages=_hdr)
+    return buf.getvalue()
+
 
 
 # ============================================================ PDF

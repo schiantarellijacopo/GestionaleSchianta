@@ -132,6 +132,34 @@ function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
 }
 
 
+function buildDettaglioCeeHTML(voci, anno, fonte, azienda) {
+    if (!voci || !voci.length) return null;
+    const eur = (v) => (v == null ? '<span style="color:#94a3b8">n.d.</span>' : "\u20ac " + Math.round(v).toLocaleString("it-IT"));
+    let rows = "", lastSec = null;
+    voci.forEach((x) => {
+        if (x.section !== lastSec) { rows += `<tr class="sez"><td colspan="2">${x.section}</td></tr>`; lastSec = x.section; }
+        const tot = /totale|total|risultato|valore della produzione|utile|perdita/i.test(x.label || "");
+        rows += `<tr class="${tot ? "tot" : ""}"><td class="lbl">${x.code ? `<span class="cod">${x.code}</span> ` : ""}${x.label || ""}</td><td class="num">${eur(x.value)}</td></tr>`;
+    });
+    return `<!doctype html><html lang="it"><head><meta charset="utf-8">
+<title>Bilancio riclassificato completo \u2014 ${azienda || "Azienda"}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1e293b;padding:26px 32px}
+h1{font-size:17px;margin:0;color:#0f2f4a}.sub{color:#64748b;font-size:12px;margin:3px 0 14px}
+table{width:100%;border-collapse:collapse;font-size:12px}td{padding:4px 10px;border-bottom:1px solid #eef2f6}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;width:160px}
+td.lbl{color:#334155}.cod{color:#94a3b8;font-size:10px;margin-right:4px}
+tr.sez td{background:#0f766e;color:#fff;font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:.4px;padding:5px 10px}
+tr.tot td{font-weight:700;background:#f1f5f9}
+.btn{background:#0f172a;color:#fff;border:0;border-radius:6px;padding:9px 16px;font-size:13px;cursor:pointer;margin:16px 0}
+@media print{.btn{display:none}body{padding:0}}</style></head><body>
+<h1>Bilancio riclassificato completo \u2014 schema CEE</h1>
+<div class="sub">${azienda || "Azienda"} \u00b7 esercizio ${anno || ""}${fonte ? " \u00b7 fonte: " + fonte : ""}</div>
+<button class="btn" onclick="window.print()">\ud83d\udda8\ufe0f Stampa / Salva PDF</button>
+<table><tbody>${rows}</tbody></table>
+<button class="btn" onclick="window.print()">\ud83d\udda8\ufe0f Stampa / Salva PDF</button></body></html>`;
+}
+
+
 export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [dati, setDati] = useState(null);
     const [aggIl, setAggIl] = useState(null);
@@ -237,6 +265,13 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
         : (bilHasData ? [{ ...bil, anno: bil.anno, completo: true }] : []);
 
     const stampaRiclassificato = (nAnni) => {
+        const dettCee = dati?.bilancio_dettaglio_cee;
+        if (nAnni === 1 && dettCee?.voci?.length) {
+            const html = buildDettaglioCeeHTML(dettCee.voci, dettCee.anno, dati?.fonte, ana?.ragione_sociale);
+            const w = window.open("", "_blank");
+            if (!w) { toast.error("Abilita i popup per aprire l'anteprima di stampa"); return; }
+            w.document.write(html); w.document.close(); return;
+        }
         const html = buildRiclassHTML(riclassEff, nAnni, dati?.fonte, ana?.ragione_sociale);
         if (!html) { toast.error("Nessun bilancio disponibile. Premi prima \u26a1 Compila da OpenAPI o carica un bilancio."); return; }
         const w = window.open("", "_blank");
@@ -307,7 +342,7 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                                 <div className="flex gap-2 flex-wrap justify-end">
                                     <button onClick={() => stampaRiclassificato(1)}
                                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500 text-white rounded text-xs hover:bg-amber-600"
-                                        data-testid="sf-riclass-1-btn"><Printer size={13} /> Ultimo anno</button>
+                                        data-testid="sf-riclass-1-btn"><Printer size={13} /> Completo ultimo anno</button>
                                     <button onClick={() => stampaRiclassificato(3)}
                                         className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-600 text-white rounded text-xs hover:bg-amber-700"
                                         data-testid="sf-riclass-3-btn"><Printer size={13} /> 3 anni</button>

@@ -1689,9 +1689,51 @@ async def company_financials(cf_piva: str) -> Optional[dict]:
         "indici": indici,
         "storico": storico[:6],
         "bilanci_riclassificati": riclass_list,
+        "bilancio_dettaglio_cee": {"anno": dett.get("anno"), "voci": _cee_detail(d)},
         "ragione_sociale": d.get("companyName") or adv_name,
         "provider": "company.openapi.com IT-full (LIVE)",
     }
+
+
+_CEE_SECTIONS = [
+    ("productionValue", "A) VALORE DELLA PRODUZIONE"),
+    ("productionCosts", "B) COSTI DELLA PRODUZIONE"),
+    ("revenuesFinancialCharges", "C) PROVENTI E ONERI FINANZIARI"),
+    ("annualResult", "RISULTATO D'ESERCIZIO"),
+    ("incomeStatementAggregateValues", "CONTO ECONOMICO — valori aggregati"),
+    ("assetsAggregateValues", "ATTIVO"),
+    ("inventory", "ATTIVO — C.I Rimanenze"),
+    ("credits", "ATTIVO — C.II Crediti"),
+    ("financialAssets", "ATTIVO — C.III Attività finanziarie"),
+    ("cashEquivalents", "ATTIVO — C.IV Disponibilità liquide"),
+    ("netWorth", "PASSIVO — A) Patrimonio netto"),
+    ("debts", "PASSIVO — D) Debiti"),
+    ("liabilitiesAggregateValues", "PASSIVO — valori aggregati"),
+]
+
+
+def _cee_detail(d: dict) -> list:
+    """Lista ordinata di TUTTE le voci CEE dell'ultimo bilancio (schema OpenAPI IT-full):
+    [{section, code, label, value}]. Usa la descrizione fornita dall'API."""
+    out = []
+    for sub, secname in _CEE_SECTIONS:
+        items = d.get(sub)
+        if not isinstance(items, list):
+            continue
+        for x in items:
+            if not isinstance(x, dict):
+                continue
+            label = x.get("description") or x.get("label") or x.get("name") or x.get("code")
+            val = _co_num(x.get("value"))
+            if not label and val is None:
+                continue
+            out.append({
+                "section": secname,
+                "code": str(x.get("code") or ""),
+                "label": label,
+                "value": val,
+            })
+    return out
 
 
 # ===================================================================
