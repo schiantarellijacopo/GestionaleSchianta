@@ -35,6 +35,19 @@ export const GESTIONI_INPS = [
 ];
 export const gestioneLabel = (v) => GESTIONI_INPS.find((g) => g.value === v)?.label || v || "—";
 
+// Rende assoluto un url relativo (/api/... o /storage/...) verso il backend e vi
+// aggancia il token: un <a href> non invia l'header Authorization e, in produzione
+// (frontend e backend su domini diversi), un path relativo /api/... punterebbe al
+// dominio del frontend. Fallback per il download/visualizzazione dei documenti.
+export const fileHref = (u) => {
+    if (!u) return "#";
+    const base = process.env.REACT_APP_BACKEND_URL || "";
+    const abs = /^https?:\/\//.test(u) ? u : `${base}${u.startsWith("/") ? "" : "/"}${u}`;
+    const tok = (typeof localStorage !== "undefined" && localStorage.getItem("token")) || "";
+    if (!tok) return abs;
+    return `${abs}${abs.includes("?") ? "&" : "?"}token=${encodeURIComponent(tok)}`;
+};
+
 import { FirmaButton } from "@/components/DocumentiSezioneSplit";
 import RichiediDocCard from "@/components/RichiediDocCard";
 import { GeneraDocumentoButton } from "@/components/GeneraDocumentoButton";
@@ -2496,7 +2509,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                             {cOpen && (doc ? (
                                 <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
                                     <div>
-                                        📎 <a href={doc.url} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline">{doc.nome_file}</a>
+                                        📎 <a href={fileHref(doc.url)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline" data-testid={`doc-card-link-${dt.key}`}>{doc.nome_file}</a>
                                     </div>
                                     <div className="text-slate-500">
                                         {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}

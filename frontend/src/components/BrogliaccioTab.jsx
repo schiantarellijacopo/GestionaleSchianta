@@ -117,8 +117,10 @@ export default function BrogliaccioTab({ refreshKey }) {
         }
         if (!window.confirm(msg)) return;
         try {
-            await api.delete(`/contabilita/movimenti/${mov.id}`);
-            toast.success("Movimento eliminato");
+            const r = await api.delete(`/contabilita/movimenti/${mov.id}`);
+            const rev = r.data?.revert;
+            if (rev) toast.success(`Movimento eliminato · ${rev}`, { duration: 6000 });
+            else toast.success("Movimento eliminato");
             load();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };

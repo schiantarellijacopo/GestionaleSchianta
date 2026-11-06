@@ -743,3 +743,8 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
   - Snapshot dello stato titolo (titolo_coperto_pre, data_copertura_pre) salvato alla creazione dei movimenti in: bulk_incassa, bulk copertura, marca-sospeso singolo, incasso singolo.
 - Regole soddisfatte: (1) arretrato→coperto→del=arretrato; (2) arretrato→coperto+incasso→del=arretrato; (3) coperto(import)→incasso→del=coperto. Testati tutti e 4 i casi (incluso legacy senza snapshot) via _revert_entita_da_movimento.
 - NB: il titolo 732224551 GIÀ cancellato resta coperto (il movimento non esiste più): usare l'azione "rimetti arretrato / storna copertura". Pubblicare su Railway con "Save to GitHub".
+
+## 2026-06 — Documenti card: apertura/download + messaggio ripristino titolo
+- Fix apertura documenti card anagrafica (es. Carta d'identità "Su Drive"): il link usava doc.url RELATIVO (/api/...). In produzione (frontend e backend su domini diversi) puntava al dominio del frontend → 404, non scaricava né visualizzava. Aggiunto helper fileHref() in AnagraficaDetail.jsx che rende l'url assoluto verso REACT_APP_BACKEND_URL e vi aggancia ?token= (un <a> non invia l'header Authorization). Applicato al link della card documenti.
+  - Testato: /api/anagrafiche/{aid}/documenti/{tipo}/download?token= e /api/storage/...?token= → 200 application/pdf (401 senza token). download_cloud_file dal Drive funziona.
+- Conferma ripristino: BrogliaccioTab ora mostra nel toast di eliminazione movimento lo stato a cui è tornato il titolo (es. "titolo ripristinato ad arretrato / a coperto (sospeso) / rimane incassato"), leggendo il campo `revert` già restituito da DELETE /contabilita/movimenti/{id}.
