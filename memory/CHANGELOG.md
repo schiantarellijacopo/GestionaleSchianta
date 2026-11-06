@@ -735,3 +735,11 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fix: condizione cambiata in `(ana or pol or sin)` — l'allegato ora viene creato per qualsiasi entità abbinata (polizza/sinistro anche senza anagrafica). _create_crm_attachment già gestiva correttamente entita_tipo=polizza.
 - Testato: _create_crm_attachment con pol e ana=None crea l'allegato (entita_tipo=polizza, categoria=libretto_circolazione, visibile_cliente=True).
 - NB produzione Railway: pubblicare con "Save to GitHub". I file già spostati fuori dall'inbox non vengono ri-scansionati: per la polizza 184643314 occorre ricaricare il libretto nell'inbox o allegarlo manualmente.
+
+## 2026-06 — Fix: cancellazione registrazione Prima Nota non riportava il titolo ad arretrato
+- Bug: eliminando da Prima Nota la copertura/incasso di un titolo, se non restavano altri movimenti il codice usava l'euristica (caricato_da_import AND data_copertura) che lasciava COPERTI i titoli importati anche quando la copertura derivava proprio dal movimento eliminato. Caso reale: polizza 732224551, titolo rimasto "coperto" invece di tornare arretrato.
+- Fix (server.py):
+  - _revert_entita_da_movimento: nel ramo "nessun movimento rimasto" ora usa lo SNAPSHOT dello stato pre-registrazione salvato sul movimento (titolo_coperto_pre / data_copertura_pre). Se manca lo snapshot e si elimina una copertura esplicita (copertura_titolo/anticipo) → ARRETRATO; fallback legacy import/setup solo per gli incassi.
+  - Snapshot dello stato titolo (titolo_coperto_pre, data_copertura_pre) salvato alla creazione dei movimenti in: bulk_incassa, bulk copertura, marca-sospeso singolo, incasso singolo.
+- Regole soddisfatte: (1) arretrato→coperto→del=arretrato; (2) arretrato→coperto+incasso→del=arretrato; (3) coperto(import)→incasso→del=coperto. Testati tutti e 4 i casi (incluso legacy senza snapshot) via _revert_entita_da_movimento.
+- NB: il titolo 732224551 GIÀ cancellato resta coperto (il movimento non esiste più): usare l'azione "rimetti arretrato / storna copertura". Pubblicare su Railway con "Save to GitHub".

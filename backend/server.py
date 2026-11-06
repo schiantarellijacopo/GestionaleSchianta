@@ -6352,6 +6352,8 @@ async def bulk_incassa(body: dict, user=Depends(require_user("admin", "collabora
             provvigioni=0.0 if effective_coperto else titolo.get("provvigioni", 0.0),
         )
         doc_mov = mov.model_dump()
+        doc_mov["titolo_coperto_pre"] = bool(titolo.get("titolo_coperto"))
+        doc_mov["data_copertura_pre"] = titolo.get("data_copertura")
         if merge:
             doc_mov["coperture_assorbite"] = cop_assorbite
         await db.movimenti.insert_one(doc_mov)
@@ -6486,7 +6488,10 @@ async def bulk_copertura(body: dict, user=Depends(require_user("admin", "collabo
             provvigioni=float(t.get("provvigioni") or 0.0),
             note=note,
         )
-        await db.movimenti.insert_one(mov.model_dump())
+        _doc_cop = mov.model_dump()
+        _doc_cop["titolo_coperto_pre"] = False
+        _doc_cop["data_copertura_pre"] = None
+        await db.movimenti.insert_one(_doc_cop)
         n_movimenti += 1
 
     await log_attivita(user, "bulk_copertura", "titolo", None,
@@ -6588,7 +6593,10 @@ async def marca_sospeso(tid: str, user=Depends(require_user("admin", "collaborat
             anagrafica_id=pol.get("contraente_id"), compagnia_id=pol.get("compagnia_id"),
             conto_cassa_id=None, provvigioni=float(t.get("provvigioni") or 0.0),
         )
-        await db.movimenti.insert_one(mov.model_dump())
+        _doc_cop2 = mov.model_dump()
+        _doc_cop2["titolo_coperto_pre"] = False
+        _doc_cop2["data_copertura_pre"] = None
+        await db.movimenti.insert_one(_doc_cop2)
         n_mov = 1
     await log_attivita(user, "marca_sospeso", "titolo", tid,
                        f"Titolo marcato sospeso ({n_del} incassi annullati, {n_mov} copertura creata)")
@@ -7338,7 +7346,10 @@ async def incassa_titolo(tid: str, body: dict, user=Depends(require_user("admin"
               + (f" — {motivo_sconto}" if motivo_sconto else "")) if sconto_applicato > 0 else None)
         ),
     )
-    await db.movimenti.insert_one(mov_in.model_dump())
+    _doc_inc = mov_in.model_dump()
+    _doc_inc["titolo_coperto_pre"] = bool(titolo.get("titolo_coperto"))
+    _doc_inc["data_copertura_pre"] = titolo.get("data_copertura")
+    await db.movimenti.insert_one(_doc_inc)
 
     # Cleanup: un titolo incassato non deve lasciare righe "anticipo" orfane in
     # Prima Nota (copertura contestuale o precedente). Skip giornate già chiuse.
@@ -9988,21 +9999,31 @@ async def _revert_entita_da_movimento(mov: dict, user: dict) -> Optional[str]:
                     "$unset": _unset_incasso})
                 azione = "titolo ripristinato a coperto/sospeso"
             else:
-                # Nessun movimento rimasto. Un titolo COPERTO da SETUP INIZIALE o da
-                # IMPORT non ha un movimento di copertura in Prima Nota: la copertura è
-                # un dato "di apertura" e NON va toccata. Eliminando l'incasso manuale il
-                # titolo torna quindi COPERTO/sospeso (non arretrato), salvo che l'utente
-                # non lo scopra con un'operazione manuale (storna copertura / rimetti
-                # arretrato). Per gli altri casi → arretrato.
-                baseline_coperto = bool(
-                    (t.get("is_setup_iniziale") or t.get("caricato_da_import"))
-                    and t.get("data_copertura"))
-                if baseline_coperto:
-                    await db.titoli.update_one({"id": tid}, {
-                        "$set": {"stato": "da_incassare", "titolo_coperto": True,
-                                 "updated_at": _now_iso()},
-                        "$unset": _unset_incasso})
-                    azione = "titolo ripristinato a coperto (sospeso da setup/import)"
+                # Nessun incasso/copertura rimasto in Prima Nota: decidi se il titolo
+                # torna COPERTO (copertura di apertura preesistente) o ARRETRATO.
+                # Si usa lo SNAPSHOT dello stato catturato alla registrazione (stato del
+                # titolo PRIMA del movimento ora eliminato):
+                #   • snapshot presente → ripristina esattamente quello stato;
+                #   • copertura esplicita (copertura_titolo/anticipo) senza snapshot
+                #     → la copertura era proprio quella eliminata → ARRETRATO;
+                #   • fallback legacy incasso → euristica import/setup (apertura).
+                if "titolo_coperto_pre" in mov:
+                    pre_coperto = bool(mov.get("titolo_coperto_pre"))
+                    pre_data_cop = mov.get("data_copertura_pre")
+                elif cat in ("copertura_titolo", "anticipo"):
+                    pre_coperto = False
+                    pre_data_cop = None
+                else:
+                    pre_coperto = bool(
+                        (t.get("is_setup_iniziale") or t.get("caricato_da_import"))
+                        and t.get("data_copertura"))
+                    pre_data_cop = t.get("data_copertura") if pre_coperto else None
+                if pre_coperto:
+                    _set = {"stato": "da_incassare", "titolo_coperto": True, "updated_at": _now_iso()}
+                    if pre_data_cop:
+                        _set["data_copertura"] = pre_data_cop
+                    await db.titoli.update_one({"id": tid}, {"$set": _set, "$unset": _unset_incasso})
+                    azione = "titolo ripristinato a coperto (sospeso)"
                 else:
                     await db.titoli.update_one({"id": tid}, {
                         "$set": {"stato": "da_incassare", "titolo_coperto": False, "updated_at": _now_iso()},
