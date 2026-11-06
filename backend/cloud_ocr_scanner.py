@@ -1009,8 +1009,10 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
 
     # ★ Se abbinato → crea ANCHE l'allegato nel CRM così il file compare in
     # Anagrafiche → tab Documenti (categoria carta_identita/patente/ecc.)
+    # NB: l'entità può essere polizza o sinistro anche SENZA anagrafica abbinata
+    # (es. libretto di circolazione associato per numero polizza).
     campi_aggiornati: list = []
-    if category != "da_smistare" and ana:
+    if category != "da_smistare" and (ana or pol or sin):
         try:
             await _create_crm_attachment(
                 db, tenant_id, name, file_bytes, mime,

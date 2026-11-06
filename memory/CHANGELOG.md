@@ -729,3 +729,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - server.py: endpoint calcolo-pensione/preview, /calcola, /pensioni/calcola e analisi/calcola-pensioni-future ora derivano la gestione dal campo professione dell'anagrafica (o override body) e applicano l'aliquota corretta (eliminato lo 0.33 hardcoded nelle proiezioni e nel totale versato).
 - Frontend AnagraficaDetail.jsx: campo "Professione" trasformato in menù a tendina "Professione / Gestione INPS" (GESTIONI_INPS + gestioneLabel); display read-only e preview calcolo mostrano la label + aliquota/stima.
 - Testato e2e (anagrafica seed commerciante): preview, calcola e pensioni-future applicano 24,48% correttamente; stato civile + figli a carico già usati per i superstiti (numero_familiari).
+
+## 2026-06 — Fix: Drive inbox OCR non allegava i documenti di polizza senza anagrafica
+- Bug: in cloud_ocr_scanner._process_file l'allegato CRM veniva creato solo se c'era un'anagrafica abbinata (`if category != "da_smistare" and ana`). Un libretto di circolazione abbinato alla polizza per numero (senza anagrafica) veniva spostato nella cartella Drive (Polizze/{numero}/Libretto di circolazione/) ma NON allegato nel CRM. Esempio reale: polizza 184643314.
+- Fix: condizione cambiata in `(ana or pol or sin)` — l'allegato ora viene creato per qualsiasi entità abbinata (polizza/sinistro anche senza anagrafica). _create_crm_attachment già gestiva correttamente entita_tipo=polizza.
+- Testato: _create_crm_attachment con pol e ana=None crea l'allegato (entita_tipo=polizza, categoria=libretto_circolazione, visibile_cliente=True).
+- NB produzione Railway: pubblicare con "Save to GitHub". I file già spostati fuori dall'inbox non vengono ri-scansionati: per la polizza 184643314 occorre ricaricare il libretto nell'inbox o allegarlo manualmente.
