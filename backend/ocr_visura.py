@@ -76,14 +76,47 @@ Regole:
 """
 
 
+def _pdf_to_images(pdf_bytes: bytes, max_pages: int = 12, zoom: float = 2.0) -> list[bytes]:
+    """Converte un PDF in una lista di PNG (una per pagina)."""
+    try:
+        import pymupdf as _fitz  # type: ignore
+    except ImportError:
+        import fitz as _fitz  # type: ignore
+    imgs: list[bytes] = []
+    doc = _fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        mat = _fitz.Matrix(zoom, zoom)
+        for i, page in enumerate(doc):
+            if i >= max_pages:
+                break
+            imgs.append(page.get_pixmap(matrix=mat).tobytes("png"))
+    finally:
+        doc.close()
+    return imgs
+
+
 async def estrai_dati_visura(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
-    """Restituisce dict con i campi estratti dalla visura camerale."""
+    """Restituisce dict con i campi estratti dalla visura camerale.
+
+    Se il file è un PDF multi-pagina viene convertito in un'immagine per pagina
+    (soci/quote e amministratori sono spesso nelle pagine interne): inviare solo
+    la prima pagina farebbe perdere questi dati.
+    """
     key = os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("GEMINI_API_KEY")
     if not key:
         raise RuntimeError("Nessuna chiave LLM configurata (EMERGENT_LLM_KEY o GEMINI_API_KEY)")
 
-    b64 = base64.b64encode(image_bytes).decode("ascii")
-    image_content = ImageContent(image_base64=b64)
+    is_pdf = (mime_type or "").lower().endswith("pdf") or image_bytes[:4] == b"%PDF"
+    page_images: list[bytes] = []
+    if is_pdf:
+        try:
+            page_images = _pdf_to_images(image_bytes)
+        except Exception:
+            page_images = []
+    if not page_images:
+        page_images = [image_bytes]  # immagine singola o fallback
+
+    image_contents = [ImageContent(image_base64=base64.b64encode(p).decode("ascii")) for p in page_images]
 
     chat = LlmChat(
         api_key=key,
@@ -91,7 +124,7 @@ async def estrai_dati_visura(image_bytes: bytes, mime_type: str = "image/jpeg") 
         system_message="Estrai dati strutturati da visure camerali italiane.",
     ).with_model("gemini", "gemini-3-flash-preview").with_json()
 
-    msg = UserMessage(text=PROMPT, file_contents=[image_content])
+    msg = UserMessage(text=PROMPT, file_contents=image_contents)
     response_text = ""
     try:
         async for ev in chat.stream_message(msg):

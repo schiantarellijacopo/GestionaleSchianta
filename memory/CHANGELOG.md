@@ -770,3 +770,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - ocr_visura.py: prompt soci aggiornato → estrae SEMPRE tutti i soci (accomandatari + accomandanti) con codice fiscale, nuovo campo quota_valore (euro) oltre a quota_percentuale; abbinamento quota↔socio tramite CF.
 - extras_p1p2.py applica-visura: _num robusto per formato italiano (6.000,00); calcolo percentuale = quota_valore / capitale_sociale * 100 (fallback: somma quote). company.soci ora include quota (%) e quota_valore.
 - Testato e2e: Vanoli 6.000 → 60%, Schiantarelli 4.000 → 40% su capitale 10.000. Il grafico e la tabella già usano company.soci. NB: ricaricare la visura in Salute Fiscale per aggiornare i soci esistenti.
+
+## 2026-06 — Visura OCR multi-pagina (fix soci mancanti/quote)
+- Causa reale del "1 solo socio senza quote": ocr_visura inviava il PDF a Gemini come IMMAGINE SINGOLA → veniva letta solo la prima pagina. I soci accomandanti e le quote (euro) sono nelle pagine 3-4 della visura, quindi persi; inoltre alcuni PDF davano errore Gemini "Unable to process input image".
+- Fix: aggiunta _pdf_to_images() (PyMuPDF) che converte il PDF in un PNG per pagina (max 12, zoom 2x); estrai_dati_visura invia TUTTE le pagine come lista di ImageContent.
+- Testato sul PDF reale: estratti Vanoli (quota_valore 6000) + Schiantarelli (4000) + capitale 10.000,00 + 1 amministratore. applica-visura calcola 60%/40%.
+- CAVEAT: "Aggiorna dati" (OpenAPI LIVE) può sovrascrivere openapi_data.company.soci con i dati OpenAPI (che per questa SAS hanno 1 solo socio). Dopo aver caricato la visura NON premere Aggiorna dati, oppure proteggere i soci visura (next action).
