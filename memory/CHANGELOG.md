@@ -761,3 +761,6 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - AnagraficaDetail.jsx: la card documenti ora usa il componente condiviso (rimpiazzato il dialog inline).
 - DocumentiSezioneSplit.jsx (allegati di polizze, sinistri, titoli, libro matricola): sostituito il link <a> con AllegatoFileLink → nome cliccabile apre l'anteprima + pulsanti Anteprima/Scarica. URL allegato reso con ?token= per l'iframe; download via blob (porta l'auth).
 - Testato: endpoint /allegati/{id}/download?token= → 200 PDF (su allegato con agenzia_tenant_id corretto); UI anteprima con zoom 120% e rotazione verificata. NB: 57 allegati polizza/sinistro nel tenant c5ae2d0e hanno agenzia_tenant_id='tenant-principale-schiantarelli' (disallineati) e non sono visibili a quel tenant — dato preesistente da sistemare a parte.
+
+## 2026-06 — Card documenti anagrafica: Anteprima/Scarica spostati in alto a destra
+- AnagraficaDetail.jsx: i pulsanti Anteprima/Scarica ora sono nella riga in alto a destra della card (accanto a RichiediDocCard, sotto il badge "caricato"), sempre visibili quando il documento esiste anche a card chiusa. Rimossi dal corpo espanso. Testato via screenshot.

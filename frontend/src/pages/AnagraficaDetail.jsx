@@ -2515,26 +2515,30 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                                     <span className={`text-slate-400 transition-transform ${cOpen ? "rotate-180" : ""}`}>▾</span>
                                 </div>
                             </button>
-                            {canEdit && (
-                                <div className="flex justify-end -mt-1 mb-1">
-                                    <RichiediDocCard entita_tipo="anagrafica" entita_id={anagrafica_id}
-                                        categoria={dt.key} label={dt.label} anagrafica={ana} variant="icon" />
+                            {(doc || canEdit) && (
+                                <div className="flex justify-end items-center gap-1.5 -mt-1 mb-1 flex-wrap">
+                                    {doc && (
+                                        <>
+                                            <button onClick={() => setAnteprimaDoc({ tipo: dt.key, nome_file: doc.nome_file, isPdf: isPdfDoc(doc), isImage: isImageDoc(doc) })}
+                                                className="text-[11px] px-2 py-1 rounded border border-sky-300 text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1" data-testid={`doc-preview-${dt.key}`}>
+                                                <Eye size={11} /> Anteprima
+                                            </button>
+                                            <button onClick={() => scaricaDoc(dt.key, doc.nome_file)}
+                                                className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1" data-testid={`doc-download-${dt.key}`}>
+                                                <Download size={11} /> Scarica
+                                            </button>
+                                        </>
+                                    )}
+                                    {canEdit && (
+                                        <RichiediDocCard entita_tipo="anagrafica" entita_id={anagrafica_id}
+                                            categoria={dt.key} label={dt.label} anagrafica={ana} variant="icon" />
+                                    )}
                                 </div>
                             )}
                             {cOpen && (doc ? (
                                 <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
                                     <div className="flex items-center gap-2 flex-wrap">
                                         <span className="text-slate-700 break-all" data-testid={`doc-card-name-${dt.key}`}>📎 {doc.nome_file}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                        <button onClick={() => setAnteprimaDoc({ tipo: dt.key, nome_file: doc.nome_file, isPdf: isPdfDoc(doc), isImage: isImageDoc(doc) })}
-                                            className="text-[11px] px-2 py-1 rounded border border-sky-300 text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1" data-testid={`doc-preview-${dt.key}`}>
-                                            <Eye size={11} /> Anteprima
-                                        </button>
-                                        <button onClick={() => scaricaDoc(dt.key, doc.nome_file)}
-                                            className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1" data-testid={`doc-download-${dt.key}`}>
-                                            <Download size={11} /> Scarica
-                                        </button>
                                     </div>
                                     <div className="text-slate-500">
                                         {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}
