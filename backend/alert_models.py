@@ -91,6 +91,7 @@ class AlertRule(BaseDoc):
     attivo: bool = False
     # statistiche
     last_run_at: Optional[str] = None
+    last_run_date: Optional[str] = None   # idempotenza giornaliera per regola
     last_event_at: Optional[str] = None
     invii_totali: int = 0
     errori_totali: int = 0

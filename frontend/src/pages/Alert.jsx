@@ -247,6 +247,11 @@ export default function Alert() {
                                                     </span>
                                                     <h3 className="font-semibold text-slate-800">{r.nome}</h3>
                                                     {r.is_preset && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">preset</span>}
+                                                    {(r.tipo === "schedule" || r.tipo === "soglia") && (
+                                                        <span className="inline-flex items-center gap-1 text-[10px] text-sky-700 bg-sky-50 border border-sky-200 px-1.5 py-0.5 rounded" data-testid={`rule-when-${r.preset_key || r.id}`}>
+                                                            <Calendar size={10} /> {cronLabel(r.cron)}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 {r.descrizione && <p className="text-sm text-slate-600 mt-1">{r.descrizione}</p>}
                                                 <div className="flex items-center gap-3 mt-2 flex-wrap">
@@ -410,7 +415,7 @@ function SchedulerConfigCard() {
                 </div>
             </div>
             <div className="text-[11px] text-slate-500 mt-2">
-                I messaggi vengono inviati al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
+                È l&apos;<strong>orario predefinito</strong>: le regole che non hanno un orario proprio partono a quest&apos;ora. Ogni regola può avere il <strong>suo orario</strong> (aprila e imposta «Quando eseguire»). I messaggi vanno al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
             </div>
         </Card>
     );
@@ -798,13 +803,50 @@ const SCHEDULE_LABELS = {
     "arretrati_settimanali": "Digest arretrati settimanali",
     "polizza_in_scadenza": "Polizza in scadenza",
 };
-const CRON_PRESETS = [
-    { v: "0 8 * * *",  label: "Ogni giorno alle 08:00" },
-    { v: "0 9 * * *",  label: "Ogni giorno alle 09:00" },
-    { v: "0 8 * * 1",  label: "Ogni lunedì alle 08:00" },
-    { v: "0 8 * * 5",  label: "Ogni venerdì alle 08:00" },
-    { v: "0 8 1 * *",  label: "Il 1° del mese alle 08:00" },
+const WEEKDAYS = [
+    { v: "1", label: "Lunedì" },
+    { v: "2", label: "Martedì" },
+    { v: "3", label: "Mercoledì" },
+    { v: "4", label: "Giovedì" },
+    { v: "5", label: "Venerdì" },
+    { v: "6", label: "Sabato" },
+    { v: "0", label: "Domenica" },
 ];
+
+// cron "min ora dom mese dow" → editor {freq, time, dow, dom}
+function parseCron(cron) {
+    const def = { freq: "daily", time: "08:00", dow: "1", dom: "1" };
+    if (!cron || typeof cron !== "string") return def;
+    const p = cron.trim().split(/\s+/);
+    if (p.length !== 5) return def;
+    const [mi, ho, dm, , dw] = p;
+    const hh = String(parseInt(ho, 10) || 0).padStart(2, "0");
+    const mm = String(parseInt(mi, 10) || 0).padStart(2, "0");
+    const time = `${hh}:${mm}`;
+    if (dw !== "*") return { ...def, freq: "weekly", time, dow: dw.split(",")[0] };
+    if (dm !== "*") return { ...def, freq: "monthly", time, dom: dm };
+    return { ...def, freq: "daily", time };
+}
+
+function buildCron({ freq, time, dow, dom }) {
+    const [hh, mm] = (time || "08:00").split(":");
+    const h = parseInt(hh, 10) || 0;
+    const m = parseInt(mm, 10) || 0;
+    if (freq === "weekly") return `${m} ${h} * * ${dow || "1"}`;
+    if (freq === "monthly") return `${m} ${h} ${dom || "1"} * *`;
+    return `${m} ${h} * * *`;
+}
+
+function cronLabel(cron) {
+    if (!cron) return "Orario globale";
+    const s = parseCron(cron);
+    if (s.freq === "weekly") {
+        const d = WEEKDAYS.find((w) => w.v === s.dow);
+        return `Ogni ${d ? d.label.toLowerCase() : "settimana"} alle ${s.time}`;
+    }
+    if (s.freq === "monthly") return `Il giorno ${s.dom} del mese alle ${s.time}`;
+    return `Ogni giorno alle ${s.time}`;
+}
 
 
 function CatalogDialog({ onClose }) {
@@ -863,6 +905,8 @@ function CatalogDialog({ onClose }) {
 function RuleEditor({ rule, onClose }) {
     const isNew = !rule.id;
     const [f, setF] = useState({ ...rule });
+    const [sched, setSched] = useState(() => parseCron(rule.cron));
+    const [customTime, setCustomTime] = useState(() => !!(rule.cron && String(rule.cron).trim()));
     const [collaboratori, setCollaboratori] = useState([]);
     const [modelliLibreria, setModelliLibreria] = useState([]);
     useEffect(() => {
@@ -880,6 +924,20 @@ function RuleEditor({ rule, onClose }) {
         }).catch(() => {});
     }, []);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const updateSched = (patch) => {
+        const next = { ...sched, ...patch };
+        setSched(next);
+        set("cron", buildCron(next));
+    };
+    const setUseGlobalTime = (useGlobal) => {
+        if (useGlobal) {
+            setCustomTime(false);
+            set("cron", null);
+        } else {
+            setCustomTime(true);
+            set("cron", buildCron(sched));
+        }
+    };
     const toggleCanale = (c) => {
         const cur = f.canali || [];
         set("canali", cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]);
@@ -968,7 +1026,7 @@ function RuleEditor({ rule, onClose }) {
                     )}
 
                     {(f.tipo === "schedule" || f.tipo === "soglia") && (
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-3">
                             <div>
                                 <Label>Tipo schedule</Label>
                                 <Select value={f.schedule_kind || ""} onValueChange={(v) => set("schedule_kind", v)}>
@@ -980,16 +1038,70 @@ function RuleEditor({ rule, onClose }) {
                                     </SelectContent>
                                 </Select>
                             </div>
-                            <div>
-                                <Label>Frequenza (cron)</Label>
-                                <Select value={f.cron || ""} onValueChange={(v) => set("cron", v)}>
-                                    <SelectTrigger data-testid="rule-cron"><SelectValue placeholder="Quando..." /></SelectTrigger>
-                                    <SelectContent>
-                                        {CRON_PRESETS.map((p) => (
-                                            <SelectItem key={p.v} value={p.v}>{p.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+
+                            <div className="border border-sky-200 bg-sky-50/50 rounded-md p-3">
+                                <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <Label className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+                                        <Calendar size={14} className="text-sky-700" /> Quando eseguire
+                                    </Label>
+                                    <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer" data-testid="rule-use-global-time">
+                                        <input
+                                            type="checkbox"
+                                            checked={!customTime}
+                                            onChange={(e) => setUseGlobalTime(e.target.checked)}
+                                            className="w-3.5 h-3.5 accent-sky-600 cursor-pointer"
+                                        />
+                                        Usa l&apos;orario globale «Avvisi programmati»
+                                    </label>
+                                </div>
+
+                                {!customTime ? (
+                                    <p className="text-[11px] text-slate-500 mt-2" data-testid="rule-time-global-hint">
+                                        Questa regola parte all&apos;orario impostato in alto nel riquadro
+                                        <strong> «Avvisi programmati»</strong>, insieme alle altre regole senza orario proprio.
+                                    </p>
+                                ) : (
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+                                        <div>
+                                            <Label className="text-xs">Ripeti</Label>
+                                            <Select value={sched.freq} onValueChange={(v) => updateSched({ freq: v })}>
+                                                <SelectTrigger data-testid="rule-cron-freq"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="daily">Ogni giorno</SelectItem>
+                                                    <SelectItem value="weekly">Ogni settimana</SelectItem>
+                                                    <SelectItem value="monthly">Ogni mese</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        {sched.freq === "weekly" && (
+                                            <div>
+                                                <Label className="text-xs">Giorno</Label>
+                                                <Select value={sched.dow} onValueChange={(v) => updateSched({ dow: v })}>
+                                                    <SelectTrigger data-testid="rule-cron-dow"><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {WEEKDAYS.map((w) => (
+                                                            <SelectItem key={w.v} value={w.v}>{w.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+                                        {sched.freq === "monthly" && (
+                                            <div>
+                                                <Label className="text-xs">Giorno del mese</Label>
+                                                <Input type="number" min={1} max={28} value={sched.dom}
+                                                    onChange={(e) => updateSched({ dom: e.target.value })}
+                                                    data-testid="rule-cron-dom" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <Label className="text-xs">Alle ore</Label>
+                                            <Input type="time" value={sched.time}
+                                                onChange={(e) => updateSched({ time: e.target.value })}
+                                                data-testid="rule-cron-time" />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     )}

@@ -89,6 +89,10 @@ async def update_alert_rule(
     user: dict = Depends(require_user("admin")),
 ) -> dict:
     upd = {k: v for k, v in body.model_dump(exclude_none=True).items()}
+    # Consenti l'azzeramento ESPLICITO del cron (ritorno all'orario globale)
+    sent = body.model_dump(exclude_unset=True)
+    if "cron" in sent:
+        upd["cron"] = sent["cron"]
     if not upd:
         raise HTTPException(400, "Nessun campo da aggiornare")
     upd["updated_at"] = _now_iso()

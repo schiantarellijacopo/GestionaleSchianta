@@ -332,7 +332,75 @@ async def esegui_schedule_tenant(tenant_id: str, *, only_rule_id: Optional[str] 
 
 
 # ---------------------------------------------------------------------------
-# Scheduler tick (multi-tenant, orario configurabile per agenzia)
+# Cron matcher (sottoinsieme: minuto ora giorno-mese mese giorno-settimana)
+# Supporta: "*", numeri singoli, liste "1,3,5", range "1-5", step "*/2".
+# giorno-settimana in formato cron: 0 e 7 = Domenica, 1 = Lunedì … 6 = Sabato.
+# ---------------------------------------------------------------------------
+def _expand_field(field: str, lo: int, hi: int) -> set[int]:
+    vals: set[int] = set()
+    for raw in str(field).split(","):
+        part = raw.strip()
+        if not part:
+            continue
+        step = 1
+        if "/" in part:
+            part, step_s = part.split("/", 1)
+            try:
+                step = max(1, int(step_s))
+            except ValueError:
+                step = 1
+        if part in ("*", ""):
+            start, end = lo, hi
+        elif "-" in part:
+            a, b = part.split("-", 1)
+            start, end = int(a), int(b)
+        else:
+            vals.add(int(part))
+            continue
+        for v in range(start, end + 1):
+            if (v - start) % step == 0:
+                vals.add(v)
+    return vals
+
+
+def _cron_due(cron: str, now: datetime, tick_minutes: int) -> bool:
+    """True se `cron` deve scattare nella finestra [ora, ora+tick) di `now`."""
+    try:
+        parts = str(cron).split()
+        if len(parts) != 5:
+            return False
+        minute, hour, dom, month, dow = parts
+        if now.month not in _expand_field(month, 1, 12):
+            return False
+        cron_dow = now.isoweekday() % 7  # Lun=1 … Sab=6, Dom=0
+        dom_restricted = dom.strip() != "*"
+        dow_restricted = dow.strip() != "*"
+        dow_set = _expand_field(dow, 0, 7)
+        dow_match = cron_dow in dow_set or (cron_dow == 0 and 7 in dow_set)
+        dom_match = now.day in _expand_field(dom, 1, 31)
+        if dom_restricted and dow_restricted:
+            day_ok = dom_match or dow_match
+        elif dom_restricted:
+            day_ok = dom_match
+        elif dow_restricted:
+            day_ok = dow_match
+        else:
+            day_ok = True
+        if not day_ok:
+            return False
+        now_min = now.hour * 60 + now.minute
+        for h in _expand_field(hour, 0, 23):
+            for m in _expand_field(minute, 0, 59):
+                target = h * 60 + m
+                if target <= now_min < target + tick_minutes:
+                    return True
+        return False
+    except (ValueError, TypeError):
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Scheduler tick (multi-tenant, orario PER REGOLA con fallback globale)
 # ---------------------------------------------------------------------------
 async def _tenant_alert_config(raw_db: AsyncIOMotorDatabase, tenant_id: str) -> dict:
     cfg = await raw_db.azienda_config.find_one({"agenzia_tenant_id": tenant_id}, {"_id": 0})
@@ -348,7 +416,6 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
     except Exception:
         tz = timezone.utc
     now = datetime.now(tz)
-    now_min = now.hour * 60 + now.minute
     today = now.date().isoformat()
 
     async for t in raw_db.tenants.find({"attivo": True}, {"_id": 0, "id": 1}):
@@ -357,22 +424,38 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
             continue
         try:
             cfg = await _tenant_alert_config(raw_db, tid)
+            # Interruttore generale (se spento → nessun avviso programmato parte)
             if not cfg.get("alert_scheduler_attivo", True):
                 continue
-            target = int(cfg.get("alert_scheduler_hour", 8)) * 60 + int(cfg.get("alert_scheduler_minute", 0))
-            if not (target <= now_min < target + _TICK_MINUTES):
-                continue
-            state = await raw_db.alert_scheduler_state.find_one({"tenant_id": tid}, {"_id": 0})
-            if state and state.get("last_run_date") == today:
-                continue
-            await raw_db.alert_scheduler_state.update_one(
-                {"tenant_id": tid},
-                {"$set": {"tenant_id": tid, "last_run_date": today, "last_run_at": now.isoformat()}},
-                upsert=True,
-            )
-            res = await esegui_schedule_tenant(tid)
-            logger.info("Avvisi programmati tenant %s: %s inviati, %s errori",
-                        tid, res["sent"], res["errors"])
+            # Orario globale usato come DEFAULT per le regole senza cron proprio
+            g_hour = int(cfg.get("alert_scheduler_hour", 8))
+            g_min = int(cfg.get("alert_scheduler_minute", 0))
+            fallback_cron = f"{g_min} {g_hour} * * *"
+
+            user = {"id": "scheduler", "role": "admin",
+                    "agenzia_tenant_id": tid, "is_super_admin": False}
+            token = set_current_user(user)
+            try:
+                rules = await db.alert_rules.find(
+                    {"attivo": True, "tipo": {"$in": ["schedule", "soglia"]}}, {"_id": 0},
+                ).to_list(500)
+                for rule in rules:
+                    cron = (rule.get("cron") or "").strip() or fallback_cron
+                    if not _cron_due(cron, now, _TICK_MINUTES):
+                        continue
+                    # Idempotenza PER REGOLA: una sola esecuzione al giorno
+                    if rule.get("last_run_date") == today:
+                        continue
+                    await db.alert_rules.update_one(
+                        {"id": rule["id"]}, {"$set": {"last_run_date": today}})
+                    try:
+                        res = await _esegui_rule(rule)
+                        logger.info("Avviso programmato '%s' tenant %s: %s inviati, %s errori",
+                                    rule.get("nome"), tid, res["sent"], res["errors"])
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Errore esecuzione regola %s", rule.get("id"))
+            finally:
+                reset_current_user(token)
         except Exception:  # noqa: BLE001
             logger.exception("Errore tick avvisi programmati tenant %s", tid)
 

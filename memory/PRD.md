@@ -391,3 +391,11 @@ NOTA: effettivo in PRODUZIONE solo dopo deploy/publish. In produzione il tenant 
 - **Colonna Operatore** in lista: mostra proprietario + indicatore "condivisa · N".
 - File: `backend/routes/commerciale.py`, `backend/server.py` (pipeline_move + pipeline_data trattative), `frontend/src/pages/Trattative.jsx`.
 - **Verifica end-to-end (preview)**: admin own=13 vs tutti=14 (1 altrui nascosta); condivisione con collaboratore → appare nella sua lista (0→1), può modificarla e spostarla di stato; 403 su trattativa altrui non condivisa; operatori, delete, documenti card e toggle "Vedi tutte" OK. Account test invariati (admin@assicura.it/Admin123!, collaboratore@assicura.it/Collab123!).
+
+## [2026-11-06] Alert & Automazioni — orario PER REGOLA
+- **Problema**: la "Frequenza (cron)" per regola veniva salvata ma IGNORATA dal motore; tutte le regole schedule/soglia partivano all'unico orario globale "Avvisi programmati". Confusione utente su quale orario contasse.
+- **Scelta utente**: orario personalizzato per ogni template (il motore lo rispetta davvero).
+- **Backend** (`scheduler_alert.py`): aggiunto matcher cron (`_expand_field`, `_cron_due`, sottoinsieme min/ora/dom/mese/dow con *, liste, range, step; dow 0/7=Domenica). `_tick` ora valuta il cron DI OGNI regola; fallback all'orario globale per regole senza cron; interruttore generale `alert_scheduler_attivo` rispettato; idempotenza giornaliera per regola via `last_run_date` (nuovo campo in `AlertRule`).
+- **Backend** (`routes/alert.py`): PUT consente l'azzeramento esplicito di `cron` (ritorno all'orario globale) tramite `exclude_unset`.
+- **Frontend** (`Alert.jsx`): sostituito il dropdown cron a valori fissi con editor "Quando eseguire" = checkbox "Usa l'orario globale" + Ripeti (ogni giorno/settimana/mese) + giorno settimana/mese + orario libero (`type=time`). Helper `parseCron`/`buildCron`/`cronLabel`. Badge con l'orario della regola nella lista. Testo card globale aggiornato ("orario predefinito").
+- **Test**: unit test `_cron_due` (daily/weekly/monthly/domenica/fuori finestra) OK; round-trip API set/clear cron OK; screenshot editor + lista OK.
