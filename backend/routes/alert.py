@@ -233,6 +233,117 @@ async def set_scheduler_config(body: SchedulerConfigBody, user: dict = Depends(r
     return await get_scheduler_config(user)
 
 
+@router.get("/alert-diagnostica")
+async def alert_diagnostica(cognome: Optional[str] = None,
+                            user: dict = Depends(require_user("admin"))) -> dict:
+    """Diagnostica SOLA LETTURA dello stato avvisi del tenant corrente.
+    Pensata per essere aperta direttamente in produzione per capire
+    perché un avviso non parte. Non invia nulla.
+    """
+    from datetime import datetime, timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    now_utc = datetime.now(_tz.utc)
+    now_rome = now_utc.astimezone(ZoneInfo("Europe/Rome"))
+
+    cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    scheduler_attivo = bool(cfg.get("alert_scheduler_attivo", True))
+
+    # Regole
+    regole = await db.alert_rules.find({}, {"_id": 0}).to_list(length=1000)
+    attive = [r for r in regole if r.get("attivo")]
+    schedule_attive = [r for r in attive if r.get("tipo") in ("schedule", "soglia")]
+    doc_id_rules = [r for r in regole if r.get("schedule_kind") == "documento_id_scaduto"]
+
+    def _rule_brief(r: dict) -> dict:
+        return {
+            "nome": r.get("nome"), "tipo": r.get("tipo"),
+            "schedule_kind": r.get("schedule_kind"),
+            "attivo": bool(r.get("attivo")),
+            "cron": r.get("cron") or "orario globale",
+            "soglia_giorni": r.get("soglia_giorni"),
+            "canali": r.get("canali"),
+            "destinatari": r.get("destinatari"),
+            "ultimo_invio": r.get("last_run_date"),
+            "invii_totali": r.get("invii_totali", 0),
+            "errori_totali": r.get("errori_totali", 0),
+        }
+
+    # Provider
+    prov_email = await db.alert_providers.find_one({"tipo": "email", "enabled": True}, {"_id": 0})
+    prov_sms = await db.alert_providers.find_one({"tipo": "sms", "enabled": True}, {"_id": 0})
+    prov_wa = await db.alert_providers.find_one({"tipo": "whatsapp", "enabled": True}, {"_id": 0})
+    import os as _os
+    email_ok = bool(prov_email) or bool(_os.environ.get("SMTP_HOST"))
+
+    # Istanze WhatsApp connesse
+    wa_total = await db.whatsapp_instances.count_documents({})
+    wa_open = await db.whatsapp_instances.count_documents({"state": {"$in": ["open", "connected"]}})
+
+    # Lookup cliente per cognome (opzionale)
+    cliente_info = None
+    if cognome:
+        import re as _re
+        rx = _re.compile(_re.escape(cognome.strip()), _re.IGNORECASE)
+        ana = await db.anagrafiche.find_one(
+            {"$or": [{"cognome": rx}, {"ragione_sociale": rx}, {"nome": rx}]},
+            {"_id": 0, "nome": 1, "cognome": 1, "ragione_sociale": 1, "email": 1,
+             "cellulare": 1, "whatsapp": 1, "ci_data_scadenza": 1, "numero_documento": 1,
+             "canale_email": 1, "canale_whatsapp": 1, "canale_sms": 1},
+        )
+        if ana:
+            cliente_info = {
+                "nominativo": ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip(),
+                "email": ana.get("email"),
+                "cellulare": ana.get("cellulare") or ana.get("whatsapp"),
+                "ci_data_scadenza": ana.get("ci_data_scadenza"),
+                "numero_documento": ana.get("numero_documento"),
+                "canale_email": ana.get("canale_email"),
+                "canale_whatsapp": ana.get("canale_whatsapp"),
+                "canale_sms": ana.get("canale_sms"),
+                "ci_data_presente": bool(ana.get("ci_data_scadenza")),
+            }
+        else:
+            cliente_info = {"errore": f"Nessun cliente trovato per «{cognome}»"}
+
+    # Problemi rilevati (checklist leggibile)
+    problemi = []
+    if not scheduler_attivo:
+        problemi.append("Scheduler SOSPESO: nessun invio automatico partirà finché non lo attivi.")
+    if not schedule_attive:
+        problemi.append("Nessuna regola programmata ATTIVA: attiva almeno una regola.")
+    if not doc_id_rules:
+        problemi.append("Nessuna regola «Documento d'identità in scadenza»: importala dalla Galleria template e attivala.")
+    elif not any(r.get("attivo") for r in doc_id_rules):
+        problemi.append("La regola «Documento d'identità» esiste ma NON è attiva.")
+    if not email_ok:
+        problemi.append("Provider email non configurato: le email non partono.")
+    if wa_open == 0:
+        problemi.append("Nessuna istanza WhatsApp connessa: i messaggi WhatsApp verranno saltati.")
+
+    return {
+        "ora_server_utc": now_utc.isoformat(),
+        "ora_italia": now_rome.strftime("%A %d/%m/%Y %H:%M:%S"),
+        "fuso": "Europe/Rome",
+        "scheduler_attivo": scheduler_attivo,
+        "scheduler_orario_globale": f"{int(cfg.get('alert_scheduler_hour', 8)):02d}:{int(cfg.get('alert_scheduler_minute', 0)):02d} (ora italiana)",
+        "regole_totali": len(regole),
+        "regole_attive": len(attive),
+        "regole_programmate_attive": len(schedule_attive),
+        "regola_documento_identita": [_rule_brief(r) for r in doc_id_rules],
+        "regole_attive_dettaglio": [_rule_brief(r) for r in schedule_attive],
+        "provider_email_ok": email_ok,
+        "provider_sms_ok": bool(prov_sms),
+        "provider_whatsapp_ok": bool(prov_wa),
+        "whatsapp_istanze_totali": wa_total,
+        "whatsapp_istanze_connesse": wa_open,
+        "cliente": cliente_info,
+        "problemi_rilevati": problemi,
+        "tutto_ok": len(problemi) == 0,
+    }
+
+
+
 @router.post("/alert-rules/{rid}/run-now")
 async def run_schedule_now(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
     """Esegue SUBITO una regola schedule/soglia (invia realmente ai destinatari)."""

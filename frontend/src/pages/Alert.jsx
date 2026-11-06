@@ -206,6 +206,7 @@ export default function Alert() {
                 <>
                     <SchedulerConfigCard />
                     <CoperturaAutoCard />
+                    <DiagnosticaCard />
                     {/* Toolbar: filtro tipo + actions */}
                     <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
                         <div className="flex gap-2">
@@ -427,6 +428,106 @@ function SchedulerConfigCard() {
         </Card>
     );
 }
+
+
+function DiagnosticaCard() {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [cognome, setCognome] = useState("");
+    const run = async () => {
+        setLoading(true);
+        try {
+            const r = await api.get("/alert-diagnostica", { params: cognome ? { cognome } : {} });
+            setData(r.data);
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore diagnostica");
+        } finally { setLoading(false); }
+    };
+    const Row = ({ label, ok, children }) => (
+        <div className="flex items-start gap-2 text-sm py-0.5">
+            {ok === true && <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 shrink-0" />}
+            {ok === false && <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" />}
+            {ok === undefined && <span className="w-[15px]" />}
+            <span className="text-slate-600">{label}</span>
+            <span className="font-medium text-slate-800 ml-auto text-right">{children}</span>
+        </div>
+    );
+    return (
+        <Card className="p-4 mb-4 border-slate-300" data-testid="diagnostica-card">
+            <div className="flex items-center gap-3 flex-wrap">
+                <Zap size={18} className="text-slate-700" />
+                <div>
+                    <div className="text-sm font-semibold text-slate-800">Diagnostica avvisi</div>
+                    <div className="text-[11px] text-slate-500">Controllo sola lettura: perché un avviso non parte? Aprilo qui in produzione.</div>
+                </div>
+                <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    <Input value={cognome} onChange={(e) => setCognome(e.target.value)}
+                        placeholder="Cerca cliente (cognome)…" className="w-56 h-9" data-testid="diag-cognome" />
+                    <Button size="sm" disabled={loading} onClick={run}
+                        className="bg-slate-800 hover:bg-slate-900" data-testid="diag-run">
+                        {loading ? "Controllo…" : "Esegui diagnostica"}
+                    </Button>
+                </div>
+            </div>
+
+            {data && (
+                <div className="mt-3 grid md:grid-cols-2 gap-4" data-testid="diag-result">
+                    <div className="space-y-0.5 border-r-0 md:border-r md:pr-4">
+                        <Row label="Ora in Italia (server)">{data.ora_italia}</Row>
+                        <Row label="Scheduler avvisi" ok={data.scheduler_attivo}>
+                            {data.scheduler_attivo ? "Attivo" : "SOSPESO"}
+                        </Row>
+                        <Row label="Orario globale">{data.scheduler_orario_globale}</Row>
+                        <Row label="Regole programmate attive" ok={data.regole_programmate_attive > 0}>
+                            {data.regole_programmate_attive} / {data.regole_totali}
+                        </Row>
+                        <Row label="Regola «Documento d'identità»" ok={data.regola_documento_identita.some((x) => x.attivo)}>
+                            {data.regola_documento_identita.length === 0 ? "assente"
+                                : (data.regola_documento_identita.some((x) => x.attivo) ? "attiva" : "non attiva")}
+                        </Row>
+                        <Row label="Provider email" ok={data.provider_email_ok}>
+                            {data.provider_email_ok ? "configurato" : "mancante"}
+                        </Row>
+                        <Row label="WhatsApp connesso" ok={data.whatsapp_istanze_connesse > 0}>
+                            {data.whatsapp_istanze_connesse} / {data.whatsapp_istanze_totali} istanze
+                        </Row>
+                    </div>
+                    <div className="space-y-2">
+                        {data.cliente && !data.cliente.errore && (
+                            <div className="text-sm bg-slate-50 border rounded p-2" data-testid="diag-cliente">
+                                <div className="font-semibold text-slate-800">{data.cliente.nominativo}</div>
+                                <Row label="Scadenza C.I." ok={data.cliente.ci_data_presente}>
+                                    {data.cliente.ci_data_scadenza || "— (campo vuoto!)"}
+                                </Row>
+                                <Row label="Email">{data.cliente.email || "—"}</Row>
+                                <Row label="Cellulare">{data.cliente.cellulare || "—"}</Row>
+                                <Row label="Canali abilitati">
+                                    {[data.cliente.canale_email && "Email", data.cliente.canale_whatsapp && "WhatsApp", data.cliente.canale_sms && "SMS"].filter(Boolean).join(", ") || "nessuno"}
+                                </Row>
+                            </div>
+                        )}
+                        {data.cliente?.errore && <div className="text-sm text-amber-700">{data.cliente.errore}</div>}
+                        {data.problemi_rilevati.length > 0 ? (
+                            <div className="text-sm bg-amber-50 border border-amber-200 rounded p-2">
+                                <div className="font-semibold text-amber-800 flex items-center gap-1 mb-1">
+                                    <AlertTriangle size={14} /> Problemi rilevati
+                                </div>
+                                <ul className="list-disc pl-5 text-amber-900 space-y-1">
+                                    {data.problemi_rilevati.map((p, i) => <li key={i}>{p}</li>)}
+                                </ul>
+                            </div>
+                        ) : (
+                            <div className="text-sm bg-emerald-50 border border-emerald-200 rounded p-2 text-emerald-800 flex items-center gap-1">
+                                <CheckCircle2 size={14} /> Tutto configurato correttamente.
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+        </Card>
+    );
+}
+
 
 
 function CoperturaAutoCard() {
