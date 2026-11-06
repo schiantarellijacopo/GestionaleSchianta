@@ -17,8 +17,10 @@ import ImmobiliSection from "@/components/ImmobiliSection";
 
 // ── Anteprima stampabile del bilancio riclassificato (3 / 5 anni) ──
 function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
+    const _HAS = ["ricavi", "valore_produzione", "totale_attivo", "patrimonio_netto", "utile_netto", "costi_personale", "ebitda", "totale_debiti"];
+    const hasData = (y) => _HAS.some((k) => y[k] != null && y[k] !== "");
     const years = [...(allYears || [])]
-        .filter((y) => y && y.anno != null)
+        .filter((y) => y && y.anno != null && hasData(y))
         .sort((a, b) => (b.anno || 0) - (a.anno || 0))
         .slice(0, nAnni);
     if (!years.length) return null;
@@ -476,7 +478,7 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                         </div>
                     </Card>
 
-                    <MargineContribuzione bil={bil} anagrafica_id={anagrafica_id} saved={ana?.salute_fiscale_scenari} onReload={onReload} />
+                    <MargineContribuzione bil={bil} anagrafica_id={anagrafica_id} saved={ana?.salute_fiscale_scenari} savedList={ana?.salute_fiscale_scenari_list} ragione={ana?.ragione_sociale} onReload={onReload} />
                     <StudioBilancio bil={bil} />
                 </>
             )}
@@ -514,7 +516,7 @@ const n = (v) => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
 const eur0 = (v) => (v == null ? "—" : Number(v).toLocaleString("it-IT", { maximumFractionDigits: 0, useGrouping: "always" }) + " €");
 
 // ── Margine di Contribuzione + Metriche di impatto (fermo attività) ──
-function MargineContribuzione({ bil, anagrafica_id, saved, onReload }) {
+function MargineContribuzione({ bil, anagrafica_id, saved, savedList, ragione, onReload }) {
     // righe: [chiave, label, segno(+/-), %nonAssicurataDefault, importoDaBilancio]
     const initRows = () => [
         { k: "ricavi", l: "Ricavi di vendita", seg: "+", pct: 100, imp: n(bil.valore_produzione) || n(bil.ricavi) },
@@ -532,22 +534,61 @@ function MargineContribuzione({ bil, anagrafica_id, saved, onReload }) {
     const [riskTol, setRiskTol] = useState(saved?.riskTol ?? 8000000);
     const [riskApp, setRiskApp] = useState(saved?.riskApp ?? 12000000);
     const [saving, setSaving] = useState(false);
+    // Gestione multi-scenario: lista salvata per cliente (ognuno con nome + anno)
+    const [scenari, setScenari] = useState(() => (Array.isArray(savedList) ? savedList : []));
+    const [curId, setCurId] = useState(null);
+    const [nome, setNome] = useState("Scenario 1");
+    const [anno, setAnno] = useState(bil.anno || new Date().getFullYear() - 1);
     // se non ci sono scenari salvati, ri-inizializza le righe quando cambiano i dati di bilancio
     useEffect(() => {
-        if (!saved?.rows?.length) setRows(initRows());
+        if (!saved?.rows?.length && !scenari.length) setRows(initRows());
         /* eslint-disable-next-line */
     }, [bil.valore_produzione, bil.rimanenze_totali, bil.costi_servizi]);
 
-    const salvaScenari = async () => {
+    const snapshot = () => ({ rows, giorni, gScen, riskTol, riskApp });
+    const loadScenario = (s) => {
+        if (!s) return;
+        setCurId(s.id); setNome(s.nome || "Scenario"); setAnno(s.anno || anno);
+        if (s.rows?.length) setRows(s.rows);
+        if (s.giorni != null) setGiorni(s.giorni);
+        if (s.gScen?.length === 4) setGScen(s.gScen);
+        if (s.riskTol != null) setRiskTol(s.riskTol);
+        if (s.riskApp != null) setRiskApp(s.riskApp);
+    };
+    const persistList = async (list, msg) => {
         setSaving(true);
         try {
-            await api.put(`/anagrafiche/${anagrafica_id}`, {
-                salute_fiscale_scenari: { rows, giorni, gScen, riskTol, riskApp },
-            });
-            toast.success("Scenari salvati per questo cliente");
+            await api.put(`/anagrafiche/${anagrafica_id}`, { salute_fiscale_scenari_list: list });
+            setScenari(list);
+            toast.success(msg || "Scenari salvati");
             onReload?.();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore salvataggio scenari"); }
         finally { setSaving(false); }
+    };
+    const salvaScenari = async () => {
+        const id = curId || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+        const entry = { id, nome: nome || `Scenario ${scenari.length + 1}`, anno, ...snapshot(), updated_at: new Date().toISOString() };
+        const exists = scenari.some((s) => s.id === id);
+        const list = exists ? scenari.map((s) => (s.id === id ? entry : s)) : [...scenari, entry];
+        setCurId(id);
+        await persistList(list, exists ? "Scenario aggiornato" : "Scenario salvato");
+    };
+    const nuovoScenario = () => {
+        setCurId(null); setNome(`Scenario ${scenari.length + 1}`);
+        setAnno(bil.anno || new Date().getFullYear() - 1); setRows(initRows());
+    };
+    const copiaScenario = async () => {
+        const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+        const entry = { id, nome: `${nome} (copia)`, anno, ...snapshot(), updated_at: new Date().toISOString() };
+        setCurId(id); setNome(entry.nome);
+        await persistList([...scenari, entry], "Scenario copiato");
+    };
+    const eliminaScenario = async () => {
+        if (!curId) { nuovoScenario(); return; }
+        if (!window.confirm("Eliminare questo scenario?")) return;
+        const list = scenari.filter((s) => s.id !== curId);
+        nuovoScenario();
+        await persistList(list, "Scenario eliminato");
     };
 
     const upd = (i, patch) => setRows((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -562,14 +603,39 @@ function MargineContribuzione({ bil, anagrafica_id, saved, onReload }) {
     const SCEN_COL = ["#10b981", "#eab308", "#f59e0b", "#ef4444"];
     const chartData = SCEN.map((s, i) => ({ name: s, impatto: Math.round(mdcGiorno * gScen[i]), giorni: gScen[i], fill: SCEN_COL[i] }));
 
+    const stampaScenario = () => {
+        const righe = rows.map((r) => `<tr><td>${r.l}</td><td class="r">${eur0(r.imp)}</td><td class="r">${r.pct}%</td><td class="r">${r.seg === "+" ? eur0(pesato(r)) : "-"}</td><td class="r">${r.seg === "-" ? eur0(pesato(r)) : "-"}</td></tr>`).join("");
+        const html = `<!doctype html><html lang="it"><head><meta charset="utf-8"><title>MDC ${nome} ${anno}</title>
+<style>body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1e293b;padding:28px 34px}h1{font-size:18px;margin:0}.sub{color:#64748b;font-size:12px;margin:2px 0 14px}table{width:100%;border-collapse:collapse;font-size:12px}th,td{padding:5px 9px;border-bottom:1px solid #e2e8f0}th{background:#f1f5f9;text-align:left;text-transform:uppercase;font-size:10px;color:#475569}td.r,th.r{text-align:right}.tot td{font-weight:700;border-top:2px solid #cbd5e1}.kpi{display:flex;gap:16px;margin-top:16px}.kpi div{background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px}.kpi b{display:block;font-size:16px;color:#0369a1}.btn{background:#0f172a;color:#fff;border:0;border-radius:6px;padding:9px 16px;font-size:13px;cursor:pointer;margin-top:16px}@media print{.btn{display:none}body{padding:0}}</style></head><body>
+<h1>Margine di Contribuzione — perdita in caso di fermo</h1>
+<div class="sub">${ragione || "Azienda"} · ${nome} · esercizio ${anno}</div>
+<table><thead><tr><th>Voci di bilancio</th><th class="r">Importo</th><th class="r">% non assic.</th><th class="r">Importo +</th><th class="r">Importo −</th></tr></thead>
+<tbody>${righe}<tr class="tot"><td>Totale importi</td><td></td><td></td><td class="r">${eur0(totPiu)}</td><td class="r">${eur0(totMeno)}</td></tr></tbody></table>
+<div class="kpi"><div>Margine di contribuzione<b>${eur0(mdc)}</b></div><div>% su ricavi<b>${pctRicavi.toFixed(1)} %</b></div><div>MDC giornaliero<b>${eur0(mdcGiorno)}</b></div><div>Giorni lavorativi/anno<b>${giorni}</b></div></div>
+<button class="btn" onclick="window.print()">🖨️ Stampa / Salva PDF</button></body></html>`;
+        const w = window.open("", "_blank");
+        if (!w) { toast.error("Abilita i popup per la stampa"); return; }
+        w.document.write(html); w.document.close();
+    };
+
     return (
         <>
         <Card className="p-4" data-testid="sf-mdc-card">
             <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <h4 className="font-semibold text-slate-800 text-sm">🧮 Margine di Contribuzione (perdita in caso di fermo)</h4>
-                <button onClick={salvaScenari} disabled={saving} className="text-xs px-3 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50" data-testid="sf-salva-scenari">
-                    {saving ? "Salvo…" : "💾 Salva scenari"}
-                </button>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                    <select value={curId || ""} onChange={(e) => e.target.value ? loadScenario(scenari.find((s) => s.id === e.target.value)) : nuovoScenario()}
+                        className="h-7 text-xs border border-slate-300 rounded px-2 bg-white" data-testid="mdc-scenario-select">
+                        <option value="">➕ Nuovo scenario</option>
+                        {scenari.map((s) => <option key={s.id} value={s.id}>{s.nome} · {s.anno}</option>)}
+                    </select>
+                    <Input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome scenario" className="h-7 w-32 text-xs" data-testid="mdc-scenario-nome" />
+                    <Input type="number" value={anno} onChange={(e) => setAnno(n(e.target.value))} className="h-7 w-20 text-xs" data-testid="mdc-scenario-anno" />
+                    <button onClick={salvaScenari} disabled={saving} className="text-xs px-2.5 py-1.5 rounded bg-slate-800 text-white hover:bg-slate-900 disabled:opacity-50" data-testid="sf-salva-scenari">{saving ? "Salvo…" : "💾 Salva"}</button>
+                    <button onClick={copiaScenario} disabled={saving} className="text-xs px-2.5 py-1.5 rounded border border-slate-300 text-slate-700 hover:bg-slate-100" data-testid="mdc-copia">📋 Copia</button>
+                    <button onClick={eliminaScenario} disabled={saving} className="text-xs px-2.5 py-1.5 rounded border border-rose-300 text-rose-700 hover:bg-rose-50" data-testid="mdc-elimina">🗑️ Elimina</button>
+                    <button onClick={stampaScenario} className="text-xs px-2.5 py-1.5 rounded border border-sky-300 text-sky-700 hover:bg-sky-50" data-testid="mdc-stampa">🖨️ Stampa</button>
+                </div>
             </div>
             <div className="overflow-x-auto">
             <table className="w-full text-xs">

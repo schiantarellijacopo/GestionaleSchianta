@@ -783,3 +783,14 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - report_azienda.py /report-azienda/riclassificato: accetta anni=1; se bilanci_riclassificati vuoto ricostruisce l'ultimo anno da bilancio_estratto; colonna Var nel PDF nascosta per anno singolo.
 - Testato: PDF anni 1/3/5 → 200 PDF valido anche da solo bilancio_estratto; UI verificata su AUTOTRASPORTI VIVIANI (riclass vuoto) → i 6 pulsanti compaiono.
 - NB: per il confronto reale 3/5 anni serve "Compila da OpenAPI" (recupera balanceSheets.all e salva i bilanci multi-anno).
+
+## 2026-06 — Riclassificato: esclusione anni senza dati (ultimi N disponibili)
+- Problema: la colonna dell'anno più recente (es. 2026, bilancio non ancora depositato) era tutta "n.d.".
+- Fix: sia buildRiclassHTML (SaluteFiscaleTab.jsx) sia _build_riclass_pdf/endpoint (report_azienda.py) filtrano gli anni tenendo solo quelli con dati (almeno uno tra ricavi/valore_produzione/totale_attivo/patrimonio_netto/utile_netto/costi_personale/ebitda/totale_debiti) PRIMA di prendere gli ultimi N. Così "3 anni" = ultimi 3 esercizi disponibili (es. 2025-2024-2023).
+- Testato: riclass con 2026 vuoto + 2025/2024/2023/2022 → "3 anni" mostra 2025-2024-2023; "5 anni" mostra 2025-2024-2023-2022.
+
+## 2026-06 — Margine di Contribuzione: scenari multipli per anno
+- MargineContribuzione (SaluteFiscaleTab.jsx): da un solo scenario a GESTIONE MULTI-SCENARIO salvati per cliente in anagrafiche.salute_fiscale_scenari_list (array {id, nome, anno, rows, giorni, gScen, riskTol, riskApp, updated_at}).
+- Barra scenari: selettore (+ Nuovo), nome, anno, pulsanti Salva (crea/aggiorna per id), Copia, Elimina, Stampa (apre finestra stampabile con tabella MDC + KPI). data-testid: mdc-scenario-select/nome/anno, sf-salva-scenari, mdc-copia/elimina/stampa.
+- Persistenza via PUT /anagrafiche/{id} (campo libero, già supportato). Testato: round-trip salute_fiscale_scenari_list 200 e riletto; UI verificata su AUTOTRASPORTI VIVIANI.
+- NB: resta aperta la richiesta "riclassificato con TUTTE le voci CEE di dettaglio" (schema completo OpenAPI) — grande, non ancora implementata.

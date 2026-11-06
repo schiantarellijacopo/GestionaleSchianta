@@ -229,10 +229,16 @@ def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
     H2 = ParagraphStyle("H2", parent=ss["Heading2"], fontSize=11.5, leading=14, textColor=navy, spaceBefore=12, spaceAfter=4)
     small = ParagraphStyle("s", parent=ss["BodyText"], fontSize=7, leading=9.5, textColor=colors.HexColor("#94a3b8"))
 
-    years = sorted([y for y in riclass if y.get("anno") is not None],
+    _HAS = ("ricavi", "valore_produzione", "totale_attivo", "patrimonio_netto",
+            "utile_netto", "costi_personale", "ebitda", "totale_debiti")
+
+    def _has_data(y):
+        return any(y.get(k) not in (None, "") for k in _HAS)
+
+    years = sorted([y for y in riclass if y.get("anno") is not None and _has_data(y)],
                    key=lambda x: x.get("anno") or 0, reverse=True)[:anni]
     if not years:
-        raise HTTPException(400, "Nessun esercizio disponibile")
+        raise HTTPException(400, "Nessun esercizio con dati disponibili")
 
     def fmt(v):
         x = _rnum(v)
