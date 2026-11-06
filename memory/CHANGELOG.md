@@ -776,3 +776,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fix: aggiunta _pdf_to_images() (PyMuPDF) che converte il PDF in un PNG per pagina (max 12, zoom 2x); estrai_dati_visura invia TUTTE le pagine come lista di ImageContent.
 - Testato sul PDF reale: estratti Vanoli (quota_valore 6000) + Schiantarelli (4000) + capitale 10.000,00 + 1 amministratore. applica-visura calcola 60%/40%.
 - CAVEAT: "Aggiorna dati" (OpenAPI LIVE) può sovrascrivere openapi_data.company.soci con i dati OpenAPI (che per questa SAS hanno 1 solo socio). Dopo aver caricato la visura NON premere Aggiorna dati, oppure proteggere i soci visura (next action).
+
+## 2026-06 — Bilancio riclassificato: sempre visibile + opzione "Ultimo anno"
+- Problema: i pulsanti del bilancio riclassificato comparivano SOLO se esisteva bilanci_riclassificati, assente nelle aziende elaborate prima della feature → utente non li trovava.
+- SaluteFiscaleTab.jsx: nuovo riclassEff = bilanci_riclassificati se presenti, altrimenti ricostruito dall'ultimo anno (bilancio_estratto). Pulsanti ora visibili con qualsiasi bilancio. Aggiunta opzione "Ultimo anno" (anni=1) oltre a 3 e 5, sia anteprima sia PDF. Gruppo etichettato "BILANCIO RICLASSIFICATO". buildRiclassHTML: colonna Var nascosta per anno singolo, titolo corretto.
+- report_azienda.py /report-azienda/riclassificato: accetta anni=1; se bilanci_riclassificati vuoto ricostruisce l'ultimo anno da bilancio_estratto; colonna Var nel PDF nascosta per anno singolo.
+- Testato: PDF anni 1/3/5 → 200 PDF valido anche da solo bilancio_estratto; UI verificata su AUTOTRASPORTI VIVIANI (riclass vuoto) → i 6 pulsanti compaiono.
+- NB: per il confronto reale 3/5 anni serve "Compila da OpenAPI" (recupera balanceSheets.all e salva i bilanci multi-anno).

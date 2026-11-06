@@ -136,14 +136,20 @@ async def report_docx(aid: str, gruppo: bool = False, user=Depends(current_user)
 async def report_riclassificato_pdf(aid: str, anni: int = 5, user=Depends(current_user)):
     """PDF del bilancio riclassificato (CE a valore aggiunto + SP finanziario)
     con comparazione sugli ultimi `anni` esercizi (3 o 5)."""
-    anni = 3 if anni <= 3 else 5
+    anni = 1 if anni <= 1 else (3 if anni <= 3 else 5)
     ana = await db.anagrafiche.find_one({"id": aid}, {"_id": 0})
     if not ana:
         raise HTTPException(404, "Anagrafica non trovata")
     sf = ana.get("salute_fiscale_dati") or {}
     riclass = sf.get("bilanci_riclassificati") or []
     if not riclass:
-        raise HTTPException(400, "Nessun bilancio riclassificato disponibile. Compila prima da OpenAPI.")
+        # fallback: ricostruisci l'ultimo anno dal bilancio estratto (OCR/OpenAPI)
+        bil = sf.get("bilancio_estratto") or {}
+        if bil and any(v is not None for k, v in bil.items()
+                       if k not in ("anno", "confidenza", "dimensione_impresa")):
+            riclass = [{**bil, "anno": bil.get("anno"), "completo": True}]
+    if not riclass:
+        raise HTTPException(400, "Nessun bilancio disponibile. Compila prima da OpenAPI o carica un bilancio.")
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     logo = await _logo_bytes()
     pdf = _build_riclass_pdf(ana, riclass, anni, sf.get("fonte"), az, logo)
@@ -241,11 +247,13 @@ def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
         return f"{'+' if p >= 0 else ''}{p:.1f}%", p
 
     ncol = len(years)
+    multi = ncol > 1
     anno_min, anno_max = years[-1]["anno"], years[0]["anno"]
 
     def build_table(rows):
-        header = ["Voce"] + [str(y["anno"]) for y in years] + [f"Var. {anno_min}\u2192{anno_max}"]
+        header = ["Voce"] + [str(y["anno"]) for y in years] + ([f"Var. {anno_min}\u2192{anno_max}"] if multi else [])
         data = [header]
+        ncols_tot = ncol + (1 if multi else 0)
         styles = [
             ("BACKGROUND", (0, 0), (-1, 0), navy),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -261,14 +269,18 @@ def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
         ri = 1
         for label, key, kind in rows:
             if kind == 2:
-                data.append([label] + [""] * (ncol + 1))
+                data.append([label] + [""] * ncols_tot)
                 styles.append(("SPAN", (0, ri), (-1, ri)))
                 styles.append(("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#0f766e")))
                 styles.append(("TEXTCOLOR", (0, ri), (-1, ri), colors.white))
                 styles.append(("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"))
             else:
-                vtxt, vp = var_pct(key)
-                data.append([label] + [fmt(_cell(y, key)) for y in years] + [vtxt])
+                row = [label] + [fmt(_cell(y, key)) for y in years]
+                vp = None
+                if multi:
+                    vtxt, vp = var_pct(key)
+                    row.append(vtxt)
+                data.append(row)
                 if kind == 1:
                     styles.append(("BACKGROUND", (0, ri), (-1, ri), colors.HexColor("#f1f5f9")))
                     styles.append(("FONTNAME", (0, ri), (-1, ri), "Helvetica-Bold"))
@@ -277,8 +289,9 @@ def _build_riclass_pdf(ana, riclass, anni, fonte, az, logo) -> bytes:
                                    colors.HexColor("#047857") if vp >= 0 else colors.HexColor("#be123c")))
             ri += 1
         voce_w = 7.2
-        col_w = (24.5 - voce_w - 3.0) / ncol
-        widths = [voce_w * cm] + [col_w * cm] * ncol + [3.0 * cm]
+        var_w = 3.0 if multi else 0.0
+        col_w = (24.5 - voce_w - var_w) / ncol
+        widths = [voce_w * cm] + [col_w * cm] * ncol + ([var_w * cm] if multi else [])
         t = Table(data, colWidths=widths, repeatRows=1)
         t.setStyle(TableStyle(styles))
         return t

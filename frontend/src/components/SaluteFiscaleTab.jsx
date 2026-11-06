@@ -67,7 +67,9 @@ function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
         ["\u2014 di cui Debiti verso fornitori", "debiti_fornitori", 0],
     ];
 
+    const multi = years.length > 1;
     const varPct = (key) => {
+        if (!multi) return "";
         const recente = cellVal(years[0], key);
         const vecchio = cellVal(years[years.length - 1], key);
         const a = num(recente), b = num(vecchio);
@@ -78,8 +80,9 @@ function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
     };
 
     const headCols = years.map((y) => `<th class="num">${y.anno}</th>`).join("");
+    const varHead = multi ? `<th class="num">Var. ${years[years.length - 1].anno}\u2192${years[0].anno}</th>` : "";
     const renderRows = (rows) => rows.map(([label, key, kind]) => {
-        if (kind === 2) return `<tr class="sez"><td colspan="${years.length + 2}">${label}</td></tr>`;
+        if (kind === 2) return `<tr class="sez"><td colspan="${years.length + (multi ? 2 : 1)}">${label}</td></tr>`;
         const cells = years.map((y) => `<td class="num">${fmt(cellVal(y, key))}</td>`).join("");
         return `<tr class="${kind === 1 ? "tot" : ""}"><td class="lbl">${label}</td>${cells}${varPct(key)}</tr>`;
     }).join("");
@@ -87,7 +90,7 @@ function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
     const titolo = azienda || "Azienda";
     const annoMin = years[years.length - 1].anno, annoMax = years[0].anno;
     return `<!doctype html><html lang="it"><head><meta charset="utf-8">
-<title>Bilancio riclassificato ${nAnni} anni \u2014 ${titolo}</title>
+<title>Bilancio riclassificato \u2014 ${titolo}</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1e293b; margin: 0; padding: 28px 34px; }
@@ -117,10 +120,10 @@ function buildRiclassHTML(allYears, nAnni, fonte, azienda) {
     <button class="btn" onclick="window.print()">\ud83d\udda8\ufe0f Stampa / Salva PDF</button>
   </div>
   <h2>Conto economico riclassificato (a valore aggiunto)</h2>
-  <table><thead><tr><th>Voce</th>${headCols}<th class="num">Var. ${annoMin}\u2192${annoMax}</th></tr></thead>
+  <table><thead><tr><th>Voce</th>${headCols}${varHead}</tr></thead>
   <tbody>${renderRows(ceRows)}</tbody></table>
   <h2>Stato patrimoniale riclassificato</h2>
-  <table><thead><tr><th>Voce</th>${headCols}<th class="num">Var. ${annoMin}\u2192${annoMax}</th></tr></thead>
+  <table><thead><tr><th>Voce</th>${headCols}${varHead}</tr></thead>
   <tbody>${renderRows(spRows)}</tbody></table>
   <div class="foot">Le voci non disponibili per gli esercizi precedenti all'ultimo bilancio depositato sono indicate con "n.d.". Documento generato automaticamente dal gestionale.</div>
 </body></html>`;
@@ -222,9 +225,18 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
     const crossSell = dati?.cross_sell_suggerito || [];
     const ramoColor = (s) => s == null ? "slate" : s <= 3 ? "emerald" : s <= 6 ? "amber" : "rose";
 
+    // Riclassificato effettivo: usa i bilanci multi-anno se presenti, altrimenti
+    // ricostruisce l'ultimo anno dal bilancio estratto (OCR o OpenAPI) così
+    // "ultimo anno" è SEMPRE disponibile anche senza lo storico OpenAPI.
+    const bilHasData = bil && Object.keys(bil).some(
+        (k) => !["anno", "confidenza", "dimensione_impresa"].includes(k) && bil[k] != null);
+    const riclassEff = riclass.length > 0
+        ? riclass
+        : (bilHasData ? [{ ...bil, anno: bil.anno, completo: true }] : []);
+
     const stampaRiclassificato = (nAnni) => {
-        const html = buildRiclassHTML(riclass, nAnni, dati?.fonte, ana?.ragione_sociale);
-        if (!html) { toast.error("Nessun bilancio disponibile. Premi prima \u26a1 Compila da OpenAPI."); return; }
+        const html = buildRiclassHTML(riclassEff, nAnni, dati?.fonte, ana?.ragione_sociale);
+        if (!html) { toast.error("Nessun bilancio disponibile. Premi prima \u26a1 Compila da OpenAPI o carica un bilancio."); return; }
         const w = window.open("", "_blank");
         if (!w) { toast.error("Abilita i popup per aprire l'anteprima di stampa"); return; }
         w.document.write(html);
@@ -287,23 +299,30 @@ export default function SaluteFiscaleTab({ anagrafica_id, ana, canEdit, onReload
                             {visuraBusy ? "Leggo visura…" : "Carica visura camerale"}
                             <input type="file" hidden accept="application/pdf,image/*" onChange={uploadVisura} />
                         </label>
-                        {riclass.length > 0 && (
-                            <div className="flex flex-col gap-1.5 items-end">
-                                <div className="flex gap-2">
+                        {riclassEff.length > 0 && (
+                            <div className="flex flex-col gap-1.5 items-end border-t border-emerald-200 pt-2 mt-1">
+                                <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Bilancio riclassificato</div>
+                                <div className="flex gap-2 flex-wrap justify-end">
+                                    <button onClick={() => stampaRiclassificato(1)}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500 text-white rounded text-xs hover:bg-amber-600"
+                                        data-testid="sf-riclass-1-btn"><Printer size={13} /> Ultimo anno</button>
                                     <button onClick={() => stampaRiclassificato(3)}
-                                        className="inline-flex items-center gap-2 px-3 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700"
-                                        data-testid="sf-riclass-3-btn"><Printer size={14} /> Anteprima 3 anni</button>
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-600 text-white rounded text-xs hover:bg-amber-700"
+                                        data-testid="sf-riclass-3-btn"><Printer size={13} /> 3 anni</button>
                                     <button onClick={() => stampaRiclassificato(5)}
-                                        className="inline-flex items-center gap-2 px-3 py-2 bg-amber-700 text-white rounded text-sm hover:bg-amber-800"
-                                        data-testid="sf-riclass-5-btn"><Printer size={14} /> Anteprima 5 anni</button>
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-700 text-white rounded text-xs hover:bg-amber-800"
+                                        data-testid="sf-riclass-5-btn"><Printer size={13} /> 5 anni</button>
                                 </div>
-                                <div className="flex gap-2">
+                                <div className="flex gap-2 flex-wrap justify-end">
+                                    <button onClick={() => scaricaRiclassPdf(1)}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-600 text-white rounded text-xs hover:bg-rose-700"
+                                        data-testid="sf-riclass-pdf-1-btn"><FileText size={13} /> PDF ultimo anno</button>
                                     <button onClick={() => scaricaRiclassPdf(3)}
-                                        className="inline-flex items-center gap-2 px-3 py-2 bg-rose-700 text-white rounded text-sm hover:bg-rose-800"
-                                        data-testid="sf-riclass-pdf-3-btn"><FileText size={14} /> PDF riclass. 3 anni</button>
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-700 text-white rounded text-xs hover:bg-rose-800"
+                                        data-testid="sf-riclass-pdf-3-btn"><FileText size={13} /> PDF 3 anni</button>
                                     <button onClick={() => scaricaRiclassPdf(5)}
-                                        className="inline-flex items-center gap-2 px-3 py-2 bg-rose-800 text-white rounded text-sm hover:bg-rose-900"
-                                        data-testid="sf-riclass-pdf-5-btn"><FileText size={14} /> PDF riclass. 5 anni</button>
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-800 text-white rounded text-xs hover:bg-rose-900"
+                                        data-testid="sf-riclass-pdf-5-btn"><FileText size={13} /> PDF 5 anni</button>
                                 </div>
                             </div>
                         )}
