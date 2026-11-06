@@ -57,7 +57,7 @@ import {
     ArrowLeft, GitBranch, UserPlus, ClipboardList, Calculator, BookText,
     Paperclip, MapPin, Plus, Upload, Phone, Mail, Calendar, FileText, Users,
     Pencil, Trash2, Briefcase, Link2, Copy, Send, MessageCircle, ArrowUp, ArrowDown, ChevronsUpDown, PenTool, AlertTriangle,
-    Receipt, Bell, UserCircle,
+    Receipt, Bell, UserCircle, Eye, Download,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -2318,6 +2318,7 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const [firmaCard, setFirmaCard] = useState(null); // {tipo, nome_file}
     const [firmaCanali, setFirmaCanali] = useState({ wa: true, email: true });
     const [firmaBusy, setFirmaBusy] = useState(false);
+    const [anteprimaDoc, setAnteprimaDoc] = useState(null); // {tipo, nome_file, isPdf, isImage}
 
     useEffect(() => {
         api.get("/config/card-visibilita")
@@ -2339,6 +2340,19 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
     const isPdfDoc = (d) => {
         const m = (d?.mime || d?.content_type || "").toLowerCase();
         return m.includes("pdf") || (d?.nome_file || "").toLowerCase().endsWith(".pdf");
+    };
+    const isImageDoc = (d) => {
+        const m = (d?.mime || d?.content_type || "").toLowerCase();
+        return m.startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif|bmp)$/i.test(d?.nome_file || "");
+    };
+    const docDownloadPath = (tipo) => `/api/anagrafiche/${anagrafica_id}/documenti/${tipo}/download`;
+    const scaricaDoc = async (tipo, nome_file) => {
+        try {
+            const r = await api.get(`/anagrafiche/${anagrafica_id}/documenti/${tipo}/download`, { responseType: "blob" });
+            const url = URL.createObjectURL(new Blob([r.data]));
+            const a = document.createElement("a"); a.href = url; a.download = nome_file || `${tipo}`; a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore download"); }
     };
     const inviaFirmaCard = async () => {
         if (!firmaCard) return;
@@ -2508,8 +2522,18 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                             )}
                             {cOpen && (doc ? (
                                 <div className="bg-slate-50 rounded-md p-2 text-xs space-y-1">
-                                    <div>
-                                        📎 <a href={fileHref(doc.url)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline" data-testid={`doc-card-link-${dt.key}`}>{doc.nome_file}</a>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-slate-700 break-all" data-testid={`doc-card-name-${dt.key}`}>📎 {doc.nome_file}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <button onClick={() => setAnteprimaDoc({ tipo: dt.key, nome_file: doc.nome_file, isPdf: isPdfDoc(doc), isImage: isImageDoc(doc) })}
+                                            className="text-[11px] px-2 py-1 rounded border border-sky-300 text-sky-700 hover:bg-sky-50 inline-flex items-center gap-1" data-testid={`doc-preview-${dt.key}`}>
+                                            <Eye size={11} /> Anteprima
+                                        </button>
+                                        <button onClick={() => scaricaDoc(dt.key, doc.nome_file)}
+                                            className="text-[11px] px-2 py-1 rounded border border-slate-300 text-slate-700 hover:bg-slate-100 inline-flex items-center gap-1" data-testid={`doc-download-${dt.key}`}>
+                                            <Download size={11} /> Scarica
+                                        </button>
                                     </div>
                                     <div className="text-slate-500">
                                         {doc.size_kb} KB · caricato {doc.data_caricamento?.slice(0, 10)}
@@ -2582,6 +2606,37 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                     </div>
                 )}
             </div>
+
+            {/* Anteprima documento in-CRM (PDF/immagine) */}
+            <Dialog open={!!anteprimaDoc} onOpenChange={(o) => !o && setAnteprimaDoc(null)}>
+                <DialogContent className="max-w-4xl w-[95vw]" data-testid="doc-preview-dialog">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-base">
+                            <Eye size={16} className="text-sky-600" /> {anteprimaDoc?.nome_file}
+                        </DialogTitle>
+                    </DialogHeader>
+                    {anteprimaDoc && (
+                        <>
+                            <div className="h-[72vh] bg-slate-100 rounded overflow-auto flex items-center justify-center">
+                                {anteprimaDoc.isImage ? (
+                                    <img src={fileHref(docDownloadPath(anteprimaDoc.tipo))} alt={anteprimaDoc.nome_file}
+                                        className="max-w-full max-h-full object-contain" data-testid="doc-preview-image" />
+                                ) : (
+                                    <iframe title="anteprima-documento" src={fileHref(docDownloadPath(anteprimaDoc.tipo))}
+                                        className="w-full h-full border-0" data-testid="doc-preview-frame" />
+                                )}
+                            </div>
+                            <div className="flex justify-end gap-2">
+                                <button onClick={() => scaricaDoc(anteprimaDoc.tipo, anteprimaDoc.nome_file)}
+                                    className="text-xs px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800 inline-flex items-center gap-1"
+                                    data-testid="doc-preview-download">
+                                    <Download size={12} /> Scarica
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </DialogContent>
+            </Dialog>
 
             {/* Popup invio firma OpenAPI per una card documento */}
             <Dialog open={!!firmaCard} onOpenChange={(o) => !o && setFirmaCard(null)}>

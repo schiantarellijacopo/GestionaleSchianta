@@ -748,3 +748,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fix apertura documenti card anagrafica (es. Carta d'identità "Su Drive"): il link usava doc.url RELATIVO (/api/...). In produzione (frontend e backend su domini diversi) puntava al dominio del frontend → 404, non scaricava né visualizzava. Aggiunto helper fileHref() in AnagraficaDetail.jsx che rende l'url assoluto verso REACT_APP_BACKEND_URL e vi aggancia ?token= (un <a> non invia l'header Authorization). Applicato al link della card documenti.
   - Testato: /api/anagrafiche/{aid}/documenti/{tipo}/download?token= e /api/storage/...?token= → 200 application/pdf (401 senza token). download_cloud_file dal Drive funziona.
 - Conferma ripristino: BrogliaccioTab ora mostra nel toast di eliminazione movimento lo stato a cui è tornato il titolo (es. "titolo ripristinato ad arretrato / a coperto (sospeso) / rimane incassato"), leggendo il campo `revert` già restituito da DELETE /contabilita/movimenti/{id}.
+
+## 2026-06 — Documenti card: anteprima in-CRM + pulsante Scarica
+- AnagraficaDetail.jsx (card "Documenti del cliente"): sostituito il semplice link con due pulsanti "Anteprima" e "Scarica" per ogni documento.
+  - Anteprima: apre un Dialog con visualizzatore in-CRM (iframe per PDF, <img> per immagini) usando l'endpoint /api/anagrafiche/{aid}/documenti/{tipo}/download (Content-Disposition: inline) reso assoluto con token via fileHref(). Nessun download forzato.
+  - Scarica: scarica il file via axios (responseType blob) + object URL, così porta l'header Authorization. Pulsante presente sia nella card sia dentro il dialog.
+  - Nuovi data-testid: doc-preview-{tipo}, doc-download-{tipo}, doc-preview-dialog, doc-preview-frame/image, doc-preview-download.
+- Testato e2e (login jacopo@schiantarelli.it, anagrafica 99b2fdc0): dialog anteprima si apre con l'iframe del PDF e il pulsante Scarica. Endpoint download inline → 200 application/pdf.
