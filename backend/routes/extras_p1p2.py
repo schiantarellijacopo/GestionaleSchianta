@@ -1733,26 +1733,43 @@ async def applica_visura(
     if fg and "individuale" not in fg and "ditta" not in fg:
         upd["tipo"] = "persona_giuridica"
 
-    # soci con percentuali → scheda Info Azienda (openapi_data.company.soci)
+    # soci con quote → scheda Info Azienda (openapi_data.company.soci)
     def _num(x):
+        if x in (None, ""):
+            return None
         try:
-            if x in (None, ""):
-                return None
-            return float(str(x).replace("%", "").replace(",", ".").strip())
+            s = str(x).replace("%", "").replace("€", "").replace("Euro", "").replace("euro", "").strip()
+            if "," in s:  # formato italiano: punto = migliaia, virgola = decimali
+                s = s.replace(".", "").replace(",", ".")
+            return float(s)
         except (TypeError, ValueError):
             return None
 
-    soci_list = []
+    capitale = _num(v.get("capitale_sociale"))
+    raw_soci = []
     for s in (v.get("soci") or []):
         nome = s.get("denominazione") or " ".join(
             x for x in [s.get("nome"), s.get("cognome")] if x).strip() or None
         if not nome:
             continue
-        soci_list.append({
+        raw_soci.append({
             "nome": nome,
-            "quota": _num(s.get("quota_percentuale")),
+            "pct": _num(s.get("quota_percentuale")),
+            "valore": _num(s.get("quota_valore")),
             "tipo": s.get("tipo"),
             "codice_fiscale": s.get("codice_fiscale"),
+        })
+    # denominatore per il calcolo percentuale: capitale sociale, altrimenti somma delle quote
+    somma_valori = sum(r["valore"] for r in raw_soci if r["valore"] is not None)
+    denom = capitale if (capitale and capitale > 0) else (somma_valori or None)
+    soci_list = []
+    for r in raw_soci:
+        quota = r["pct"]
+        if quota is None and r["valore"] is not None and denom:
+            quota = round(r["valore"] / denom * 100, 2)
+        soci_list.append({
+            "nome": r["nome"], "quota": quota, "quota_valore": r["valore"],
+            "tipo": r["tipo"], "codice_fiscale": r["codice_fiscale"],
         })
     if soci_list:
         company = dict((ana.get("openapi_data") or {}).get("company") or {})

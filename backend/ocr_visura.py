@@ -40,7 +40,8 @@ Analizza il documento e restituisci ESCLUSIVAMENTE un JSON valido con questo sch
       "cognome": "stringa o null (se persona fisica)",
       "nome": "stringa o null (se persona fisica)",
       "codice_fiscale": "stringa o null",
-      "quota_percentuale": "numero percentuale di possesso es 60 (senza simbolo %) o null",
+      "quota_valore": "quota posseduta in euro, solo il numero es 6000 (dal campo 'Quota: 6.000,00 Valuta: Euro') o null",
+      "quota_percentuale": "percentuale di possesso es 60 (senza simbolo %) o null",
       "tipo": "socio accomandatario | socio accomandante | socio unico | socio | nudo proprietario | usufruttuario | altro"
     }
   ],
@@ -66,7 +67,9 @@ Regole:
 - Ragione sociale e cognomi/nomi in MAIUSCOLO senza accenti speciali
 - Date sempre in formato YYYY-MM-DD
 - Per amministratori restituisci array (anche con un solo elemento o vuoto se nessuno)
-- Nella sezione "SOCI" / "TITOLARI DI DIRITTI SU QUOTE E AZIONI" / soci accomandatari e accomandanti estrai TUTTI i soci con la relativa quota di possesso in percentuale (campo quota_percentuale, solo il numero). Se la quota è espressa in valore (euro) e non in percentuale, calcolala sul capitale sociale quando possibile, altrimenti null.
+- Nella sezione "SOCI" / "TITOLARI DI DIRITTI SU QUOTE E AZIONI" e per i soci ACCOMANDATARI e ACCOMANDANTI delle S.a.s. estrai SEMPRE TUTTI i soci (sia accomandatari sia accomandanti), ciascuno con il proprio codice fiscale.
+- Per ogni socio riporta la quota in euro nel campo quota_valore (es. dal testo "Quota: 6.000,00 Valuta: Euro" → 6000) e, se presente, anche quota_percentuale. Se la percentuale non è indicata lasciala null: verrà calcolata a parte sul capitale sociale.
+- NON unire i soci: anche se la visura elenca prima i nomi e poi in un'altra sezione le quote, abbina la quota al socio corretto tramite il codice fiscale.
 - Per soci restituisci array (vuoto se non presenti)
 - Non aggiungere testo prima o dopo il JSON
 - Non includere markdown ```json```

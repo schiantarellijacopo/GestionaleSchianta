@@ -764,3 +764,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 
 ## 2026-06 — Card documenti anagrafica: Anteprima/Scarica spostati in alto a destra
 - AnagraficaDetail.jsx: i pulsanti Anteprima/Scarica ora sono nella riga in alto a destra della card (accanto a RichiediDocCard, sotto il badge "caricato"), sempre visibili quando il documento esiste anche a card chiusa. Rimossi dal corpo espanso. Testato via screenshot.
+
+## 2026-06 — Visura: soci S.a.s. e calcolo % quote dal valore in euro
+- Bug: nel grafico Soci/Azionisti compariva un solo socio al 100%. Nella visura le quote sono espresse in euro (es. 6.000 / 4.000 su capitale 10.000) e un solo accomandatario veniva estratto.
+- ocr_visura.py: prompt soci aggiornato → estrae SEMPRE tutti i soci (accomandatari + accomandanti) con codice fiscale, nuovo campo quota_valore (euro) oltre a quota_percentuale; abbinamento quota↔socio tramite CF.
+- extras_p1p2.py applica-visura: _num robusto per formato italiano (6.000,00); calcolo percentuale = quota_valore / capitale_sociale * 100 (fallback: somma quote). company.soci ora include quota (%) e quota_valore.
+- Testato e2e: Vanoli 6.000 → 60%, Schiantarelli 4.000 → 40% su capitale 10.000. Il grafico e la tabella già usano company.soci. NB: ricaricare la visura in Salute Fiscale per aggiornare i soci esistenti.
