@@ -75,6 +75,7 @@ import OpenApiActions from "@/components/OpenApiActions";
 import AnalisiAziendaTab from "@/components/AnalisiAziendaTab";
 import WhatsAppChatPreview from "@/components/WhatsAppChatPreview";
 import ContrattoConsulenzaTab from "@/components/ContrattoConsulenzaTab";
+import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
 import useMezziPagamento from "@/hooks/useMezziPagamento";
 import { formatPhone } from "@/lib/phone";
 
@@ -2607,36 +2608,15 @@ function DocumentiTab({ anagrafica_id, ana, canEdit, onReload }) {
                 )}
             </div>
 
-            {/* Anteprima documento in-CRM (PDF/immagine) */}
-            <Dialog open={!!anteprimaDoc} onOpenChange={(o) => !o && setAnteprimaDoc(null)}>
-                <DialogContent className="max-w-4xl w-[95vw]" data-testid="doc-preview-dialog">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-base">
-                            <Eye size={16} className="text-sky-600" /> {anteprimaDoc?.nome_file}
-                        </DialogTitle>
-                    </DialogHeader>
-                    {anteprimaDoc && (
-                        <>
-                            <div className="h-[72vh] bg-slate-100 rounded overflow-auto flex items-center justify-center">
-                                {anteprimaDoc.isImage ? (
-                                    <img src={fileHref(docDownloadPath(anteprimaDoc.tipo))} alt={anteprimaDoc.nome_file}
-                                        className="max-w-full max-h-full object-contain" data-testid="doc-preview-image" />
-                                ) : (
-                                    <iframe title="anteprima-documento" src={fileHref(docDownloadPath(anteprimaDoc.tipo))}
-                                        className="w-full h-full border-0" data-testid="doc-preview-frame" />
-                                )}
-                            </div>
-                            <div className="flex justify-end gap-2">
-                                <button onClick={() => scaricaDoc(anteprimaDoc.tipo, anteprimaDoc.nome_file)}
-                                    className="text-xs px-3 py-1.5 rounded bg-sky-700 text-white hover:bg-sky-800 inline-flex items-center gap-1"
-                                    data-testid="doc-preview-download">
-                                    <Download size={12} /> Scarica
-                                </button>
-                            </div>
-                        </>
-                    )}
-                </DialogContent>
-            </Dialog>
+            {/* Anteprima documento in-CRM (PDF/immagine) con zoom e rotazione */}
+            <DocumentPreviewDialog
+                open={!!anteprimaDoc}
+                onOpenChange={(o) => !o && setAnteprimaDoc(null)}
+                fileUrl={anteprimaDoc ? fileHref(docDownloadPath(anteprimaDoc.tipo)) : null}
+                nome_file={anteprimaDoc?.nome_file}
+                isImage={!!anteprimaDoc?.isImage}
+                onDownload={() => anteprimaDoc && scaricaDoc(anteprimaDoc.tipo, anteprimaDoc.nome_file)}
+            />
 
             {/* Popup invio firma OpenAPI per una card documento */}
             <Dialog open={!!firmaCard} onOpenChange={(o) => !o && setFirmaCard(null)}>

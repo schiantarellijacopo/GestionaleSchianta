@@ -8,13 +8,54 @@ import { useEffect, useState } from "react";
 import { api, API_BASE } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles, PenTool, AlertTriangle } from "lucide-react";
+import { Eye, EyeOff, Upload, FileText, Trash2, Lock, Sparkles, PenTool, AlertTriangle, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import RichiediDocCard from "@/components/RichiediDocCard";
+import DocumentPreviewDialog from "@/components/DocumentPreviewDialog";
+
+const _withToken = (u) => {
+    const t = (typeof localStorage !== "undefined" && localStorage.getItem("token")) || "";
+    return t ? `${u}${u.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}` : u;
+};
+const _isImageAllegato = (a) => {
+    const m = (a?.content_type || a?.mime || "").toLowerCase();
+    return m.startsWith("image/") || /\.(jpe?g|png|webp|gif|heic|heif|bmp)$/i.test(a?.nome_file || "");
+};
+
+// Nome file cliccabile → apre anteprima in-CRM; + pulsanti Anteprima / Scarica.
+function AllegatoFileLink({ a }) {
+    const [open, setOpen] = useState(false);
+    const scarica = async () => {
+        try {
+            const r = await api.get(`/allegati/${a.id}/download`, { responseType: "blob" });
+            const url = URL.createObjectURL(new Blob([r.data]));
+            const el = document.createElement("a"); el.href = url; el.download = a.nome_file || "documento"; el.click();
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore download"); }
+    };
+    return (
+        <>
+            <button onClick={() => setOpen(true)}
+                className="text-sm font-medium text-sky-700 hover:underline truncate block text-left w-full"
+                data-testid={`doc-link-${a.id}`}>
+                {a.nome_file}
+            </button>
+            <div className="flex items-center gap-2 mt-0.5">
+                <button onClick={() => setOpen(true)} data-testid={`doc-preview-${a.id}`}
+                    className="text-[10px] text-sky-700 hover:underline inline-flex items-center gap-0.5"><Eye size={10} /> Anteprima</button>
+                <button onClick={scarica} data-testid={`doc-download-${a.id}`}
+                    className="text-[10px] text-slate-600 hover:underline inline-flex items-center gap-0.5"><Download size={10} /> Scarica</button>
+            </div>
+            <DocumentPreviewDialog open={open} onOpenChange={setOpen}
+                fileUrl={_withToken(`${API_BASE}/allegati/${a.id}/download`)}
+                nome_file={a.nome_file} isImage={_isImageAllegato(a)} onDownload={scarica} />
+        </>
+    );
+}
 
 export default function DocumentiSezioneSplit({
     entita_tipo,
@@ -326,10 +367,7 @@ function DocBox({ titolo, icona: Icon, color, items, canEdit, onUpload, onToggle
                         <div key={a.id} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200 hover:border-sky-300 group">
                             <FileText size={14} className="text-sky-600 shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <a href={`${API_BASE}/allegati/${a.id}/download`} target="_blank" rel="noreferrer"
-                                    className="text-sm font-medium text-sky-700 hover:underline truncate block" data-testid={`doc-link-${a.id}`}>
-                                    {a.nome_file}
-                                </a>
+                                <AllegatoFileLink a={a} />
                                 <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                                     {a.categoria && <span className="bg-sky-100 text-sky-700 px-1 rounded">{a.categoria}</span>}
                                     {a.descrizione && <span className="italic truncate">{a.descrizione}</span>}
@@ -409,10 +447,7 @@ function QuadrottoCategoria({ categoria, files, canEdit, uploading, onUpload, on
                         <div key={a.id} className="flex items-center gap-2 p-2 bg-white rounded border border-slate-200 hover:border-sky-300 group">
                             <FileText size={14} className="text-sky-600 shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <a href={`${API_BASE}/allegati/${a.id}/download`} target="_blank" rel="noreferrer"
-                                    className="text-sm font-medium text-sky-700 hover:underline truncate block" data-testid={`doc-link-${a.id}`}>
-                                    {a.nome_file}
-                                </a>
+                                <AllegatoFileLink a={a} />
                                 <div className="text-[10px] text-slate-500 flex items-center gap-1.5 flex-wrap">
                                     {a.visibile_cliente
                                         ? <span className="bg-emerald-100 text-emerald-700 px-1 rounded">visibile cliente</span>
