@@ -19,6 +19,7 @@ import logging
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -32,12 +33,22 @@ logger = logging.getLogger(__name__)
 _scheduler = None
 _TICK_MINUTES = 10
 
+# Tutti gli orari degli avvisi programmati sono interpretati in ORA ITALIANA
+# (Europe/Rome), indipendentemente dal fuso del server (che in produzione è UTC).
+ROME_TZ = ZoneInfo("Europe/Rome")
+
+
+def _now_rome() -> datetime:
+    return datetime.now(ROME_TZ)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 def _today() -> date:
-    return date.today()
+    # Data di riferimento = data odierna in ora italiana (evita slittamenti di
+    # un giorno quando il server è in UTC e a Roma è già passata la mezzanotte).
+    return _now_rome().date()
 
 
 def _fmt_date(s: Optional[str]) -> str:
@@ -261,6 +272,58 @@ async def _res_documenti_aziendali_in_scadenza(default_giorni: int) -> list[dict
     return out
 
 
+async def _res_digest_sospesi() -> list[dict]:
+    """Digest SOSPESI per collaboratore: un payload per collaboratore con il
+    totale dei titoli COPERTI (anticipati dall'agenzia) non ancora incassati."""
+    pipeline = [
+        {"$match": {"titolo_coperto": True,
+                    "stato": {"$in": ["da_incassare", "insoluto"]}}},
+        {"$group": {"_id": "$collaboratore_id",
+                    "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
+    ]
+    out: list[dict] = []
+    async for g in db.titoli.aggregate(pipeline):
+        cid = g.get("_id")
+        if not cid:
+            continue
+        out.append({
+            "entita_tipo": "collaboratore",
+            "entita_id": cid,
+            "collaboratore_id": cid,
+            "n_titoli": g.get("n", 0),
+            "totale_sospesi": _fmt_eur(g.get("tot", 0)).replace(" €", ""),
+            "link": "/titoli?preset=sospesi",
+        })
+    return out
+
+
+async def _res_digest_arretrati(giorni: int = 15) -> list[dict]:
+    """Digest ARRETRATI per collaboratore: titoli da incassare NON coperti,
+    scaduti da oltre `giorni` giorni."""
+    limite = (_today() - timedelta(days=max(0, giorni))).isoformat()
+    pipeline = [
+        {"$match": {"stato": {"$in": ["da_incassare", "insoluto"]},
+                    "titolo_coperto": {"$ne": True},
+                    "scadenza": {"$nin": ["", None], "$lt": limite}}},
+        {"$group": {"_id": "$collaboratore_id",
+                    "n": {"$sum": 1}, "tot": {"$sum": "$importo_lordo"}}},
+    ]
+    out: list[dict] = []
+    async for g in db.titoli.aggregate(pipeline):
+        cid = g.get("_id")
+        if not cid:
+            continue
+        out.append({
+            "entita_tipo": "collaboratore",
+            "entita_id": cid,
+            "collaboratore_id": cid,
+            "n_arretrati": g.get("n", 0),
+            "totale_arretrati": _fmt_eur(g.get("tot", 0)).replace(" €", ""),
+            "link": "/titoli?preset=scad_oltre15",
+        })
+    return out
+
+
 _OFFSET_KINDS = {
     "polizza_scaduta_giorno": 0,
     "polizza_scaduta_5g": 5,
@@ -285,8 +348,12 @@ async def resolve_payloads(rule: dict) -> list[dict]:
         return await _res_documento_id_in_scadenza(int(rule.get("soglia_giorni") or 30))
     if kind == "documento_aziendale_scaduto":
         return await _res_documenti_aziendali_in_scadenza(int(rule.get("soglia_giorni") or 15))
-    # schedule_kind non gestito da questo esecutore (es. digest settimanali,
-    # documento_veicolo_mancante gestito da sollecito_veicoli, documento_id_scaduto)
+    if kind == "sospesi_settimanali":
+        return await _res_digest_sospesi()
+    if kind == "arretrati_settimanali":
+        return await _res_digest_arretrati(int(rule.get("soglia_giorni") or 15))
+    # schedule_kind non gestito da questo esecutore (es.
+    # documento_veicolo_mancante gestito da sollecito_veicoli nel tick)
     return []
 
 
@@ -294,6 +361,16 @@ async def resolve_payloads(rule: dict) -> list[dict]:
 # Esecuzione per tenant
 # ---------------------------------------------------------------------------
 async def _esegui_rule(rule: dict) -> dict:
+    # Solleciti documento veicolo mancante: handler dedicato (link upload pubblico)
+    if rule.get("schedule_kind") == "documento_veicolo_mancante":
+        from sollecito_veicoli import run_sollecito_documento_veicolo
+        r = await run_sollecito_documento_veicolo(rule, db)
+        agg = {"rule_id": rule.get("id"), "nome": rule.get("nome"),
+               "schedule_kind": rule.get("schedule_kind"),
+               "entita": r.get("solleciti_inviati", 0), "sent": r.get("solleciti_inviati", 0),
+               "errors": 0, "skipped": r.get("gia_ok", 0)}
+        await db.alert_rules.update_one({"id": rule["id"]}, {"$set": {"last_run_at": _now_iso()}})
+        return agg
     payloads = await resolve_payloads(rule)
     agg = {"rule_id": rule.get("id"), "nome": rule.get("nome"),
            "schedule_kind": rule.get("schedule_kind"),
@@ -410,12 +487,7 @@ async def _tenant_alert_config(raw_db: AsyncIOMotorDatabase, tenant_id: str) -> 
 
 
 async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
-    try:
-        from tzlocal import get_localzone
-        tz = get_localzone()
-    except Exception:
-        tz = timezone.utc
-    now = datetime.now(tz)
+    now = _now_rome()
     today = now.date().isoformat()
 
     async for t in raw_db.tenants.find({"attivo": True}, {"_id": 0, "id": 1}):
@@ -464,12 +536,7 @@ async def _tick_copertura(raw_db: AsyncIOMotorDatabase) -> None:
     """Invio AUTOMATICO giornaliero delle comunicazioni di copertura, a fine
     giornata, all'orario configurato per agenzia (`copertura_auto_*`). Una sola
     esecuzione al giorno per tenant (idempotenza via `copertura_auto_state`)."""
-    try:
-        from tzlocal import get_localzone
-        tz = get_localzone()
-    except Exception:
-        tz = timezone.utc
-    now = datetime.now(tz)
+    now = _now_rome()
     now_min = now.hour * 60 + now.minute
     today = now.date().isoformat()
 
@@ -606,11 +673,7 @@ def start_alert_scheduler(raw_db: AsyncIOMotorDatabase) -> None:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.interval import IntervalTrigger
     from apscheduler.triggers.cron import CronTrigger
-    try:
-        from tzlocal import get_localzone
-        tz = get_localzone()
-    except Exception:
-        tz = timezone.utc
+    tz = ROME_TZ
 
     sched = AsyncIOScheduler(timezone=tz)
 

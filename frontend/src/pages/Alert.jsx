@@ -24,7 +24,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import {
     Bell, Mail, MessageCircle, Smartphone, Edit3, Send, Trash2, Plus, Library,
-    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink, Copy, ShieldCheck,
+    CheckCircle2, AlertTriangle, History, Zap, Calendar, Settings, ExternalLink, Copy, ShieldCheck, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -161,6 +161,8 @@ export default function Alert() {
                 title="Alert & Automazioni"
                 subtitle="Notifiche automatiche multi-canale per clienti, collaboratori e agenzia"
             />
+
+            <RomeClock />
 
             {/* Stats */}
             <div className="grid grid-cols-3 gap-4 mb-4">
@@ -394,7 +396,7 @@ function SchedulerConfigCard() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2 ml-auto flex-wrap">
-                    <Label className="text-xs text-slate-600">Ora</Label>
+                    <Label className="text-xs text-slate-600">Ora (Italia)</Label>
                     <Input type="number" min={0} max={23} value={cfg.alert_scheduler_hour}
                         onChange={(e) => setCfg({ ...cfg, alert_scheduler_hour: parseInt(e.target.value || "0", 10) })}
                         className="w-16 h-9" data-testid="scheduler-hour" />
@@ -415,8 +417,13 @@ function SchedulerConfigCard() {
                 </div>
             </div>
             <div className="text-[11px] text-slate-500 mt-2">
-                È l&apos;<strong>orario predefinito</strong>: le regole che non hanno un orario proprio partono a quest&apos;ora. Ogni regola può avere il <strong>suo orario</strong> (aprila e imposta «Quando eseguire»). I messaggi vanno al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
+                È l&apos;<strong>orario predefinito</strong> (<strong>ora italiana · Europe/Rome</strong>): le regole che non hanno un orario proprio partono a quest&apos;ora. Ogni regola può avere il <strong>suo orario</strong> (aprila e imposta «Quando eseguire»). I messaggi vanno al cliente sul <strong>canale scelto in anagrafica</strong> (Email / WhatsApp / SMS). Usa <strong>Esegui ora</strong> su una regola per inviarla subito.
             </div>
+            {!cfg.alert_scheduler_attivo && (
+                <div className="text-[12px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2 mt-2 flex items-center gap-2" data-testid="scheduler-warning">
+                    <AlertTriangle size={14} /> Gli avvisi programmati sono <strong>sospesi</strong>: nessun invio automatico partirà finché non attivi l&apos;interruttore qui sopra.
+                </div>
+            )}
         </Card>
     );
 }
@@ -842,10 +849,45 @@ function cronLabel(cron) {
     const s = parseCron(cron);
     if (s.freq === "weekly") {
         const d = WEEKDAYS.find((w) => w.v === s.dow);
-        return `Ogni ${d ? d.label.toLowerCase() : "settimana"} alle ${s.time}`;
+        return `Ogni ${d ? d.label.toLowerCase() : "settimana"} alle ${s.time} (ora it.)`;
     }
-    if (s.freq === "monthly") return `Il giorno ${s.dom} del mese alle ${s.time}`;
-    return `Ogni giorno alle ${s.time}`;
+    if (s.freq === "monthly") return `Il giorno ${s.dom} del mese alle ${s.time} (ora it.)`;
+    return `Ogni giorno alle ${s.time} (ora it.)`;
+}
+
+// Orologio live in fuso Europe/Rome: giorno calendario + ora italiana
+function RomeClock() {
+    const [now, setNow] = useState(new Date());
+    useEffect(() => {
+        const t = setInterval(() => setNow(new Date()), 1000);
+        return () => clearInterval(t);
+    }, []);
+    const dateFmt = new Intl.DateTimeFormat("it-IT", {
+        timeZone: "Europe/Rome", weekday: "long", day: "2-digit", month: "long", year: "numeric",
+    });
+    const timeFmt = new Intl.DateTimeFormat("it-IT", {
+        timeZone: "Europe/Rome", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+    const tzName = new Intl.DateTimeFormat("it-IT", {
+        timeZone: "Europe/Rome", timeZoneName: "short",
+    }).formatToParts(now).find((p) => p.type === "timeZoneName")?.value || "";
+    return (
+        <Card className="p-3 mb-4 border-indigo-200 bg-indigo-50/50" data-testid="rome-clock">
+            <div className="flex items-center gap-3 flex-wrap">
+                <Clock size={18} className="text-indigo-700" />
+                <div className="text-sm text-slate-700">
+                    Ora attuale in Italia (Europe/Rome):{" "}
+                    <strong className="capitalize" data-testid="rome-clock-date">{dateFmt.format(now)}</strong>
+                    {" · "}
+                    <strong className="tabular-nums" data-testid="rome-clock-time">{timeFmt.format(now)}</strong>
+                    <span className="text-slate-400"> {tzName}</span>
+                </div>
+                <span className="ml-auto text-[11px] text-slate-500">
+                    Tutti gli orari programmati sono in <strong>ora italiana</strong>.
+                </span>
+            </div>
+        </Card>
+    );
 }
 
 

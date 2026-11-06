@@ -802,3 +802,12 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - report_azienda.py: endpoint riclassificato anni=1 → se esiste bilancio_dettaglio_cee genera _build_cee_detail_pdf (PDF A4 con tutte le voci). 3/5 anni restano aggregati.
 - Testato: _cee_detail su schema mock (11 voci, sezioni+label corretti); PDF completo endpoint anni=1 → 200.
 - LIMITE: il dettaglio completo è disponibile solo per l'ULTIMO bilancio depositato (IT-full); gli anni storici (3/5) restano aggregati. Serve ri-premere "Compila da OpenAPI" per popolare bilancio_dettaglio_cee.
+
+## 2026-11-06 — Alert: fuso Roma, orologio UI, template digest/veicolo, diagnosi mancati invii
+- **Root cause mancati avvisi (tenant reale c5ae2d0e)**: (1) scheduler avvisi SOSPESO (switch off) → nessun invio automatico; (2) nessuna regola "Documento d'identità" attiva salvata; (3) WhatsApp senza istanza connessa → canale sempre saltato; (4) bug latente fuso: scheduler girava in UTC, orari slittati di 1h vs Roma.
+- **Fix fuso orario** (`scheduler_alert.py`): nuovo `ROME_TZ=Europe/Rome`, `_now_rome()`, `_today()` ora in Roma; `_tick`, `_tick_copertura` e APScheduler (`AsyncIOScheduler(timezone=ROME_TZ)`) usano l'ora italiana. Gli orari cron delle regole e l'orario globale sono ora valutati in ora italiana.
+- **Template digest implementati** (`scheduler_alert.py`): `sospesi_settimanali` e `arretrati_settimanali` ora producono 1 payload per collaboratore con totali (`n_titoli`/`totale_sospesi`, `n_arretrati`/`totale_arretrati`). Prima `resolve_payloads` tornava [] → non inviavano nulla.
+- **Veicolo**: `documento_veicolo_mancante` ora è collegato allo scheduler (`_esegui_rule` chiama `run_sollecito_documento_veicolo`). Prima non partiva dal tick.
+- **Frontend** (`Alert.jsx`): nuovo `RomeClock` (data calendario + ora Italia Europe/Rome live, aggiornamento 1s, timeZoneName); etichette orari regole con "(ora it.)"; label "Ora (Italia)" nella card scheduler; banner giallo quando lo scheduler è "Sospeso".
+- **Audit template (tenant reale, read-only)**: polizza_scaduta_* + polizza_in_scadenza ✅; compleanno ✅ (9); titolo_scaduto_oltre ✅ (14); documento_id_scaduto ✅ (campo `ci_data_scadenza` corretto, popolato solo su clienti con data inserita); documento_aziendale ✅ (0 oggi); sospesi/arretrati ✅ (8+8 dopo fix); veicolo ✅ (dopo wiring).
+- **Verificato**: orologio Roma 18:53 CET in UI; recipient resolution (digest→collaboratore email, cliente Jacopo→email+whatsapp, whatsapp saltato no istanza). NESSUN invio reale innescato in test (evitato run-now su dati reali).
