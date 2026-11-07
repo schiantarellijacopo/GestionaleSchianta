@@ -316,11 +316,18 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
         html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
         msg.attach(MIMEText(html, "html", "utf-8"))
         port = int(cfg.get("smtp_port") or 587)
-        with smtplib.SMTP(host, port, timeout=20) as srv:
-            if cfg.get("smtp_starttls", True):
-                srv.starttls()
-            srv.login(user, pwd)
-            srv.sendmail(sender, [to_email], msg.as_string())
+        use_ssl = bool(cfg.get("smtp_ssl")) or port == 465
+        if use_ssl:
+            # SSL implicito (tipicamente porta 465)
+            with smtplib.SMTP_SSL(host, port, timeout=20) as srv:
+                srv.login(user, pwd)
+                srv.sendmail(sender, [to_email], msg.as_string())
+        else:
+            with smtplib.SMTP(host, port, timeout=20) as srv:
+                if cfg.get("smtp_starttls", True):
+                    srv.starttls()
+                srv.login(user, pwd)
+                srv.sendmail(sender, [to_email], msg.as_string())
         return {"status": "ok"}
     except Exception as e:
         return {"status": "errore", "error": str(e)}
@@ -358,8 +365,14 @@ async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
     if not to_num:
         return {"status": "skipped", "error": "WhatsApp destinatario assente"}
 
-    # normalizza numero (rimuovi +, spazi, trattini)
+    # normalizza numero: solo cifre, prefisso internazionale (default Italia +39)
     to_clean = "".join(c for c in str(to_num) if c.isdigit())
+    if to_clean.startswith("00"):
+        to_clean = to_clean[2:]  # 0039... -> 39...
+    cc = os.environ.get("WHATSAPP_DEFAULT_CC", "39")
+    # numeri italiani senza prefisso = max 10 cifre; con prefisso >= 11
+    if len(to_clean) <= 10:
+        to_clean = cc + to_clean
     if not to_clean:
         return {"status": "skipped", "error": "Numero non valido"}
 

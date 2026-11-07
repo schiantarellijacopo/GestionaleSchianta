@@ -824,3 +824,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - **Frontend** (`Alert.jsx`): DiagnosticaCard mostra box rosso "Ultimi invii non riusciti (motivo reale)"; Storico invii mostra il testo errore inline sotto l'esito (prima era solo tooltip title, invisibile su mobile).
 - STATO: NON risolto finché non si leggono i messaggi d'errore reali da produzione. Ipotesi: email = auth/relay SMTP; whatsapp = numero destinatario assente o api_key Evolution mancante.
 - Prossimo: utente redeploy su Railway → esegue Diagnostica → invia screenshot del box "Ultimi invii non riusciti" → fix mirato.
+
+## 2026-11-07 (2) — FIX cause reali: email SMTP SSL/465 + WhatsApp prefisso +39
+- Errori reali da produzione: EMAIL "Connection unexpectedly closed" (server SMTP su porta 465 SSL implicito, ma il codice faceva sempre SMTP+STARTTLS); WHATSAPP Evolution API 400 {"exists":false,"number":"3402934389"} (numero inviato senza prefisso internazionale).
+- **Fix email** (`alert_dispatcher.py` send_email): se `smtp_port==465` o `smtp_ssl` true → usa `smtplib.SMTP_SSL`; altrimenti SMTP+STARTTLS come prima. (Tipico caso Aruba smtps.aruba.it:465.)
+- **Fix whatsapp** (`alert_dispatcher.py` send_whatsapp): normalizzazione numero → strip non-cifre, rimuove `00` iniziale, se <=10 cifre antepone prefisso `WHATSAPP_DEFAULT_CC` (default "39"). Verificato: 3402934389/00393402934389/+39.../393402934389 → 393402934389.
+- NOTA: alcune righe whatsapp "saltato: destinatario assente" = quel record anagrafica non ha cellulare/whatsapp salvato.
+- STATO: fix applicati e logica verificata in locale; consegna reale SMTP/Evolution NON verificabile dalla preview (serve redeploy Railway + retest). Se email ancora KO dopo redeploy: confermare host/porta SMTP (465 vs 587).
