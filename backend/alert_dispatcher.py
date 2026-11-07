@@ -315,20 +315,36 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
         msg.attach(MIMEText(body, "plain", "utf-8"))
         html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
         msg.attach(MIMEText(html, "html", "utf-8"))
-        port = int(cfg.get("smtp_port") or 587)
-        use_ssl = bool(cfg.get("smtp_ssl")) or port == 465
-        if use_ssl:
-            # SSL implicito (tipicamente porta 465)
-            with smtplib.SMTP_SSL(host, port, timeout=20) as srv:
-                srv.login(user, pwd)
-                srv.sendmail(sender, [to_email], msg.as_string())
+
+        configured_port = int(cfg.get("smtp_port") or 587)
+        want_ssl = bool(cfg.get("smtp_ssl")) or configured_port == 465
+        # Prova la modalità configurata, poi l'altra combinazione standard
+        # (SSL/465 <-> STARTTLS/587): auto-corregge porta/modalità errata.
+        if want_ssl:
+            attempts = [("ssl", configured_port), ("starttls", 587)]
         else:
-            with smtplib.SMTP(host, port, timeout=20) as srv:
-                if cfg.get("smtp_starttls", True):
-                    srv.starttls()
-                srv.login(user, pwd)
-                srv.sendmail(sender, [to_email], msg.as_string())
-        return {"status": "ok"}
+            attempts = [("starttls", configured_port), ("ssl", 465)]
+
+        last_err = None
+        for mode, p in attempts:
+            try:
+                if mode == "ssl":
+                    with smtplib.SMTP_SSL(host, p, timeout=20) as srv:
+                        srv.login(user, pwd)
+                        srv.sendmail(sender, [to_email], msg.as_string())
+                else:
+                    with smtplib.SMTP(host, p, timeout=20) as srv:
+                        srv.starttls()
+                        srv.login(user, pwd)
+                        srv.sendmail(sender, [to_email], msg.as_string())
+                return {"status": "ok"}
+            except smtplib.SMTPAuthenticationError as e:
+                # Credenziali errate: inutile riprovare l'altra porta
+                return {"status": "errore", "error": f"Autenticazione SMTP fallita: {e}"}
+            except Exception as e:
+                last_err = e
+                continue
+        return {"status": "errore", "error": f"{type(last_err).__name__}: {last_err}"}
     except Exception as e:
         return {"status": "errore", "error": str(e)}
 

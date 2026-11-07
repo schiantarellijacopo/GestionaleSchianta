@@ -81,7 +81,16 @@ export default function Alert() {
     const test = async (rid) => {
         try {
             const r = await api.post(`/alert-rules/${rid}/test`, {});
-            toast.success(`Test inviato (in-app: ${r.data.sent}, errori: ${r.data.errors})`);
+            const d = r.data;
+            if ((d.errors || 0) > 0 || (d.skipped || 0) > 0) {
+                const motivi = (d.dettaglio || [])
+                    .filter((x) => x.status === "errore" || x.status === "skipped")
+                    .map((x) => `${x.canale}: ${x.error_message || x.status}`)
+                    .join(" · ");
+                toast.error(`Test: ${d.sent} inviati, ${d.errors} errori, ${d.skipped} saltati. ${motivi}`, { duration: 12000 });
+            } else {
+                toast.success(`Test inviato: ${d.sent} messaggi su ${(d.dettaglio || []).map((x) => x.canale).join(", ") || "nessun canale"}`);
+            }
         } catch (e) {
             toast.error(e.response?.data?.detail || "Errore test");
         }

@@ -397,7 +397,14 @@ async def test_alert_rule(rid: str, body: dict | None = None, user: dict = Depen
     rule_test["destinatari_user_ids"] = [user["id"]]
     rule_test["attivo"] = True
     stats = await dispatch_rule(rule_test, payload)
-    return {"ok": True, **stats}
+    # Dettaglio esiti per canale (per mostrare il motivo reale del fallimento)
+    dettaglio = []
+    for eid in stats.get("events", []):
+        ev = await db.alert_events.find_one(
+            {"id": eid}, {"_id": 0, "canale": 1, "status": 1, "error_message": 1, "destinatario_indirizzo": 1})
+        if ev:
+            dettaglio.append(ev)
+    return {"ok": True, **stats, "dettaglio": dettaglio}
 
 
 # ============================================================
