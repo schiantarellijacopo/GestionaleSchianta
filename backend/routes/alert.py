@@ -279,6 +279,15 @@ async def alert_diagnostica(cognome: Optional[str] = None,
     # Istanze WhatsApp connesse
     wa_total = await db.whatsapp_instances.count_documents({})
     wa_open = await db.whatsapp_instances.count_documents({"state": {"$in": ["open", "connected"]}})
+    wa_srv = await db.whatsapp_server_config.find_one({}, {"_id": 0, "server_url": 1, "api_key": 1}) or {}
+    wa_server_ok = bool((wa_srv.get("server_url") or _os.environ.get("WHATSAPP_API_URL")))
+
+    # Ultimi invii falliti/saltati (con il MESSAGGIO D'ERRORE reale)
+    err_events = await db.alert_events.find(
+        {"status": {"$in": ["errore", "skipped"]}},
+        {"_id": 0, "canale": 1, "destinatario_label": 1, "destinatario_indirizzo": 1,
+         "error_message": 1, "created_at": 1, "status": 1, "rule_nome": 1},
+    ).sort("created_at", -1).to_list(12)
 
     # Lookup cliente per cognome (opzionale)
     cliente_info = None
@@ -320,6 +329,8 @@ async def alert_diagnostica(cognome: Optional[str] = None,
         problemi.append("Provider email non configurato: le email non partono.")
     if wa_open == 0:
         problemi.append("Nessuna istanza WhatsApp connessa: i messaggi WhatsApp verranno saltati.")
+    elif not wa_server_ok:
+        problemi.append("Istanza WhatsApp presente ma server/Evolution API non configurato (server_url mancante): WhatsApp verrà saltato.")
 
     return {
         "ora_server_utc": now_utc.isoformat(),
@@ -337,6 +348,8 @@ async def alert_diagnostica(cognome: Optional[str] = None,
         "provider_whatsapp_ok": bool(prov_wa),
         "whatsapp_istanze_totali": wa_total,
         "whatsapp_istanze_connesse": wa_open,
+        "whatsapp_server_ok": wa_server_ok,
+        "ultimi_errori": err_events,
         "cliente": cliente_info,
         "problemi_rilevati": problemi,
         "tutto_ok": len(problemi) == 0,

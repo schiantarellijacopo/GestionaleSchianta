@@ -817,3 +817,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - **Backend** (`routes/alert.py`): nuovo endpoint sola-lettura `GET /api/alert-diagnostica?cognome=` (admin). Ritorna: ora server UTC + ora Italia, scheduler attivo/orario globale, n. regole totali/attive/programmate-attive, dettaglio regola documento_id, provider email/sms/whatsapp, istanze WhatsApp totali/connesse, lookup cliente (ci_data_scadenza, canali) e lista `problemi_rilevati` + `tutto_ok`.
 - **Frontend** (`Alert.jsx`): `DiagnosticaCard` con input cognome + bottone "Esegui diagnostica" e report a checklist (verde/ambra) + box problemi. Verificato in UI sul tenant locale c5ae2d0e: scheduler SOSPESO, 0/2 regole attive, regola documento identità assente, email configurata, WhatsApp 0/1 connesse.
 - **Per Railway**: le modifiche vanno deployate su Railway (push su GitHub → redeploy) per poter aprire la Diagnostica direttamente in produzione.
+
+## 2026-11-07 — Diagnostica: esposto il MESSAGGIO D'ERRORE reale degli invii
+- PRODUZIONE Railway: dopo attivazione, la regola documento_id parte e trova i destinatari, ma EMAIL→errore e WHATSAPP→skipped. Test email: errori:1.
+- **Backend** (`routes/alert.py` `/alert-diagnostica`): aggiunti `ultimi_errori` (ultimi 12 eventi status errore/skipped con `error_message`, canale, destinatario, data), `whatsapp_server_ok` (presenza server_url Evolution) e relativo problema in checklist.
+- **Frontend** (`Alert.jsx`): DiagnosticaCard mostra box rosso "Ultimi invii non riusciti (motivo reale)"; Storico invii mostra il testo errore inline sotto l'esito (prima era solo tooltip title, invisibile su mobile).
+- STATO: NON risolto finché non si leggono i messaggi d'errore reali da produzione. Ipotesi: email = auth/relay SMTP; whatsapp = numero destinatario assente o api_key Evolution mancante.
+- Prossimo: utente redeploy su Railway → esegue Diagnostica → invia screenshot del box "Ultimi invii non riusciti" → fix mirato.

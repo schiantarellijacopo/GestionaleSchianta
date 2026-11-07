@@ -333,9 +333,14 @@ export default function Alert() {
                                         <td className="text-xs">{e.destinatario_label || e.destinatario_indirizzo || "—"}</td>
                                         <td>
                                             {e.status === "ok" && <span className="inline-flex items-center gap-1 text-emerald-700 text-xs"><CheckCircle2 size={12} /> Inviata</span>}
-                                            {e.status === "skipped" && <span className="text-amber-700 text-xs" title={e.error_message}>⊘ Skipped</span>}
-                                            {e.status === "errore" && <span className="text-rose-700 text-xs" title={e.error_message}>✕ Errore</span>}
+                                            {e.status === "skipped" && <span className="text-amber-700 text-xs">⊘ Saltata</span>}
+                                            {e.status === "errore" && <span className="text-rose-700 text-xs">✕ Errore</span>}
                                             {e.status === "pending" && <span className="text-slate-500 text-xs">…</span>}
+                                            {(e.status === "errore" || e.status === "skipped") && e.error_message && (
+                                                <div className="text-[11px] text-rose-600 mt-0.5 max-w-[320px] break-words" data-testid={`event-error-${e.id}`}>
+                                                    {e.error_message}
+                                                </div>
+                                            )}
                                         </td>
                                     </tr>
                                 ))}
@@ -519,6 +524,25 @@ function DiagnosticaCard() {
                         ) : (
                             <div className="text-sm bg-emerald-50 border border-emerald-200 rounded p-2 text-emerald-800 flex items-center gap-1">
                                 <CheckCircle2 size={14} /> Tutto configurato correttamente.
+                            </div>
+                        )}
+                        {data.ultimi_errori && data.ultimi_errori.length > 0 && (
+                            <div className="text-sm bg-rose-50 border border-rose-200 rounded p-2" data-testid="diag-errori">
+                                <div className="font-semibold text-rose-800 flex items-center gap-1 mb-1">
+                                    <AlertTriangle size={14} /> Ultimi invii non riusciti (motivo reale)
+                                </div>
+                                <ul className="space-y-1.5">
+                                    {data.ultimi_errori.map((e, i) => (
+                                        <li key={i} className="text-rose-900 border-b border-rose-100 pb-1 last:border-0">
+                                            <span className="text-[11px] text-rose-500">{fmtDate(e.created_at)}</span>{" "}
+                                            <span className="inline-block text-[10px] uppercase px-1 rounded bg-rose-100 text-rose-700">{e.canale}</span>{" "}
+                                            <span className="font-medium">{e.destinatario_label}</span>
+                                            {" — "}
+                                            <span className="italic">{e.status === "skipped" ? "saltato" : "errore"}:</span>{" "}
+                                            <span className="break-words">{e.error_message || "—"}</span>
+                                        </li>
+                                    ))}
+                                </ul>
                             </div>
                         )}
                     </div>
