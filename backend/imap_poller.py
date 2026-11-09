@@ -122,13 +122,16 @@ def _extract_body(msg) -> tuple[str, str]:
 
 
 def _extract_attachments(msg, *, uid: int) -> list[dict]:
-    """Estrae gli allegati dal messaggio MIME e li salva nello storage.
+    """Estrae gli allegati dal messaggio MIME conservando i byte INLINE (base64)
+    nel record email.
 
-    Restituisce lista di dict ``{filename, content_type, size, storage_path, url}``.
-    Storage path: ``email/<uid>/<index>_<filename_sanitized>``.
+    Direttiva archiviazione: nessun upload verso object storage Emergent o GridFS
+    in questa fase. Gli allegati vengono poi archiviati SOLO su Google Drive quando
+    collegati a un'entità (vedi ``_store_email_doc``). ``storage_path`` resta un
+    riferimento logico (``email/<uid>/<idx>_<file>``) usato per de-duplica/matching.
     """
     import re as _re
-    import storage as obj_storage
+    import base64 as _b64
     out: list[dict] = []
     if not msg.is_multipart():
         return out
@@ -154,22 +157,13 @@ def _extract_attachments(msg, *, uid: int) -> list[dict]:
         # sanitize filename
         safe = _re.sub(r"[^\w.\- ]+", "_", filename)[:120].strip() or f"file_{idx}"
         path = f"email/{uid}/{idx}_{safe}"
-        rec = {
+        out.append({
             "filename": filename,
             "content_type": ctype,
             "size": len(payload),
             "storage_path": path,
-            "url": f"/api/storage/{path}",
-        }
-        try:
-            obj_storage.put_object(path, payload, ctype)
-        except Exception:
-            # Object storage non disponibile (es. Railway): conserva i byte nel DB
-            # in base64 così l'allegato resta scaricabile e processabile (OCR).
-            import base64 as _b64
-            rec["data_b64"] = _b64.b64encode(payload).decode("ascii")
-            logger.warning("Storage non disponibile per %s: allegato salvato in DB (base64)", filename)
-        out.append(rec)
+            "data_b64": _b64.b64encode(payload).decode("ascii"),
+        })
         idx += 1
     return out
 
@@ -352,13 +346,53 @@ def _allegabili(attachments: list[dict]) -> list[dict]:
     return out
 
 
+async def _store_email_doc(
+    *, tenant_id: Optional[str], entita_tipo: str, entita_id: str,
+    categoria: Optional[str], filename: str, data: bytes, mime: str, doc_id: str,
+) -> dict:
+    """Archivia un documento acquisito via email ESCLUSIVAMENTE su Google Drive.
+
+    Direttiva: niente object storage Emergent, niente GridFS. Si tenta SOLO il
+    cloud dell'agenzia (Drive). Se il cloud non è collegato / fallisce, i byte
+    restano temporaneamente inline nel record (base64) con ``pending_sync=True``
+    e verranno spostati su Drive dal backfill automatico (``sync_pending_for_tenant``).
+
+    Ritorna i campi di storage da applicare al record Allegato.
+    """
+    from cloud_doc_sync import mirror_document, alleg_label
+    cloud = None
+    if tenant_id:
+        try:
+            base = filename.rsplit(".", 1)[0] if "." in filename else filename
+            cloud = await mirror_document(
+                tenant_id=tenant_id, entita_tipo=entita_tipo, entita_id=entita_id,
+                doc_label_text=alleg_label(categoria), doc_id=doc_id,
+                data=data, mime=mime, filename=filename, file_label=base,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Drive upload email doc '%s' fallito: %s", filename, str(e)[:160])
+    if cloud:
+        logger.info("Email doc '%s' archiviato su Google Drive (%s)", filename, cloud.get("path"))
+        return {"storage_provider": cloud["provider"], "cloud_sync": cloud, "pending_sync": False}
+    # Fallback SENZA objstore/GridFS: byte inline, in attesa di sync su Drive.
+    import base64 as _b64
+    logger.warning(
+        "Drive non disponibile (tenant=%s): documento email '%s' tenuto inline, pending Drive",
+        tenant_id, filename)
+    return {"storage_provider": "pending_drive",
+            "data_b64": _b64.b64encode(data).decode("ascii"), "pending_sync": True}
+
+
+
 async def _copia_allegato_su_entita(
     db: AsyncIOMotorDatabase, att: dict, *, entita_tipo: str, entita_id: str,
-    categoria: str, subject: str,
+    categoria: str, subject: str, tenant_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """Copia un allegato email nello storage dell'entità e crea il record Allegato."""
-    import os as _os
-    import storage as obj_storage
+    """Copia un allegato email sull'entità creando il record Allegato.
+
+    Archiviazione ESCLUSIVA su Google Drive (vedi ``_store_email_doc``): nessun
+    tentativo verso object storage Emergent o GridFS.
+    """
     from db_models import Allegato
     # idempotenza: stesso file già copiato su questa entità
     dup = await db.allegati.find_one(
@@ -371,27 +405,24 @@ async def _copia_allegato_su_entita(
     except Exception:
         logger.exception("Impossibile leggere allegato %s", att.get("storage_path"))
         return None
-    app_name = _os.environ.get("APP_NAME", "assicura")
-    new_path = f"{app_name}/{entita_tipo}/{entita_id}/email_{_now_iso()[:10]}_{att['filename']}"
-    _data_b64 = None
-    try:
-        obj_storage.put_object(new_path, data, ctype or "application/octet-stream")
-    except Exception:
-        # Storage non disponibile (Railway): conserva l'allegato nel DB (base64)
-        import base64 as _b64
-        _data_b64 = _b64.b64encode(data).decode("ascii")
-        logger.warning("Storage non disponibile: allegato %s salvato in DB (base64)", att.get("filename"))
+    mime = ctype or att.get("content_type") or "application/octet-stream"
     alleg = Allegato(
         entita_tipo=entita_tipo, entita_id=entita_id,
         nome_file=att["filename"],
-        storage_path=new_path,
-        content_type=ctype or att.get("content_type") or "application/octet-stream",
+        storage_path="",  # cloud-only: il file vive su Drive (cloud_sync)
+        content_type=mime,
         size=len(data),
         autore_id=None,
     ).model_dump()
-    if _data_b64:
-        alleg["data_b64"] = _data_b64
-    alleg["url"] = f"/api/storage/{new_path}"
+    store = await _store_email_doc(
+        tenant_id=tenant_id, entita_tipo=entita_tipo, entita_id=entita_id,
+        categoria=categoria, filename=att["filename"], data=data, mime=mime,
+        doc_id=alleg["id"])
+    alleg.update(store)
+    if store.get("cloud_sync", {}).get("link"):
+        alleg["url"] = store["cloud_sync"]["link"]
+    if tenant_id:
+        alleg["agenzia_tenant_id"] = tenant_id
     alleg["fonte"] = "email_imap"
     alleg["visibile_cliente"] = False
     alleg["categoria"] = categoria
@@ -399,12 +430,13 @@ async def _copia_allegato_su_entita(
     alleg["origine_storage_path"] = att.get("storage_path")
     await db.allegati.insert_one(alleg)
     return {"entita_tipo": entita_tipo, "entita_id": entita_id,
-            "filename": att["filename"], "storage_path": new_path}
+            "filename": att["filename"], "storage_path": att.get("storage_path"),
+            "cloud": bool(store.get("cloud_sync"))}
 
 
 async def _auto_allega_sinistro(
     db: AsyncIOMotorDatabase, *, subject: str, body_text: str,
-    attachments: list[dict], anagrafica_id: Optional[str],
+    attachments: list[dict], anagrafica_id: Optional[str], tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Collega allegati (PDF e foto) a un sinistro: match per numero sinistro /
     numero interno citato, oppure fallback sull'unico sinistro aperto del cliente
@@ -444,7 +476,7 @@ async def _auto_allega_sinistro(
         for att in docs:
             m = await _copia_allegato_su_entita(
                 db, att, entita_tipo="sinistro", entita_id=sin["id"],
-                categoria="documentazione_sinistro", subject=subject)
+                categoria="documentazione_sinistro", subject=subject, tenant_id=tenant_id)
             if m:
                 m["numero_sinistro"] = sin.get("numero_sinistro") or sin.get("numero_interno")
                 matches.append(m)
@@ -454,7 +486,7 @@ async def _auto_allega_sinistro(
 async def _auto_allega_anagrafica(
     db: AsyncIOMotorDatabase, *, subject: str,
     attachments: list[dict], anagrafica_id: str,
-    esclusi_paths: set[str],
+    esclusi_paths: set[str], tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Fallback: gli allegati del cliente non collegati a polizza/sinistro finiscono
     nei Documenti della sua anagrafica."""
@@ -464,7 +496,7 @@ async def _auto_allega_anagrafica(
             continue
         m = await _copia_allegato_su_entita(
             db, att, entita_tipo="anagrafica", entita_id=anagrafica_id,
-            categoria="documento_da_email", subject=subject)
+            categoria="documento_da_email", subject=subject, tenant_id=tenant_id)
         if m:
             matches.append(m)
     return matches
@@ -472,7 +504,7 @@ async def _auto_allega_anagrafica(
 
 async def _auto_allega_polizza(
     db: AsyncIOMotorDatabase, *, subject: str, body_text: str,
-    attachments: list[dict], anagrafica_id: Optional[str],
+    attachments: list[dict], anagrafica_id: Optional[str], tenant_id: Optional[str] = None,
 ) -> list[dict]:
     """Se una mail ha allegati PDF e nel testo/oggetto/nome file è citato un
     numero polizza esistente, crea automaticamente un record `Allegato`
@@ -510,49 +542,45 @@ async def _auto_allega_polizza(
         # per evitare falsi positivi
         return []
 
-    # Per ogni polizza matchata + ogni PDF, crea un allegato
+    # Per ogni polizza matchata + ogni PDF, crea un allegato (Drive-only)
     for pol in polizze:
         for att in pdf_attachments:
-            # Recupera i byte dal path già salvato per copiarli in un path polizza-scoped
             try:
                 data, ctype = attachment_bytes(att)
             except Exception:
                 logger.exception("Impossibile leggere allegato %s per riclassificazione polizza",
                                  att.get("storage_path"))
                 continue
-            import os as _os
-            app_name = _os.environ.get("APP_NAME", "assicura")
-            new_path = f"{app_name}/polizze/{pol['id']}/firmata_email_{_now_iso()[:10]}_{att['filename']}"
-            _b64p = None
-            try:
-                obj_storage.put_object(new_path, data, ctype or "application/pdf")
-            except Exception:
-                import base64 as _b64
-                _b64p = _b64.b64encode(data).decode("ascii")
-                logger.warning("Storage non disponibile: allegato polizza %s in DB (base64)", pol["id"])
+            mime = ctype or att.get("content_type") or "application/pdf"
             alleg = Allegato(
                 entita_tipo="polizza", entita_id=pol["id"],
                 nome_file=att["filename"],
-                storage_path=new_path,
-                content_type=ctype or att.get("content_type") or "application/pdf",
+                storage_path="",  # cloud-only: vive su Drive
+                content_type=mime,
                 size=len(data),
                 autore_id=None,   # System via IMAP
             ).model_dump()
-            if _b64p:
-                alleg["data_b64"] = _b64p
-            alleg["url"] = f"/api/storage/{new_path}"
+            store = await _store_email_doc(
+                tenant_id=tenant_id, entita_tipo="polizza", entita_id=pol["id"],
+                categoria="quietanza", filename=att["filename"], data=data, mime=mime,
+                doc_id=alleg["id"])
+            alleg.update(store)
+            if store.get("cloud_sync", {}).get("link"):
+                alleg["url"] = store["cloud_sync"]["link"]
+            if tenant_id:
+                alleg["agenzia_tenant_id"] = tenant_id
             alleg["fonte"] = "email_imap"
             alleg["visibile_cliente"] = False
             alleg["categoria"] = "polizza_firmata"
             alleg["origine_email_subject"] = (subject or "")[:200]
+            alleg["origine_storage_path"] = att.get("storage_path")
             await db.allegati.insert_one(alleg)
-            # Idempotenza: se dovesse riarrivare per ripolling, il match sarà lo stesso e
-            # basta un uniqueness soft (per storage_path).
+            # Idempotenza: se dovesse riarrivare per ripolling, il match sarà lo stesso.
             matches.append({
                 "polizza_id": pol["id"],
                 "numero_polizza": pol.get("numero_polizza"),
                 "filename": att["filename"],
-                "storage_path": new_path,
+                "storage_path": att.get("storage_path"),
             })
     return matches
 
@@ -573,6 +601,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
     pwd = clean_password(az.get("imap_password"))
     folder = az.get("imap_folder") or "INBOX"
     last_uid = int(az.get("imap_poller_last_uid") or 0)
+    tenant_id = az.get("agenzia_tenant_id")
 
     if not (host and user_ and pwd):
         return {"ok": False, "errore": "IMAP non configurato"}
@@ -747,6 +776,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                         polizze_matched = await _auto_allega_polizza(
                             db, subject=subject or "", body_text=body_text or "",
                             attachments=attachments, anagrafica_id=anagrafica_id,
+                            tenant_id=tenant_id,
                         )
                     except Exception:
                         logger.exception("Errore auto-allegamento polizza per email UID=%s", uid)
@@ -754,6 +784,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                         sinistri_matched = await _auto_allega_sinistro(
                             db, subject=subject or "", body_text=body_text or "",
                             attachments=attachments, anagrafica_id=anagrafica_id,
+                            tenant_id=tenant_id,
                         )
                     except Exception:
                         logger.exception("Errore auto-allegamento sinistro per email UID=%s", uid)
@@ -770,6 +801,7 @@ async def poll_once(db: AsyncIOMotorDatabase) -> dict:
                             anagrafica_matched = await _auto_allega_anagrafica(
                                 db, subject=subject or "", attachments=attachments,
                                 anagrafica_id=anagrafica_id, esclusi_paths=esclusi,
+                                tenant_id=tenant_id,
                             )
                         except Exception:
                             logger.exception("Errore auto-allegamento anagrafica per email UID=%s", uid)
@@ -858,9 +890,12 @@ async def retry_auto_allega(db: AsyncIOMotorDatabase, *, limit: int = 500) -> di
             {"polizze_matched": {"$exists": False}},
         ],
     }
+    _az = await get_active_config(db)
+    _az_tid = _az.get("agenzia_tenant_id")
     cursor = db.email_inbox.find(
         q, {"_id": 0, "id": 1, "uid": 1, "folder": 1, "subject": 1, "body_text": 1,
-            "attachments": 1, "anagrafica_id": 1, "from_name": 1, "from_address": 1},
+            "attachments": 1, "anagrafica_id": 1, "from_name": 1, "from_address": 1,
+            "agenzia_tenant_id": 1},
     ).limit(limit)
     esaminate = 0
     con_match = 0
@@ -875,19 +910,20 @@ async def retry_auto_allega(db: AsyncIOMotorDatabase, *, limit: int = 500) -> di
         subject = em.get("subject") or ""
         body_text = em.get("body_text") or ""
         anagrafica_id = em.get("anagrafica_id")
+        _tid = em.get("agenzia_tenant_id") or _az_tid
         polizze_matched: list[dict] = []
         sinistri_matched: list[dict] = []
         anagrafica_matched: list[dict] = []
         try:
             polizze_matched = await _auto_allega_polizza(
                 db, subject=subject, body_text=body_text,
-                attachments=attachments, anagrafica_id=anagrafica_id)
+                attachments=attachments, anagrafica_id=anagrafica_id, tenant_id=_tid)
         except Exception:
             logger.exception("retry: errore auto-allega polizza email %s", em.get("uid"))
         try:
             sinistri_matched = await _auto_allega_sinistro(
                 db, subject=subject, body_text=body_text,
-                attachments=attachments, anagrafica_id=anagrafica_id)
+                attachments=attachments, anagrafica_id=anagrafica_id, tenant_id=_tid)
         except Exception:
             logger.exception("retry: errore auto-allega sinistro email %s", em.get("uid"))
         if anagrafica_id:
@@ -897,7 +933,7 @@ async def retry_auto_allega(db: AsyncIOMotorDatabase, *, limit: int = 500) -> di
                            if a.get("filename") in origine_usate}
                 anagrafica_matched = await _auto_allega_anagrafica(
                     db, subject=subject, attachments=attachments,
-                    anagrafica_id=anagrafica_id, esclusi_paths=esclusi)
+                    anagrafica_id=anagrafica_id, esclusi_paths=esclusi, tenant_id=_tid)
             except Exception:
                 logger.exception("retry: errore auto-allega anagrafica email %s", em.get("uid"))
         if polizze_matched or sinistri_matched or anagrafica_matched:

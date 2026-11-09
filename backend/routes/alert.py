@@ -274,7 +274,17 @@ async def alert_diagnostica(cognome: Optional[str] = None,
     prov_sms = await db.alert_providers.find_one({"tipo": "sms", "enabled": True}, {"_id": 0})
     prov_wa = await db.alert_providers.find_one({"tipo": "whatsapp", "enabled": True}, {"_id": 0})
     import os as _os
-    email_ok = bool(prov_email) or bool(_os.environ.get("SMTP_HOST"))
+    # Email via Gmail API (connessione Google OAuth dell'agenzia) — canale preferito.
+    from tenant import user_tenant_id as _utid
+    _tid = _utid(user)
+    g_conn = await db.cloud_connections.find_one(
+        {"tenant_id": _tid, "provider": "google_drive"},
+        {"_id": 0, "scopes": 1, "account_email": 1}) if _tid else None
+    gmail_scope_ok = bool(g_conn and "gmail.send" in (g_conn.get("scopes") or ""))
+    gmail_account = (g_conn or {}).get("account_email")
+    # Email OK se: Gmail API pronto, oppure SMTP configurato (fallback legacy).
+    smtp_ok = bool(prov_email) or bool(_os.environ.get("SMTP_HOST"))
+    email_ok = gmail_scope_ok or smtp_ok
 
     # Istanze WhatsApp connesse
     wa_total = await db.whatsapp_instances.count_documents({})
@@ -326,7 +336,9 @@ async def alert_diagnostica(cognome: Optional[str] = None,
     elif not any(r.get("attivo") for r in doc_id_rules):
         problemi.append("La regola «Documento d'identità» esiste ma NON è attiva.")
     if not email_ok:
-        problemi.append("Provider email non configurato: le email non partono.")
+        problemi.append("Email non configurata: collega Google (Librerie → Cloud Storage) per l'invio via Gmail API, oppure imposta l'SMTP in Comunicazioni.")
+    elif g_conn and not gmail_scope_ok:
+        problemi.append("Google collegato ma SENZA permesso invio email: ricollega Google (Cloud Storage) per autorizzare Gmail (scope gmail.send).")
     if wa_open == 0:
         problemi.append("Nessuna istanza WhatsApp connessa: i messaggi WhatsApp verranno saltati.")
     elif not wa_server_ok:
@@ -344,6 +356,9 @@ async def alert_diagnostica(cognome: Optional[str] = None,
         "regola_documento_identita": [_rule_brief(r) for r in doc_id_rules],
         "regole_attive_dettaglio": [_rule_brief(r) for r in schedule_attive],
         "provider_email_ok": email_ok,
+        "email_gmail_api_ok": gmail_scope_ok,
+        "email_gmail_account": gmail_account,
+        "email_smtp_ok": smtp_ok,
         "provider_sms_ok": bool(prov_sms),
         "provider_whatsapp_ok": bool(prov_wa),
         "whatsapp_istanze_totali": wa_total,

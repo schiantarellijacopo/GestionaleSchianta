@@ -831,3 +831,14 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - **Fix whatsapp** (`alert_dispatcher.py` send_whatsapp): normalizzazione numero → strip non-cifre, rimuove `00` iniziale, se <=10 cifre antepone prefisso `WHATSAPP_DEFAULT_CC` (default "39"). Verificato: 3402934389/00393402934389/+39.../393402934389 → 393402934389.
 - NOTA: alcune righe whatsapp "saltato: destinatario assente" = quel record anagrafica non ha cellulare/whatsapp salvato.
 - STATO: fix applicati e logica verificata in locale; consegna reale SMTP/Evolution NON verificabile dalla preview (serve redeploy Railway + retest). Se email ancora KO dopo redeploy: confermare host/porta SMTP (465 vs 587).
+
+## 2026-11-09 — Email avvisi via GMAIL API (OAuth per-agenzia) + IMAP allegati solo su Drive
+- VERIFICA richiesta: la tab Librerie → Comunicazioni ha già Email = Google (Gmail/Workspace) via App Password = SMTP (smtp.gmail.com:587). È ATTIVA ma SMTP è bloccato da Railway → "Connection unexpectedly closed". Resend scartato su richiesta utente.
+- **Nuovo invio email = Gmail API ufficiale, token per-agenzia** (direttiva utente):
+  - `routes/cloud_storage.py`: scope esteso `drive + gmail.send + userinfo.email`; client OAuth globale ora legge `GOOGLE_CLIENT_ID/SECRET` con fallback a `GOOGLE_DRIVE_CLIENT_ID/SECRET`; al callback OAuth salva `account_email` (mittente) nella connessione del tenant.
+  - `gmail_send.py` (NUOVO): `send_gmail()` (POST gmail.googleapis.com users/me/messages/send, MIME base64url, rileva 403 insufficientPermissions → GmailNeedsReconsent) e `send_tenant_email(tenant_id,...)` che usa il refresh_token dell'agenzia (cloud_connections) e `_fresh_access_token`.
+  - `alert_dispatcher.send_email`: PRIMA Gmail API col token del tenant (se Google collegato); FALLBACK legacy SMTP; Resend rimosso. Errori azionabili (ricollega Google / configura SMTP).
+  - `routes/alert.py` /alert-diagnostica: campi `email_gmail_api_ok`, `email_gmail_account`, `email_smtp_ok`; problema "Google collegato ma senza gmail.send → ricollega". Frontend Alert.jsx: riga "Email (invio): Gmail API · account / SMTP".
+- AZIONE UTENTE per attivare: redeploy Railway → Librerie → Cloud Storage → **ricollega Google** (grant gmail.send + userinfo.email; serve anche aggiungere lo scope gmail.send nella OAuth consent screen del progetto Google Cloud). Poi gli avvisi email partono via Gmail API (HTTPS, non bloccato).
+- IMAP→Drive (sessione precedente): allegati email archiviati SOLO su Google Drive via `_store_email_doc`; bypass objstore/GridFS; fallback inline b64 pending→Drive; download/backfill gestiscono inline. Verificato: allegato email → provider google_drive, cloud:True.
+- Verificato in preview (mirror tenant c5ae2d0e): diagnostica mostra Google connesso solo-Drive → email_gmail_api_ok False, messaggio ricollega; import OK, backend sano.

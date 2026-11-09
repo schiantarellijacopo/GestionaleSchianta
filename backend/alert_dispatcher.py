@@ -294,32 +294,72 @@ async def _load_provider(tipo: str) -> dict:
 
 
 async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
-    """Invia email via SMTP. Provider config dal DB (preferenza) o env (fallback)."""
+    """Invia email dell'agenzia corrente.
+
+    Priorità: Gmail API ufficiale col token OAuth dell'agenzia (scope gmail.send,
+    stessa connessione Google del Drive) — funziona anche dove l'SMTP è bloccato
+    (es. Railway). Se l'agenzia non ha Google collegato, ripiega sull'SMTP
+    configurato in Librerie → Comunicazioni.
+    """
     to_email = dest.get("email")
     if not to_email:
         return {"status": "skipped", "error": "email destinatario assente"}
+
+    # tenant corrente (dal rule o dal contesto JWT)
+    tenant_id = rule.get("agenzia_tenant_id")
+    if not tenant_id:
+        try:
+            from tenant import user_tenant_id as _utid
+            from database import get_current_user
+            tenant_id = _utid(get_current_user())
+        except Exception:
+            tenant_id = None
+
+    subject = ctx.get("oggetto") or rule.get("nome") or "Notifica"
+    body = ctx.get("corpo") or ""
+    html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
+
+    # 1) Gmail API con il token OAuth dell'agenzia (preferito)
+    if tenant_id:
+        from database import db as _db
+        conn = await _db.cloud_connections.find_one(
+            {"tenant_id": tenant_id, "provider": "google_drive"}, {"_id": 1})
+        if conn:
+            from gmail_send import send_tenant_email, GmailNeedsReconsent, GmailNotConnected
+            try:
+                await send_tenant_email(tenant_id, to_email, subject, html, body)
+                return {"status": "ok"}
+            except GmailNeedsReconsent:
+                return {"status": "errore",
+                        "error": "Google collegato ma senza permesso invio email. Ricollega "
+                                 "Google da Librerie → Cloud Storage per autorizzare l'invio (Gmail)."}
+            except GmailNotConnected as e:
+                logger.info("Gmail non collegato per tenant=%s: %s", tenant_id, e)
+            except Exception as e:
+                logger.error("Invio Gmail API fallito tenant=%s: %s", tenant_id, str(e)[:200])
+                return {"status": "errore", "error": f"Gmail API: {str(e)[:200]}"}
+
+    # 2) Fallback legacy: SMTP configurato in Comunicazioni
     cfg = await _load_provider("email")
     host = cfg.get("smtp_host")
     user = cfg.get("smtp_user")
     pwd = cfg.get("smtp_password")
     sender = cfg.get("smtp_from") or user
     if not (host and user and pwd and sender):
-        return {"status": "skipped", "error": "Provider Email non configurato — vai in /alert → tab Configurazione"}
+        return {"status": "skipped",
+                "error": "Email non configurata: collega Google (Librerie → Cloud Storage) "
+                         "oppure imposta l'SMTP in Librerie → Comunicazioni."}
     try:
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = ctx.get("oggetto") or rule.get("nome") or "Notifica"
+        msg["Subject"] = subject
         from_name = cfg.get("smtp_from_name")
         msg["From"] = f"{from_name} <{sender}>" if from_name else sender
         msg["To"] = to_email
-        body = ctx.get("corpo") or ""
         msg.attach(MIMEText(body, "plain", "utf-8"))
-        html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
         msg.attach(MIMEText(html, "html", "utf-8"))
 
         configured_port = int(cfg.get("smtp_port") or 587)
         want_ssl = bool(cfg.get("smtp_ssl")) or configured_port == 465
-        # Prova la modalità configurata, poi l'altra combinazione standard
-        # (SSL/465 <-> STARTTLS/587): auto-corregge porta/modalità errata.
         if want_ssl:
             attempts = [("ssl", configured_port), ("starttls", 587)]
         else:
@@ -339,12 +379,13 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
                         srv.sendmail(sender, [to_email], msg.as_string())
                 return {"status": "ok"}
             except smtplib.SMTPAuthenticationError as e:
-                # Credenziali errate: inutile riprovare l'altra porta
                 return {"status": "errore", "error": f"Autenticazione SMTP fallita: {e}"}
             except Exception as e:
                 last_err = e
                 continue
-        return {"status": "errore", "error": f"{type(last_err).__name__}: {last_err}"}
+        return {"status": "errore",
+                "error": f"SMTP non raggiungibile ({type(last_err).__name__}: {last_err}). "
+                         f"Suggerito: collega Google in Cloud Storage per l'invio via Gmail API."}
     except Exception as e:
         return {"status": "errore", "error": str(e)}
 

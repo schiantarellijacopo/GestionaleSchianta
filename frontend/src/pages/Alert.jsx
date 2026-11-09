@@ -499,8 +499,10 @@ function DiagnosticaCard() {
                             {data.regola_documento_identita.length === 0 ? "assente"
                                 : (data.regola_documento_identita.some((x) => x.attivo) ? "attiva" : "non attiva")}
                         </Row>
-                        <Row label="Provider email" ok={data.provider_email_ok}>
-                            {data.provider_email_ok ? "configurato" : "mancante"}
+                        <Row label="Email (invio)" ok={data.provider_email_ok}>
+                            {data.email_gmail_api_ok
+                                ? `Gmail API${data.email_gmail_account ? " · " + data.email_gmail_account : ""}`
+                                : (data.email_smtp_ok ? "SMTP (Railway può bloccarlo)" : "non configurata")}
                         </Row>
                         <Row label="WhatsApp connesso" ok={data.whatsapp_istanze_connesse > 0}>
                             {data.whatsapp_istanze_connesse} / {data.whatsapp_istanze_totali} istanze

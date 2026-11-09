@@ -44,8 +44,11 @@ log = logging.getLogger("cloud_storage")
 # ============================================================
 # Config da environment
 # ============================================================
-GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_DRIVE_CLIENT_ID", "")
-GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_DRIVE_CLIENT_SECRET", "")
+# Client OAuth Google GLOBALE dell'app (una sola app Google per tutte le agenzie).
+# Accetta i nomi "globali" GOOGLE_CLIENT_ID/SECRET con fallback ai vecchi
+# GOOGLE_DRIVE_CLIENT_ID/SECRET (retrocompatibilità con la config esistente).
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID") or os.environ.get("GOOGLE_DRIVE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET") or os.environ.get("GOOGLE_DRIVE_CLIENT_SECRET", "")
 MS_CLIENT_ID = os.environ.get("MS_ONEDRIVE_CLIENT_ID", "")
 MS_CLIENT_SECRET = os.environ.get("MS_ONEDRIVE_CLIENT_SECRET", "")
 MS_TENANT = os.environ.get("MS_ONEDRIVE_TENANT", "common")
@@ -55,7 +58,11 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL") or BACKEND_PUBLIC_URL
 
 REDIRECT_URI = f"{BACKEND_PUBLIC_URL}/api/librerie/cloud-storage/callback" if BACKEND_PUBLIC_URL else ""
 
-G_SCOPE = "https://www.googleapis.com/auth/drive"
+# Scope Google: Drive (archiviazione documenti) + Gmail invio (notifiche email via
+# Gmail API) + userinfo.email (per conoscere l'indirizzo mittente dell'agenzia).
+G_SCOPE = ("https://www.googleapis.com/auth/drive "
+           "https://www.googleapis.com/auth/gmail.send "
+           "https://www.googleapis.com/auth/userinfo.email")
 M_SCOPE = "openid profile offline_access Files.ReadWrite User.Read"
 
 # Struttura cartelle standard che il CRM crea automaticamente quando l'agenzia
@@ -400,6 +407,18 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
             400,
             "Nessun refresh_token restituito. Revoca l'accesso dall'account provider e riprova.",
         )
+    # Indirizzo email dell'account Google collegato (mittente per l'invio Gmail API).
+    account_email = None
+    if provider == "google_drive" and t.get("access_token"):
+        try:
+            async with httpx.AsyncClient(timeout=15) as x:
+                ui = await x.get(
+                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                    headers={"Authorization": f"Bearer {t['access_token']}"})
+            if ui.status_code == 200:
+                account_email = (ui.json() or {}).get("email")
+        except Exception as e:
+            log.warning("Userinfo email non recuperata (tenant=%s): %s", st["tenant_id"], str(e)[:160])
     # UPSERT per tenant (1 drive per agenzia). Al (ri)collegamento ripartiamo da uno
     # stato PULITO: azzeriamo folder_id/root custom e svuotiamo la cache dei path,
     # altrimenti se l'utente ha cancellato le cartelle dentro Drive la cache punterebbe
@@ -415,6 +434,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
             "agenzia_tenant_id": st["tenant_id"],
             "refresh_token": _enc(refresh),
             "scopes": t.get("scope", cfg["scope"]),
+            "account_email": account_email,
             "connected_at": _now().isoformat(),
             "connected_by": st["user_id"],
             "folder_id": None,

@@ -328,7 +328,10 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500,
         al_filter = {
             "is_deleted": {"$ne": True},
             "cloud_sync.file_id": {"$exists": False},
-            "storage_path": {"$exists": True, "$nin": ["", None]},
+            "$or": [
+                {"storage_path": {"$exists": True, "$nin": ["", None]}},
+                {"data_b64": {"$exists": True, "$nin": ["", None]}},
+            ],
         }
     else:
         al_filter = {"pending_sync": True, "is_deleted": {"$ne": True}}
@@ -339,14 +342,25 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500,
     # applicato automaticamente dal wrapper DB in base all'utente corrente.
     cur = db.allegati.find(al_filter, {"_id": 0}).limit(limit)
     async for al in cur:
-        if not al.get("storage_path"):
-            failed += 1
-            continue
-        try:
-            data, mime = obj_storage.get_object(al["storage_path"])
-        except Exception as e:
-            logger.warning("Backfill: file interno mancante (allegato id=%s, path=%s): %s",
-                           al.get("id"), al.get("storage_path"), str(e)[:160])
+        sp = al.get("storage_path")
+        # Byte: inline (documenti email) oppure da storage interno legacy.
+        if al.get("data_b64"):
+            import base64 as _b64
+            try:
+                data = _b64.b64decode(al["data_b64"])
+                mime = al.get("content_type") or "application/octet-stream"
+            except Exception:
+                failed += 1
+                continue
+        elif sp:
+            try:
+                data, mime = obj_storage.get_object(sp)
+            except Exception as e:
+                logger.warning("Backfill: file interno mancante (allegato id=%s, path=%s): %s",
+                               al.get("id"), sp, str(e)[:160])
+                failed += 1
+                continue
+        else:
             failed += 1
             continue
         sync = await mirror_document(
@@ -359,12 +373,13 @@ async def sync_pending_for_tenant(tenant_id: str, limit: int = 500,
                 {"id": al["id"]},
                 {"$set": {"storage_provider": sync["provider"], "cloud_sync": sync,
                           "pending_sync": False},
-                 "$unset": {"storage_path": ""}},
+                 "$unset": {"storage_path": "", "data_b64": ""}},
             )
-            try:
-                obj_storage.delete_object(al["storage_path"])
-            except Exception:
-                pass
+            if sp:
+                try:
+                    obj_storage.delete_object(sp)
+                except Exception:
+                    pass
             moved += 1
         else:
             failed += 1
@@ -514,6 +529,9 @@ async def read_allegato_bytes(al: dict) -> tuple[bytes, str]:
                                         cloud["file_id"])
         if res:
             return res
+    if al.get("data_b64"):
+        import base64 as _b64
+        return _b64.b64decode(al["data_b64"]), al.get("content_type") or "application/octet-stream"
     return obj_storage.get_object(al["storage_path"])
 
 

@@ -17976,6 +17976,16 @@ async def download_allegato(aid: str, user=Depends(current_user)):
     try:
         data, ctype = obj_storage.get_object(rec["storage_path"])
     except Exception as e:
+        # Documento acquisito via email e tenuto inline (pending sync su Drive)
+        if rec.get("data_b64"):
+            import base64 as _b64
+            data = _b64.b64decode(rec["data_b64"])
+            ctype = rec.get("content_type") or "application/octet-stream"
+            return StreamingResponse(
+                _io.BytesIO(data),
+                media_type=ctype,
+                headers={"Content-Disposition": f'inline; filename="{rec["nome_file"]}"'},
+            )
         raise HTTPException(503, f"Errore download: {e}")
     return StreamingResponse(
         _io.BytesIO(data),

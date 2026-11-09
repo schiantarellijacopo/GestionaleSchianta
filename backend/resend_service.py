@@ -72,6 +72,26 @@ async def _send(to: str, subject: str, html: str) -> dict:
         return {"status": "error", "error": str(e), "to": to}
 
 
+async def send_via_resend(to: str, subject: str, html: str) -> dict:
+    """Invia una email SOLO via Resend (HTTP, porta 443) — niente SMTP.
+
+    Usato come fallback quando l'SMTP è bloccato dalla piattaforma (es. Railway
+    blocca le porte SMTP in uscita). In MOCK mode (chiave assente) logga soltanto.
+    """
+    if is_mock_mode():
+        logger.info("[EMAIL MOCK/Resend] to=%s subject=%r", to, subject)
+        return {"status": "mock", "to": to, "subject": subject}
+    try:
+        import resend  # type: ignore
+        resend.api_key = _api_key()
+        params = {"from": _sender(), "to": [to], "subject": subject, "html": html}
+        res = await asyncio.to_thread(resend.Emails.send, params)
+        return {"status": "sent", "transport": "resend", "id": (res or {}).get("id"), "to": to}
+    except Exception as e:
+        logger.error("resend send failed to=%s: %s", to, e)
+        return {"status": "error", "error": str(e), "to": to}
+
+
 def _html_wrap(title: str, body_html: str, cta_url: Optional[str] = None, cta_label: Optional[str] = None) -> str:
     """Template email HTML con inline CSS (email-safe)."""
     cta_block = ""
