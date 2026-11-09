@@ -7756,7 +7756,13 @@ function CloudStorageSezione() {
     const autoInitDone = useRef({});
 
     const maybeAutoInit = async (conns) => {
+        // Solo i provider di ARCHIVIAZIONE hanno una struttura cartelle da creare.
+        // La connessione Gmail (provider "gmail") serve solo all'invio email e NON
+        // deve mai avviare la configurazione cartelle (altrimenti l'endpoint
+        // init-structure rifiuta il provider con un errore di validazione).
+        const STORAGE_PROVIDERS = ["google_drive", "onedrive"];
         for (const c of conns) {
+            if (!STORAGE_PROVIDERS.includes(c.provider)) continue;
             if (c.connected && !c.structure_initialized_at && !autoInitDone.current[c.provider]) {
                 autoInitDone.current[c.provider] = true;
                 try {

@@ -1,5 +1,13 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Fix: errore "Configurazione automatica cartelle non riuscita" (provider gmail)
+- **Sintomo (produzione)**: toast "Configurazione automatica cartelle non riuscita: String should match pattern '^(google_drive|onedrive)$'" nella pagina Librerie → Cloud Storage.
+- **Causa**: dopo l'aggiunta della connessione Gmail OAuth dedicata, l'endpoint `status` restituisce anche una connessione `provider="gmail"`. Il frontend `CloudStorageSezione.maybeAutoInit` iterava su TUTTE le connessioni collegate e chiamava `/cloud-storage/init-structure` anche per `gmail`, ma l'endpoint accetta solo `google_drive|onedrive` → errore di validazione. Il Drive era comunque collegato correttamente (nessun problema di credenziali).
+- **Fix** (`Librerie.jsx`): l'auto-init della struttura cartelle ora gira SOLO per i provider di archiviazione (`google_drive`, `onedrive`); la connessione Gmail viene ignorata.
+- **Nota deploy**: fix in preview; attivo in produzione dopo "Save to Github".
+
+
+
 ## 2026-11-09 — Avvisi "Invia in AUTOMATICO": invio MULTICANALE a tutti i canali preferiti
 - **Richiesta utente**: se in anagrafica sono spuntati più "Canali preferiti avvisi" (es. Email + WhatsApp), l'invio automatico deve partire su TUTTI, non solo sul primo.
 - **Prima**: `/avvisi/invia-bulk-auto` sceglieva UN SOLO canale per cliente (il primo attivo secondo la priorità) e si fermava lì.
