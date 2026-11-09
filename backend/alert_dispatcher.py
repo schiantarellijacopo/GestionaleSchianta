@@ -535,7 +535,13 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
         modello_libreria = await db.template_modelli.find_one({"id": mid}, {"_id": 0})
     for dest in destinatari:
         ctx_dest = dict(base_ctx)
-        ctx_dest["nome"] = dest.get("label") or ""
+        _nome_cliente = dest.get("label") or base_ctx.get("cliente_nome") or ""
+        ctx_dest["nome"] = _nome_cliente
+        # Alias comuni del segnaposto nome cliente usati nei modelli della libreria
+        # ({cliente}, {nome_cliente}) così la sostituzione funziona sempre.
+        ctx_dest["cliente"] = _nome_cliente
+        ctx_dest["nome_cliente"] = _nome_cliente
+        ctx_dest["cliente_nome"] = base_ctx.get("cliente_nome") or _nome_cliente
         og_src = (modello_libreria or {}).get("oggetto") or rule.get("template_oggetto") or rule.get("nome") or ""
         cp_src = (modello_libreria or {}).get("corpo") or rule.get("template_corpo") or ""
         # Placeholder {link_carica_documenti}: genera un link pubblico sicuro dove

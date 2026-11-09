@@ -1,5 +1,13 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Alert: fix segnaposto {cliente}, riarmo scheduler al cambio orario, ora Roma
+- **Bug segnaposto `{cliente}`** (WhatsApp/email mostravano "Gentile {cliente}," letterale): il context di rendering esponeva solo `nome`/`cliente_nome`, non `cliente`. Fix in `alert_dispatcher.dispatch_rule`: aggiunti alias `cliente`, `nome_cliente` (= nome cliente) prima di `render_template`. Verificato: corpo → "Gentile Mario Rossi, …".
+- **Bug "Esegui ora funziona ma col solo orario no"**: il tick imposta `last_run_date=oggi` alla prima esecuzione giornaliera (idempotenza 1 run/giorno), quindi cambiando l'orario per ritestare la regola veniva saltata fino al giorno dopo; "Esegui ora" invece bypassa `last_run_date`. Fix in `routes/alert.py`: al salvataggio dell'orario (`cron`) e alla riattivazione (toggle ON) si azzera `last_run_date` → la regola si ri-arma e può scattare al nuovo orario anche in giornata. Verificato.
+- **Ora Roma**: lo scheduler avvisi era già `Europe/Rome`; allineato anche `avvisi_scadenze._today()` (prima `date.today()` = UTC in produzione) a `Europe/Rome`. Restano `date.today()`/`datetime.now()` in alcuni endpoint dashboard e nei PDF (data stampata): impattano solo nella fascia a cavallo di mezzanotte; sweep completo disponibile su richiesta.
+- **Nota deploy**: fix attivi in produzione dopo il prossimo "Save to Github".
+
+
+
 ## 2026-11-09 — Import OMNIA: crea il titolo in ARRETRATO per polizze nuove/sostituenti
 - **Richiesta utente**: all'import del flusso OMNIA, per le polizze NUOVE o SOSTITUENTI, oltre a popolare Premi e Provvigioni creare anche il TITOLO con gli stessi dati, lasciato in arretrato; date del titolo = esattamente quelle della polizza.
 - **Contesto**: dal 2026-10 l'import OMNIA era stato disattivato dal creare titoli (nascono dai Carichi mensili); unica eccezione lo storno del titolo della polizza vecchia in sostituzione.

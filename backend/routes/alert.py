@@ -93,6 +93,10 @@ async def update_alert_rule(
     sent = body.model_dump(exclude_unset=True)
     if "cron" in sent:
         upd["cron"] = sent["cron"]
+        # Cambiando l'orario, ri-arma la regola: azzera l'esecuzione odierna così
+        # può scattare al NUOVO orario anche oggi (altrimenti, avendo già girato
+        # una volta oggi, verrebbe saltata fino a domani).
+        upd["last_run_date"] = None
     if not upd:
         raise HTTPException(400, "Nessun campo da aggiornare")
     upd["updated_at"] = _now_iso()
@@ -180,6 +184,9 @@ async def toggle_alert_rule(rid: str, user: dict = Depends(require_user("admin")
     new_val = not bool(r.get("attivo"))
     upd = {"attivo": new_val, "updated_at": _now_iso()}
     warning = None
+    # Alla riattivazione ri-arma la regola per oggi (azzera l'esecuzione odierna).
+    if new_val:
+        upd["last_run_date"] = None
     # All'attivazione, una regola temporale/soglia senza orario proprio NON partirebbe
     # (nessuna ereditarietà dall'orario master): proponiamo un orario di default
     # esplicito preso dalla configurazione globale, così diventa subito operativa.

@@ -17,17 +17,22 @@ import smtplib
 from datetime import date, datetime, timedelta, timezone
 from email.message import EmailMessage
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
+
+# Tutte le date "oggi" sono in ORA ITALIANA (Europe/Rome), per evitare slittamenti
+# di un giorno quando il server di produzione è in UTC.
+_ROME_TZ = ZoneInfo("Europe/Rome")
 
 
 # ---------------------------------------------------------------------------
 # Helpers base
 # ---------------------------------------------------------------------------
 def _today() -> date:
-    return date.today()
+    return datetime.now(_ROME_TZ).date()
 
 
 def _iso(d: date) -> str:
