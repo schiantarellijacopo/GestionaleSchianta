@@ -842,3 +842,16 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - AZIONE UTENTE per attivare: redeploy Railway → Librerie → Cloud Storage → **ricollega Google** (grant gmail.send + userinfo.email; serve anche aggiungere lo scope gmail.send nella OAuth consent screen del progetto Google Cloud). Poi gli avvisi email partono via Gmail API (HTTPS, non bloccato).
 - IMAP→Drive (sessione precedente): allegati email archiviati SOLO su Google Drive via `_store_email_doc`; bypass objstore/GridFS; fallback inline b64 pending→Drive; download/backfill gestiscono inline. Verificato: allegato email → provider google_drive, cloud:True.
 - Verificato in preview (mirror tenant c5ae2d0e): diagnostica mostra Google connesso solo-Drive → email_gmail_api_ok False, messaggio ricollega; import OK, backend sano.
+
+## 2026-11-09 (3) — Gmail = integrazione OAuth AUTONOMA (separata da Drive e Contatti)
+- Direttiva utente: separazione totale dei servizi Google, chiavi indipendenti per agenzia.
+- **Drive**: scope ripristinato a SOLO `auth/drive` (rimosso gmail.send dalla connessione Drive).
+- **Gmail (nuovo provider "gmail")** riusa l'infra OAuth di cloud_storage:
+  - `routes/cloud_storage.py`: `GMAIL_SCOPE = gmail.send + userinfo.email`; `_provider_cfg_async`/`_load_tenant_config` gestiscono provider "gmail" (chiavi per-agenzia in `cloud_oauth_configs` provider=gmail, fallback ENV globale GOOGLE_CLIENT_ID/SECRET con retrocompat GOOGLE_DRIVE_*); regex endpoint admin-config/oauth-url/delete estese a `gmail`; `prompt=consent`; callback salva refresh_token in `cloud_connections` provider=gmail + `account_email` (mittente); callback salta init-cartelle/backfill per gmail. Nuovi endpoint `GET /gmail/status`, `DELETE /gmail/disconnect`.
+  - `gmail_send.send_tenant_email`: usa connessione provider="gmail" (`_fresh_access_token("gmail",...)`).
+  - `alert_dispatcher.send_email`: Gmail API via connessione dedicata "gmail"; fallback SMTP solo per Microsoft/custom.
+  - `routes/librerie.py` comunicazioni/test email: instrada via Gmail API se connessione gmail presente, altrimenti SMTP.
+  - `routes/alert.py` diagnostica: legge connessione provider="gmail" per `email_gmail_api_ok`/`email_gmail_account`.
+- **Frontend** `Librerie.jsx`: sezione Comunicazioni → Email, provider Google ora mostra card `GmailOAuthCard` (stato connesso + mittente, credenziali proprie/globali, Connetti/Ricollega/Scollega); App Password nascosta per Google (resta per Microsoft/SMTP).
+- Verificato preview: gmail/status source=env configured; oauth-url scope = SOLO gmail.send+userinfo.email, prompt=consent; UI card renderizza; import+backend OK.
+- AZIONE UTENTE: redeploy Railway → Comunicazioni → Email (Google) → "Connetti Gmail" (serve Gmail API abilitata + scope gmail.send nella OAuth consent screen del progetto Google). Drive e Contatti restano collegamenti separati.

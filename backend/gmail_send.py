@@ -84,12 +84,12 @@ async def send_tenant_email(tenant_id: str, to: str, subject: str,
     from routes.cloud_storage import _fresh_access_token
 
     conn = await db.cloud_connections.find_one(
-        {"tenant_id": tenant_id, "provider": "google_drive"})
+        {"tenant_id": tenant_id, "provider": "gmail"})
     if not conn:
         raise GmailNotConnected(
-            "Nessun account Google collegato per questa agenzia. Collega Google da "
-            "Librerie → Cloud Storage.")
-    token = await _fresh_access_token("google_drive", conn)
+            "Nessun account Gmail collegato per questa agenzia. Collega Gmail da "
+            "Librerie → Comunicazioni → Email.")
+    token = await _fresh_access_token("gmail", conn)
     sender = conn.get("account_email")
     res = await send_gmail(token, sender, to, subject, html, text)
     logger.info("Email Gmail API inviata (tenant=%s, msg=%s) → %s",

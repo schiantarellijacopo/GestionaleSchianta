@@ -319,11 +319,11 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
     body = ctx.get("corpo") or ""
     html = "<html><body><p>" + body.replace("\n", "<br/>") + "</p></body></html>"
 
-    # 1) Gmail API con il token OAuth dell'agenzia (preferito)
+    # 1) Gmail API con il token OAuth dedicato dell'agenzia (preferito)
     if tenant_id:
         from database import db as _db
         conn = await _db.cloud_connections.find_one(
-            {"tenant_id": tenant_id, "provider": "google_drive"}, {"_id": 1})
+            {"tenant_id": tenant_id, "provider": "gmail"}, {"_id": 1})
         if conn:
             from gmail_send import send_tenant_email, GmailNeedsReconsent, GmailNotConnected
             try:
@@ -331,15 +331,15 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
                 return {"status": "ok"}
             except GmailNeedsReconsent:
                 return {"status": "errore",
-                        "error": "Google collegato ma senza permesso invio email. Ricollega "
-                                 "Google da Librerie → Cloud Storage per autorizzare l'invio (Gmail)."}
+                        "error": "Gmail collegato senza permesso di invio. Ricollega Gmail da "
+                                 "Librerie → Comunicazioni → Email per autorizzare l'invio (gmail.send)."}
             except GmailNotConnected as e:
                 logger.info("Gmail non collegato per tenant=%s: %s", tenant_id, e)
             except Exception as e:
                 logger.error("Invio Gmail API fallito tenant=%s: %s", tenant_id, str(e)[:200])
                 return {"status": "errore", "error": f"Gmail API: {str(e)[:200]}"}
 
-    # 2) Fallback legacy: SMTP configurato in Comunicazioni
+    # 2) Fallback legacy: SMTP configurato in Comunicazioni (provider non-Google)
     cfg = await _load_provider("email")
     host = cfg.get("smtp_host")
     user = cfg.get("smtp_user")
@@ -347,8 +347,8 @@ async def send_email(rule: dict, dest: dict, ctx: dict) -> dict:
     sender = cfg.get("smtp_from") or user
     if not (host and user and pwd and sender):
         return {"status": "skipped",
-                "error": "Email non configurata: collega Google (Librerie → Cloud Storage) "
-                         "oppure imposta l'SMTP in Librerie → Comunicazioni."}
+                "error": "Email non configurata: collega Gmail (Librerie → Comunicazioni → Email) "
+                         "oppure imposta un SMTP."}
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject

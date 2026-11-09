@@ -58,11 +58,11 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL") or BACKEND_PUBLIC_URL
 
 REDIRECT_URI = f"{BACKEND_PUBLIC_URL}/api/librerie/cloud-storage/callback" if BACKEND_PUBLIC_URL else ""
 
-# Scope Google: Drive (archiviazione documenti) + Gmail invio (notifiche email via
-# Gmail API) + userinfo.email (per conoscere l'indirizzo mittente dell'agenzia).
-G_SCOPE = ("https://www.googleapis.com/auth/drive "
-           "https://www.googleapis.com/auth/gmail.send "
-           "https://www.googleapis.com/auth/userinfo.email")
+# Scope Google Drive: SOLO archiviazione file (indipendente da Gmail/Contatti).
+G_SCOPE = "https://www.googleapis.com/auth/drive"
+# Scope Gmail (invio email): integrazione dedicata e separata da Drive.
+GMAIL_SCOPE = ("https://www.googleapis.com/auth/gmail.send "
+               "https://www.googleapis.com/auth/userinfo.email")
 M_SCOPE = "openid profile offline_access Files.ReadWrite User.Read"
 
 # Struttura cartelle standard che il CRM crea automaticamente quando l'agenzia
@@ -176,7 +176,7 @@ async def _load_tenant_config(tenant_id: str, provider: str) -> dict:
             "source": "db",
         }
     # Fallback su ENV
-    if provider == "google_drive":
+    if provider in ("google_drive", "gmail"):
         if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
             return {"client_id": GOOGLE_CLIENT_ID, "client_secret": GOOGLE_CLIENT_SECRET, "source": "env"}
     elif provider == "onedrive":
@@ -189,11 +189,14 @@ async def _provider_cfg_async(provider: str, tenant_id: str) -> dict:
     """Ritorna la config OAuth per il provider richiesto (versione async con tenant)."""
     creds = await _load_tenant_config(tenant_id, provider)
     if not creds:
-        label = "Google Drive" if provider == "google_drive" else "OneDrive"
+        label = {"google_drive": "Google Drive", "gmail": "Gmail",
+                 "onedrive": "OneDrive"}.get(provider, provider)
+        hint = ("Librerie → Comunicazioni → Email" if provider == "gmail"
+                else "Librerie → Cloud Storage → Configurazione admin")
         raise HTTPException(
             501,
-            f"{label} non configurato per questa agenzia. Vai su Librerie → "
-            f"Cloud Storage → Configurazione admin e incolla Client ID e Client Secret.",
+            f"{label} non configurato per questa agenzia. Vai su {hint} e incolla "
+            f"Client ID e Client Secret (oppure usa le chiavi globali dell'app).",
         )
     if provider == "google_drive":
         return {
@@ -202,6 +205,14 @@ async def _provider_cfg_async(provider: str, tenant_id: str) -> dict:
             "client_id": creds["client_id"],
             "client_secret": creds["client_secret"],
             "scope": G_SCOPE,
+        }
+    if provider == "gmail":
+        return {
+            "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_url": "https://oauth2.googleapis.com/token",
+            "client_id": creds["client_id"],
+            "client_secret": creds["client_secret"],
+            "scope": GMAIL_SCOPE,
         }
     base = f"https://login.microsoftonline.com/{MS_TENANT}/oauth2/v2.0"
     return {
@@ -275,9 +286,42 @@ def _mask(v: Optional[str]) -> Optional[str]:
     return v[:8] + "…" + v[-4:] if len(v) > 15 else v[:4] + "…"
 
 
+@router.get("/gmail/status")
+async def gmail_status(user=Depends(current_user)):
+    """Stato della connessione Gmail (invio email) dell'agenzia — indipendente da Drive."""
+    tenant = _tenant_id(user)
+    try:
+        cfg = await _load_tenant_config(tenant, "gmail")
+    except Exception:
+        cfg = None
+    conn = await db.cloud_connections.find_one(
+        {"tenant_id": tenant, "provider": "gmail"},
+        {"_id": 0, "account_email": 1, "scopes": 1, "connected_at": 1})
+    return {
+        "configured": bool(cfg),
+        "source": cfg.get("source") if cfg else None,
+        "client_id_masked": _mask(cfg.get("client_id")) if cfg else None,
+        "connected": bool(conn),
+        "account_email": (conn or {}).get("account_email"),
+        "connected_at": (conn or {}).get("connected_at"),
+        "gmail_send_ok": bool(conn and "gmail.send" in (conn.get("scopes") or "")),
+        "redirect_uri": REDIRECT_URI,
+    }
+
+
+@router.delete("/gmail/disconnect")
+async def gmail_disconnect(user=Depends(current_user)):
+    """Scollega l'account Gmail dell'agenzia (non tocca Drive né Contatti)."""
+    if (user.get("role") or "").lower() not in ("admin", "superadmin"):
+        raise HTTPException(403, "Solo gli amministratori possono scollegare Gmail")
+    tenant = _tenant_id(user)
+    await db.cloud_connections.delete_many({"tenant_id": tenant, "provider": "gmail"})
+    return {"ok": True}
+
+
 @router.post("/admin-config")
 async def save_admin_config(
-    provider: str = Form(..., regex="^(google_drive|onedrive)$"),
+    provider: str = Form(..., regex="^(google_drive|onedrive|gmail)$"),
     client_id: str = Form(...),
     client_secret: str = Form(...),
     user=Depends(current_user),
@@ -310,7 +354,7 @@ async def save_admin_config(
 
 @router.delete("/admin-config")
 async def delete_admin_config(
-    provider: str = Query(..., regex="^(google_drive|onedrive)$"),
+    provider: str = Query(..., regex="^(google_drive|onedrive|gmail)$"),
     user=Depends(current_user),
 ):
     """Rimuove le credenziali OAuth salvate per l'agenzia (torna al fallback ENV)."""
@@ -325,7 +369,7 @@ async def delete_admin_config(
 
 @router.get("/oauth-url")
 async def oauth_url(
-    provider: str = Query(..., regex="^(google_drive|onedrive)$"),
+    provider: str = Query(..., regex="^(google_drive|onedrive|gmail)$"),
     user=Depends(current_user),
 ):
     """Genera l'authorize URL con un `state` random legato al tenant/utente."""
@@ -350,7 +394,7 @@ async def oauth_url(
         "access_type": "offline",
         "include_granted_scopes": "true",
     }
-    if provider == "google_drive":
+    if provider in ("google_drive", "gmail"):
         q["prompt"] = "consent"  # forza il refresh_token
     else:
         q["response_mode"] = "query"
@@ -409,7 +453,7 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
         )
     # Indirizzo email dell'account Google collegato (mittente per l'invio Gmail API).
     account_email = None
-    if provider == "google_drive" and t.get("access_token"):
+    if provider in ("google_drive", "gmail") and t.get("access_token"):
         try:
             async with httpx.AsyncClient(timeout=15) as x:
                 ui = await x.get(
@@ -444,6 +488,14 @@ async def oauth_callback(code: str = Query(...), state: str = Query(...),
         }},
         upsert=True,
     )
+    # I passi seguenti (struttura cartelle, cache, backfill) sono specifici dello
+    # STORAGE. Per Gmail (solo invio email) non vanno eseguiti.
+    if provider == "gmail":
+        frontend_target = (FRONTEND_URL or BACKEND_PUBLIC_URL).rstrip("/")
+        return RedirectResponse(
+            f"{frontend_target}/librerie?gmail=connected&provider=gmail",
+            status_code=302,
+        )
     await db.cloud_folder_cache.delete_many(
         {"tenant_id": st["tenant_id"], "provider": provider})
     # Appena l'agenzia collega il Drive, crea subito la struttura cartelle + INBOX

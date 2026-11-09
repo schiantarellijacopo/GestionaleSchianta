@@ -470,8 +470,25 @@ async def test_comunicazioni(body: dict,
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
 
     if canale == "email":
+        # Preferenza: Gmail API con la connessione OAuth DEDICATA dell'agenzia.
+        from tenant import user_tenant_id
+        tid = user_tenant_id(user)
+        gconn = await db.cloud_connections.find_one(
+            {"tenant_id": tid, "provider": "gmail"}, {"_id": 1}) if tid else None
+        if gconn:
+            from gmail_send import send_tenant_email, GmailNeedsReconsent, GmailNotConnected
+            html = "<p>" + (msg or "").replace("\n", "<br/>") + "</p>"
+            try:
+                await send_tenant_email(tid, dest, "Test invio email — Assicura", html, msg)
+                return {"ok": True, "canale": "email", "destinatario": dest, "via": "gmail_api"}
+            except GmailNeedsReconsent:
+                raise HTTPException(400, "Gmail collegato ma senza permesso di invio: ricollega Gmail per autorizzare lo scope gmail.send.")
+            except GmailNotConnected:
+                pass
+            except Exception as e:
+                raise HTTPException(503, f"Errore invio Gmail API: {e}")
         if not (az.get("smtp_host") and az.get("smtp_user")):
-            raise HTTPException(400, "SMTP non configurato (host/user mancanti)")
+            raise HTTPException(400, "Email non configurata: collega Gmail (OAuth) oppure imposta un SMTP")
         from email_utils import smtp_send
         try:
             smtp_send(

@@ -3460,6 +3460,133 @@ const EMAIL_PRESETS = {
     smtp: {},
 };
 
+function GmailOAuthCard() {
+    const [st, setSt] = useState(null);
+    const [cid, setCid] = useState("");
+    const [csec, setCsec] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [showKeys, setShowKeys] = useState(false);
+
+    const load = async () => {
+        try {
+            const r = await api.get("/librerie/cloud-storage/gmail/status");
+            setSt(r.data);
+        } catch (e) { /* noop */ }
+    };
+    useEffect(() => { load(); }, []);
+
+    const salvaChiavi = async () => {
+        if (!cid.trim() || !csec.trim()) { toast.error("Inserisci Client ID e Client Secret"); return; }
+        setBusy(true);
+        try {
+            const fd = new FormData();
+            fd.append("provider", "gmail");
+            fd.append("client_id", cid.trim());
+            fd.append("client_secret", csec.trim());
+            await api.post("/librerie/cloud-storage/admin-config", fd);
+            toast.success("Credenziali Gmail salvate ✓");
+            setCid(""); setCsec(""); setShowKeys(false);
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore salvataggio credenziali")); }
+        setBusy(false);
+    };
+
+    const connetti = async () => {
+        setBusy(true);
+        try {
+            const r = await api.get("/librerie/cloud-storage/oauth-url?provider=gmail");
+            window.location.href = r.data.authorize_url;
+        } catch (e) { toast.error(errMsg(e, "Collega prima le credenziali OAuth")); setBusy(false); }
+    };
+
+    const scollega = async () => {
+        if (!window.confirm("Scollegare l'account Gmail? Gli avvisi email smetteranno di partire.")) return;
+        setBusy(true);
+        try {
+            await api.delete("/librerie/cloud-storage/gmail/disconnect");
+            toast.success("Gmail scollegato");
+            load();
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+        setBusy(false);
+    };
+
+    const connesso = !!st?.connected;
+    return (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4" data-testid="gmail-oauth-card">
+            <div className="flex items-start gap-3">
+                <div className="bg-white border border-emerald-200 p-1.5 rounded-md">
+                    <Mail size={16} className="text-emerald-700" />
+                </div>
+                <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h5 className="text-sm font-semibold text-slate-800">Invio via Gmail API (OAuth)</h5>
+                        {connesso ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300" data-testid="gmail-badge">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Connesso
+                            </span>
+                        ) : (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300" data-testid="gmail-badge">non collegato</span>
+                        )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-1">
+                        Connessione OAuth <strong>dedicata e separata</strong> da Drive e Contatti. Funziona anche dove l'SMTP è bloccato (es. Railway). Scope richiesti: solo <code>gmail.send</code> + <code>userinfo.email</code>.
+                    </p>
+
+                    {connesso && (
+                        <div className="mt-2 text-sm text-slate-700" data-testid="gmail-account">
+                            Mittente rilevato: <strong>{st.account_email || "—"}</strong>
+                            {!st.gmail_send_ok && (
+                                <span className="ml-2 text-[11px] text-amber-700">(manca lo scope invio: ricollega)</span>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Credenziali OAuth dell'agenzia (opzionali: fallback globale app) */}
+                    <div className="mt-3">
+                        {!showKeys ? (
+                            <button type="button" onClick={() => setShowKeys(true)}
+                                className="text-[12px] text-emerald-800 underline" data-testid="gmail-toggle-keys">
+                                {st?.configured ? `Credenziali OAuth: ${st.source === "db" ? "proprie dell'agenzia" : "globali dell'app"} · modifica` : "Usa credenziali OAuth proprie dell'agenzia (opzionale)"}
+                            </button>
+                        ) : (
+                            <div className="rounded-md border border-slate-200 bg-white p-3">
+                                <p className="text-[11px] text-slate-500 mb-2">
+                                    Google Cloud Console → Gmail API abilitata → ID client OAuth tipo <strong>Applicazione web</strong>. Lascia vuoto per usare le chiavi globali dell'app.
+                                </p>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                    <Input placeholder="Client ID" value={cid} onChange={(e) => setCid(e.target.value)} data-testid="gmail-client-id" />
+                                    <Input placeholder="Client Secret" type="password" value={csec} onChange={(e) => setCsec(e.target.value)} data-testid="gmail-client-secret" />
+                                </div>
+                                {st?.redirect_uri && (
+                                    <p className="text-[11px] text-slate-500 mt-2">URI di reindirizzamento: <code className="break-all">{st.redirect_uri}</code></p>
+                                )}
+                                <div className="flex gap-2 mt-2">
+                                    <Button size="sm" onClick={salvaChiavi} disabled={busy} className="bg-slate-800 hover:bg-slate-900" data-testid="gmail-save-keys">Salva credenziali</Button>
+                                    <Button size="sm" variant="outline" onClick={() => setShowKeys(false)}>Annulla</Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex gap-2 mt-3">
+                        {!connesso ? (
+                            <Button size="sm" onClick={connetti} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700" data-testid="gmail-connect">
+                                Connetti Gmail
+                            </Button>
+                        ) : (
+                            <>
+                                <Button size="sm" variant="outline" onClick={connetti} disabled={busy} data-testid="gmail-reconnect">Ricollega</Button>
+                                <Button size="sm" variant="outline" onClick={scollega} disabled={busy} className="text-rose-600 border-rose-200" data-testid="gmail-disconnect">Scollega</Button>
+                            </>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+
 function EmailSection({ f, set, onSet }) {
     const [provider, setProvider] = useState(_detectEmailProvider(f.smtp_host));
     const [testDest, setTestDest] = useState("");
@@ -3548,11 +3675,7 @@ function EmailSection({ f, set, onSet }) {
                 </div>
                 <p className="text-[11px] text-slate-500 mt-2">
                     {provider === "google" && (
-                        <>Email aziendale Google. Crea una App Password su{" "}
-                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-sky-700 underline">
-                                myaccount.google.com → Security → 2-Step → App passwords
-                            </a>.
-                        </>
+                        <>Email aziendale Google collegata via <strong>OAuth (Gmail API)</strong> — niente App Password, funziona anche dove l'SMTP è bloccato.</>
                     )}
                     {provider === "microsoft" && (
                         <>Outlook/Office 365. Se hai 2FA attiva crea una{" "}
@@ -3567,7 +3690,11 @@ function EmailSection({ f, set, onSet }) {
                 </p>
             </div>
 
-            {/* Campi base (sempre visibili) */}
+            {/* Google = connessione OAuth dedicata (Gmail API) */}
+            {provider === "google" && <GmailOAuthCard />}
+
+            {/* Campi SMTP/App Password: solo per Microsoft e SMTP personalizzato */}
+            {provider !== "google" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
                     <Label>Indirizzo email <span className="text-rose-500">*</span></Label>
@@ -3578,10 +3705,6 @@ function EmailSection({ f, set, onSet }) {
                 <div>
                     <Label>
                         {provider === "smtp" ? "Password" : "Password app"} <span className="text-rose-500">*</span>
-                        {provider === "google" && (
-                            <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer"
-                                className="ml-2 text-[11px] text-sky-700 underline font-normal">crea su Google ↗</a>
-                        )}
                         {provider === "microsoft" && (
                             <a href="https://account.live.com/proofs/AppPassword" target="_blank" rel="noreferrer"
                                 className="ml-2 text-[11px] text-sky-700 underline font-normal">crea su Microsoft ↗</a>
@@ -3629,6 +3752,7 @@ function EmailSection({ f, set, onSet }) {
                     </>
                 )}
             </div>
+            )}
 
             {/* Test invio inline */}
             <div className="mt-5 pt-4 border-t border-slate-100">
