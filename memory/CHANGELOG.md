@@ -868,3 +868,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - `routes/librerie.py`: `GET /librerie/comunicazioni/queue-status` (admin).
 - Frontend `Librerie.jsx`: `CodeInvioCard` in cima a Comunicazioni → contatori (in attesa/in invio/inviati/falliti) per canale + ultimi falliti, polling 5s.
 - Verificato: worker avviato nei log, endpoint OK, transizioni coda OK (test offline, nessun invio reale), UI renderizza.
+
+## 2026-11-09 (5) — Controllo rigoroso Alert & Automazioni (toggle + orario per-regola)
+- SCHEDULER (`scheduler_alert._tick`): RIMOSSA l'ereditarietà dell'orario master. Una regola schedule/soglia senza `cron` proprio NON parte (log debug "in attesa di configurazione"). Solo regole `attivo:True` elaborate; interruttore generale spento → nessun invio. Fuso sempre Europe/Rome (_now_rome). Log esecuzione ora include id regola + ora.
+- GATING ATTIVO: già garantito — `dispatch_rule` esce subito se `attivo` è falso; `dispatch_evento` filtra `attivo:True` (evento spento → nessun accodamento). Quindi nessun messaggio entra in `comm_queue` da regola non attiva.
+- TOGGLE (`routes/alert.toggle_alert_rule`): all'attivazione di una regola schedule/soglia SENZA cron, assegna un orario esplicito di default (dalla config globale) e restituisce `warning`; così la regola diventa subito operativa senza ereditare runtime.
+- UI (`Alert.jsx`): card "Avvisi programmati" ora spiega che l'orario è solo un default PROPOSTO per le nuove regole e che una regola senza orario/disattivata NON parte. `cronLabel(null)` → "⚠ Orario non impostato". Modal regola: rimosso il check "usa orario globale"; selettore "Quando eseguire" SEMPRE esplicito (Ripeti giorno/settimana/mese + ora) con anteprima; al salvataggio il cron è sempre valorizzato (buildCron). Toggle mostra il warning. Storico invii: mostra data+ora in Europe/Rome, nome regola + id (#8char), tooltip id completo.
+- Verificato: toggle su regola senza cron → cron "0 11 * * *" + warning; ripristinato compleanno 09:00; frontend compila; pagina Alert render OK.

@@ -496,23 +496,28 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
             continue
         try:
             cfg = await _tenant_alert_config(raw_db, tid)
-            # Interruttore generale (se spento → nessun avviso programmato parte)
+            # L'interruttore GENERALE spento → nessun avviso programmato parte.
             if not cfg.get("alert_scheduler_attivo", True):
                 continue
-            # Orario globale usato come DEFAULT per le regole senza cron proprio
-            g_hour = int(cfg.get("alert_scheduler_hour", 8))
-            g_min = int(cfg.get("alert_scheduler_minute", 0))
-            fallback_cron = f"{g_min} {g_hour} * * *"
 
             user = {"id": "scheduler", "role": "admin",
                     "agenzia_tenant_id": tid, "is_super_admin": False}
             token = set_current_user(user)
             try:
+                # SOLO regole ATTIVE (toggle ON). Le regole spente sono
+                # categoricamente ignorate dal motore di invio.
                 rules = await db.alert_rules.find(
                     {"attivo": True, "tipo": {"$in": ["schedule", "soglia"]}}, {"_id": 0},
                 ).to_list(500)
                 for rule in rules:
-                    cron = (rule.get("cron") or "").strip() or fallback_cron
+                    # Orario INDIPENDENTE per regola: nessuna ereditarietà dall'orario
+                    # master. Senza cron proprio la regola NON parte (resta in attesa
+                    # di configurazione specifica).
+                    cron = (rule.get("cron") or "").strip()
+                    if not cron:
+                        logger.debug("Regola '%s' (tenant %s) senza orario: in attesa di configurazione",
+                                     rule.get("nome"), tid)
+                        continue
                     if not _cron_due(cron, now, _TICK_MINUTES):
                         continue
                     # Idempotenza PER REGOLA: una sola esecuzione al giorno
@@ -522,8 +527,9 @@ async def _tick(raw_db: AsyncIOMotorDatabase) -> None:
                         {"id": rule["id"]}, {"$set": {"last_run_date": today}})
                     try:
                         res = await _esegui_rule(rule)
-                        logger.info("Avviso programmato '%s' tenant %s: %s inviati, %s errori",
-                                    rule.get("nome"), tid, res["sent"], res["errors"])
+                        logger.info("Avviso programmato '%s' (id=%s) tenant %s @ %s: %s inviati, %s errori",
+                                    rule.get("nome"), rule.get("id"), tid,
+                                    now.strftime("%H:%M"), res["sent"], res["errors"])
                     except Exception:  # noqa: BLE001
                         logger.exception("Errore esecuzione regola %s", rule.get("id"))
             finally:

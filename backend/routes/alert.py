@@ -174,12 +174,23 @@ async def duplica_alert_rule(rid: str, user: dict = Depends(require_user("admin"
 
 @router.post("/alert-rules/{rid}/toggle")
 async def toggle_alert_rule(rid: str, user: dict = Depends(require_user("admin"))) -> dict:
-    r = await db.alert_rules.find_one({"id": rid}, {"_id": 0, "attivo": 1})
+    r = await db.alert_rules.find_one({"id": rid}, {"_id": 0, "attivo": 1, "tipo": 1, "cron": 1})
     if not r:
         raise HTTPException(404, "Regola non trovata")
     new_val = not bool(r.get("attivo"))
-    await db.alert_rules.update_one({"id": rid}, {"$set": {"attivo": new_val, "updated_at": _now_iso()}})
-    return {"id": rid, "attivo": new_val}
+    upd = {"attivo": new_val, "updated_at": _now_iso()}
+    warning = None
+    # All'attivazione, una regola temporale/soglia senza orario proprio NON partirebbe
+    # (nessuna ereditarietà dall'orario master): proponiamo un orario di default
+    # esplicito preso dalla configurazione globale, così diventa subito operativa.
+    if new_val and r.get("tipo") in ("schedule", "soglia") and not (r.get("cron") or "").strip():
+        cfg = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+        gh = int(cfg.get("alert_scheduler_hour", 9))
+        gm = int(cfg.get("alert_scheduler_minute", 0))
+        upd["cron"] = f"{gm} {gh} * * *"
+        warning = f"Orario non impostato: assegnato {gh:02d}:{gm:02d} (ora italiana). Modificalo dalla matita se preferisci."
+    await db.alert_rules.update_one({"id": rid}, {"$set": upd})
+    return {"id": rid, "attivo": new_val, "cron": upd.get("cron", r.get("cron")), "warning": warning}
 
 
 # ============================================================
