@@ -808,7 +808,8 @@ async def _applica_sospensione_import(db, pid: str, data_sosp: str) -> None:
 
 
 async def _upsert_polizza(db, data: dict, log: ImportLog,
-                          polizza_id_map: Dict[str, str], id_exp: str) -> None:
+                          polizza_id_map: Dict[str, str], id_exp: str,
+                          created_ids: Optional[set] = None) -> None:
     """Esegue insert o update di una polizza. Matching robusto: prima per
     id_polizza_exp, poi (fallback) per numero_polizza nello stesso tenant — così
     non si creano doppioni quando id_polizza_exp manca o cambia tra import."""
@@ -842,6 +843,8 @@ async def _upsert_polizza(db, data: dict, log: ImportLog,
         await db.polizze.insert_one(obj.model_dump())
         polizza_id_map[id_exp] = obj.id
         log.polizze_create += 1
+        if created_ids is not None:
+            created_ids.add(obj.id)
 
 
 async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
@@ -851,7 +854,8 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                             mapping_operatori: dict,
                             counts: Dict[str, int],
                             tracker: Optional[Dict[str, Dict[str, dict]]] = None,
-                            import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> None:
+                            import_mappings: Optional[Dict[str, Dict[str, Optional[str]]]] = None,
+                            created_ids: Optional[set] = None) -> None:
     rami_cache: Dict[str, str] = {}
     nome_cache_pol: Dict[str, str] = {}
     for fname, content in files_data.items():
@@ -939,7 +943,7 @@ async def _processa_polizze(db, files_data: Dict[str, str], log: ImportLog,
                 )
                 if prov_ops:
                     data["provvigioni_operatori"] = prov_ops
-            await _upsert_polizza(db, data, log, polizza_id_map, id_exp)
+            await _upsert_polizza(db, data, log, polizza_id_map, id_exp, created_ids)
             # rec20 col AH = data sospensione → metti la polizza 'sospesa' + titolo a 0
             # (idempotente: se è già sospesa/annullata/sostituita non fa nulla)
             _data_sosp = _parse_date(_col_at(row, 33))
@@ -1992,6 +1996,65 @@ async def _applica_regola_stato_da_titoli(db, polizza_id_map: Dict[str, str], lo
 
 
 
+async def _crea_titoli_import(db, polizza_id_map: Dict[str, str],
+                              created_ids: set, counts: Dict[str, int]) -> int:
+    """Crea 1 titolo DA INCASSARE (in arretrato) per ogni polizza NUOVA o
+    SOSTITUENTE importata, con le STESSE date e importi della polizza
+    (effetto/scadenza = quelli della polizza; lordo/netto/imposte/SSN/provvigioni
+    e ripartizione operatori identici). Idempotente: salta se esiste già un titolo
+    per quella polizza alla stessa data di effetto (nessun doppione al re-import)."""
+    pids = set(polizza_id_map.values())
+    if not pids:
+        return 0
+    creati = 0
+    for pid in pids:
+        pol = await db.polizze.find_one({"id": pid}, {"_id": 0})
+        if not pol:
+            continue
+        is_sost = bool((pol.get("sostituisce_polizza") or "").strip())
+        is_new = pid in (created_ids or set())
+        # Solo polizze NUOVE o SOSTITUENTI (i rinnovi restano gestiti dai Carichi mensili)
+        if not (is_new or is_sost):
+            continue
+        # Solo polizze operative: niente titolo su annullate/sostituite/disdettate
+        if pol.get("stato") in ("annullata", "sostituita", "disdettata"):
+            continue
+        lordo = float(pol.get("premio_lordo") or 0)
+        if lordo <= 0:
+            continue
+        effetto = (pol.get("effetto") or "")[:10]
+        if not effetto:
+            continue
+        # Anti-doppione: titolo già presente per questa polizza a questa data effetto
+        esiste = await db.titoli.find_one(
+            {"polizza_id": pid, "effetto": effetto}, {"_id": 0, "id": 1})
+        if esiste:
+            continue
+        imposte = float(pol.get("premio_imposte") or pol.get("premio_tasse") or 0)
+        doc = {
+            "polizza_id": pid,
+            "tipo": "sostituzione" if is_sost else "nuova",
+            "effetto": effetto,
+            "scadenza": (pol.get("scadenza") or effetto)[:10],
+            "stato": "da_incassare",
+            "importo_lordo": round(lordo, 2),
+            "importo_netto": round(float(pol.get("premio_netto") or 0), 2),
+            "imposte": round(imposte, 2),
+            "ssn": round(float(pol.get("premio_ssn") or 0), 2),
+            "provvigioni": round(float(pol.get("provvigioni") or 0), 2),
+            "provvigioni_operatori": pol.get("provvigioni_operatori") or [],
+            "collaboratore_id": pol.get("collaboratore_id"),
+            "data_emissione": pol.get("data_emissione"),
+            "titolo_coperto": False,
+            "fonte": "import_ania",
+        }
+        obj = Titolo(**doc)
+        await db.titoli.insert_one(obj.model_dump())
+        creati += 1
+    counts["titoli_arretrato_creati"] = creati
+    return creati
+
+
 async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> ImportLog:
     """Importa un file ZIP contenente i record ANIA (rec10/20/21/30/40/50)."""
     log = ImportLog(
@@ -2011,6 +2074,7 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     compagnie_cache: Dict[str, str] = {}
     ana_id_map: Dict[str, str] = {}
     polizza_id_map: Dict[str, str] = {}
+    created_polizze_ids: set = set()   # id polizze INSERITE in questo import (new business)
     # Tracker delle entità incontrate senza un mapping verso un'entità DB
     tracker: Dict[str, Dict[str, dict]] = {}
 
@@ -2027,7 +2091,8 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
                                 tracker=tracker, import_mappings=import_mappings)
     await _processa_polizze(db, files_data, log, ana_id_map, polizza_id_map,
                             compagnie_cache, mapping_operatori, counts,
-                            tracker=tracker, import_mappings=import_mappings)
+                            tracker=tracker, import_mappings=import_mappings,
+                            created_ids=created_polizze_ids)
     await _processa_dettagli_veicolo(db, files_data, polizza_id_map, counts)
     await _processa_garanzie(db, files_data, polizza_id_map, mapping_garanzie, counts,
                              tracker=tracker, import_mappings=import_mappings)
@@ -2042,6 +2107,10 @@ async def importa_zip(db, file_bytes: bytes, filename: str, utente: dict) -> Imp
     counts["polizze_sostituite"] = _sost_n
     counts["titoli_stornati_sostituzione"] = _sost_st
     counts["scadenze_allineate"] = await _aggiorna_scadenza_da_titoli(db)
+    # ═══ TITOLO IN ARRETRATO per polizze NUOVE / SOSTITUENTI (richiesta utente) ═══
+    # Oltre a premi e provvigioni sulla polizza, l'import crea anche il relativo
+    # titolo con le STESSE date e importi, lasciato "da_incassare" (arretrato).
+    await _crea_titoli_import(db, polizza_id_map, created_polizze_ids, counts)
     await _processa_sinistri(db, files_data, log, polizza_id_map, ana_id_map,
                              compagnie_cache, counts,
                              tracker=tracker, import_mappings=import_mappings)

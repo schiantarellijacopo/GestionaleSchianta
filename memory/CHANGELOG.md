@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Import OMNIA: crea il titolo in ARRETRATO per polizze nuove/sostituenti
+- **Richiesta utente**: all'import del flusso OMNIA, per le polizze NUOVE o SOSTITUENTI, oltre a popolare Premi e Provvigioni creare anche il TITOLO con gli stessi dati, lasciato in arretrato; date del titolo = esattamente quelle della polizza.
+- **Contesto**: dal 2026-10 l'import OMNIA era stato disattivato dal creare titoli (nascono dai Carichi mensili); unica eccezione lo storno del titolo della polizza vecchia in sostituzione.
+- **Implementazione** (`ania_importer.py`):
+  - `_upsert_polizza` ora raccoglie gli id delle polizze INSERITE in questo import (`created_ids`) → identifica il new business.
+  - Nuova `_crea_titoli_import(...)` chiamata in `importa_zip` dopo l'allineamento scadenze: per ogni polizza NUOVA o con `sostituisce_polizza`, operativa e con lordo>0, crea 1 titolo `stato="da_incassare"`, `titolo_coperto=False`, `tipo` = "sostituzione"/"nuova", **effetto/scadenza = date della polizza**, importi (lordo/netto/imposte/SSN/provvigioni) e `provvigioni_operatori`/`collaboratore_id` identici alla polizza, `fonte="import_ania"`.
+  - **Idempotente**: salta se esiste già un titolo per quella polizza alla stessa data di effetto (nessun doppione al re-import). I rinnovi (polizze aggiornate, non nuove) restano esclusi.
+- **Verifica (preview, tenant isolato, 6/6 PASS)**: titolo creato solo per nuova+sostituente (rinnovo escluso); date=polizza (09/11/2026→09/11/2027), stato arretrato, non coperto; importi/provvigioni/ripartizione = polizza; tipo nuova/sostituzione corretto; re-import senza doppioni; polizza annullata → nessun titolo.
+- **Nota deploy**: attivo in produzione dopo il prossimo "Save to Github".
+
+
+
 ## 2026-11-09 — UX: scroll con rotellina del mouse nei dropdown con ricerca (globale)
 - **Richiesta utente**: oltre alla ricerca, poter scorrere TUTTE le voci col mouse in ogni menù a tendina del programma (es. "Tipo pagamento" in Incasso/Copertura).
 - **Causa**: i dropdown (`Select` e `SearchableSelect`) sono basati su `cmdk` e, quando aperti dentro un modale (Dialog con blocco-scroll `react-remove-scroll`), la rotellina veniva bloccata perché il popover è in un portale esterno al Dialog. Ricerca e click funzionavano, lo scroll col mouse no.
