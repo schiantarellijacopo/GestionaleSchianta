@@ -185,15 +185,25 @@ async def _res_titolo_scaduto_oltre(giorni: int) -> list[dict]:
 
 
 async def _res_documento_id_in_scadenza(giorni: int) -> list[dict]:
-    """Anagrafiche la cui carta d'identità (ci_data_scadenza) scade ESATTAMENTE
-    tra `giorni` giorni (promemoria rinnovo documento)."""
-    target = (_today() + timedelta(days=max(0, giorni))).isoformat()
+    """Anagrafiche la cui carta d'identità (ci_data_scadenza) scade ENTRO
+    `giorni` giorni, finestra [oggi … oggi+giorni] (promemoria rinnovo).
+
+    Idempotenza PER DOCUMENTO: una volta avvisato per una certa data di scadenza
+    (`ci_avviso_scad_inviato_per`), la regola non riavvisa più fino al rinnovo del
+    documento (così non spamma ogni giorno finché resta nella finestra)."""
+    oggi = _today().isoformat()
+    limite = (_today() + timedelta(days=max(0, giorni))).isoformat()
     out: list[dict] = []
     cur = db.anagrafiche.find(
-        {"ci_data_scadenza": target},
-        {"_id": 0, "id": 1, "ragione_sociale": 1, "ci_data_scadenza": 1, "numero_carta_identita": 1},
+        {"ci_data_scadenza": {"$gte": oggi, "$lte": limite}},
+        {"_id": 0, "id": 1, "ragione_sociale": 1, "ci_data_scadenza": 1,
+         "numero_carta_identita": 1, "ci_avviso_scad_inviato_per": 1},
     )
     async for a in cur:
+        scad = str(a.get("ci_data_scadenza"))[:10]
+        # già avvisato per QUESTA scadenza → salta (niente invii ripetuti)
+        if a.get("ci_avviso_scad_inviato_per") == scad:
+            continue
         out.append({
             "entita_tipo": "anagrafica",
             "entita_id": a.get("id"),
@@ -205,6 +215,9 @@ async def _res_documento_id_in_scadenza(giorni: int) -> list[dict]:
             "data_scadenza": _fmt_date(a.get("ci_data_scadenza")),
             "scadenza": _fmt_date(a.get("ci_data_scadenza")),
             "link": f"/anagrafiche/{a.get('id')}",
+            # metadati per l'idempotenza (consumati da _esegui_rule, non inviati)
+            "_mark": {"coll": "anagrafiche", "id": a.get("id"),
+                      "field": "ci_avviso_scad_inviato_per", "value": scad},
         })
     return out
 
@@ -376,11 +389,18 @@ async def _esegui_rule(rule: dict) -> dict:
            "schedule_kind": rule.get("schedule_kind"),
            "entita": len(payloads), "sent": 0, "errors": 0, "skipped": 0}
     for payload in payloads:
+        mark = payload.pop("_mark", None)
         try:
             s = await dispatch_rule(rule, payload)
             agg["sent"] += s.get("sent", 0)
             agg["errors"] += s.get("errors", 0)
             agg["skipped"] += s.get("skipped", 0)
+            # Idempotenza per-entità: segna "avvisato" solo se qualcosa è stato
+            # realmente inviato o accodato (così niente invii ripetuti, ma se non
+            # c'era alcun canale valido si potrà riprovare).
+            if mark and (s.get("sent", 0) + s.get("queued", 0)) > 0:
+                await db[mark["coll"]].update_one(
+                    {"id": mark["id"]}, {"$set": {mark["field"]: mark["value"]}})
         except Exception as e:  # noqa: BLE001
             agg["errors"] += 1
             logger.exception("Errore dispatch schedule rule %s: %s", rule.get("id"), e)

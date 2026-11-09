@@ -1,5 +1,14 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — FIX: "Documento d'identità in scadenza" non inviava (match esatto → range)
+- **Sintomo utente**: documento (CI) in scadenza OGGI, regola ATTIVA, ma nessun invio email/WhatsApp (né con "Esegui ora").
+- **Root cause** (`scheduler_alert._res_documento_id_in_scadenza`): il resolver cercava `ci_data_scadenza == oggi + soglia_giorni` (match ESATTO; soglia vuota → default 30). Un documento che scade OGGI (0 giorni) non combaciava mai con "oggi+30" → 0 destinatari → niente in coda. La dashboard invece usava già un range `$gte oggi / $lte +30`, da cui il documento appariva "in scadenza" ma l'alert non partiva.
+- **Fix**: match su finestra `[oggi … oggi+soglia]` (default 30gg), con **idempotenza per-documento** (`ci_avviso_scad_inviato_per` = data scadenza): avvisa UNA sola volta per quella scadenza, niente spam quotidiano finché il documento resta nella finestra; si riavvisa solo al rinnovo. Marker scritto in `_esegui_rule` solo se qualcosa è stato inviato/accodato.
+- **Verifica (preview, tenant isolato, 5/5 PASS)**: doc che scade oggi → accodati email+whatsapp; marker scritto; seconda esecuzione non riaccoda; doc a +10gg dentro finestra (accodato); doc a +60gg fuori finestra (niente).
+- **Nota deploy**: attivo in produzione solo dopo deploy. Per la consegna reale servono comunque Gmail OAuth collegato e istanza WhatsApp aperta (segnalati dalla Diagnostica avvisi).
+
+
+
 ## 2026-11-09 — Alert & Automazioni: validazione conformità (controllo rigido attivo:true + per-regola)
 - **Richiesta**: validazione finale + rilascio del controllo rigoroso degli alert.
 - **Test di conformità eseguiti su DB locale (tenant isolato, con cleanup) — 7/7 PASS**:
