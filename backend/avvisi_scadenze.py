@@ -96,6 +96,43 @@ async def _query_titoli_arretrati(
     return await cur.to_list(2000)
 
 
+def _filtro_stato_titoli(stato: str) -> dict:
+    """Costruisce il filtro Mongo per i 3 stati della sezione Avvisi:
+    - 'arretrati' (default): da incassare/insoluto e NON ancora coperti;
+    - 'coperti': titoli con copertura garantita (titolo_coperto) ancora da chiudere;
+    - 'tutti': tutti i titoli pendenti (coperti o meno), esclusi incassati/stornati."""
+    if stato == "coperti":
+        return {"titolo_coperto": True, "stato": {"$nin": ["stornato", "incassato"]}}
+    if stato == "tutti":
+        return {"stato": {"$nin": ["stornato", "incassato"]}}
+    # arretrati
+    return {"stato": {"$in": ["da_incassare", "insoluto"]}, "titolo_coperto": {"$ne": True}}
+
+
+async def _query_titoli_avvisi(
+    db: AsyncIOMotorDatabase, oggi_iso: str, limite_iso: str, *,
+    dal: Optional[str] = None, al: Optional[str] = None, stato: str = "arretrati",
+) -> list[dict]:
+    """Titoli per la sezione Avvisi, filtrati per DATA RATA (effetto) e stato.
+
+    Finestra sulla data della rata (effetto):
+      - se `dal`/`al` indicati → effetto nel range [dal, al];
+      - altrimenti → effetto <= oggi+giorni (rate già scadute + prossime nel periodo).
+    """
+    q: dict = dict(_filtro_stato_titoli(stato))
+    eff: dict = {}
+    if dal:
+        eff["$gte"] = dal
+    if al:
+        eff["$lte"] = al
+    if not dal and not al:
+        eff["$lte"] = limite_iso
+    if eff:
+        q["effetto"] = eff
+    cur = db.titoli.find(q, {"_id": 0}).sort("effetto", 1)
+    return await cur.to_list(3000)
+
+
 async def _carica_anagrafiche(
     db: AsyncIOMotorDatabase, ana_ids: list[str], cache: dict[str, dict],
 ) -> None:
@@ -200,14 +237,26 @@ def _format_titolo_record(
 # ---------------------------------------------------------------------------
 # API pubblica: cerca scadenze
 # ---------------------------------------------------------------------------
-async def cerca_scadenze(db: AsyncIOMotorDatabase, giorni: int) -> dict[str, list[dict]]:
-    """Ritorna polizze (in scadenza) + titoli (arretrati) entro `giorni` giorni."""
+async def cerca_scadenze(
+    db: AsyncIOMotorDatabase, giorni: int, *,
+    dal: Optional[str] = None, al: Optional[str] = None, stato: Optional[str] = None,
+) -> dict[str, list[dict]]:
+    """Ritorna polizze (in scadenza) + titoli entro `giorni` giorni.
+
+    Se `stato` è None → comportamento storico (solo titoli arretrati scaduti), usato
+    dal job email. Se `stato` è valorizzato ('arretrati'/'coperti'/'tutti') → usa la
+    query Avvisi filtrata per data rata (effetto) e stato, includendo le rate in arrivo.
+    """
     oggi = _today()
     limite = oggi + timedelta(days=max(0, giorni))
     oggi_iso, limite_iso = _iso(oggi), _iso(limite)
 
     polizze = await _query_polizze_in_scadenza(db, oggi_iso, limite_iso)
-    titoli = await _query_titoli_arretrati(db, oggi_iso)
+    if stato is None:
+        titoli = await _query_titoli_arretrati(db, oggi_iso)
+    else:
+        titoli = await _query_titoli_avvisi(
+            db, oggi_iso, limite_iso, dal=dal, al=al, stato=stato)
 
     # carico polizze referenziate dai titoli
     pol_ids = list({t.get("polizza_id") for t in titoli if t.get("polizza_id")})

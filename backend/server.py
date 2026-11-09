@@ -15781,30 +15781,35 @@ async def preview_avvisi_scadenze(
     al: Optional[str] = None,
     collaboratore_id: Optional[str] = None,
     mezzo_pagamento: Optional[str] = None,
+    stato_titoli: str = "arretrati",
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
     """Anteprima: ritorna le scadenze (polizze + titoli) nei prossimi N giorni.
 
     Se ``giorni`` non specificato, usa il valore da AziendaConfig (default 15).
     Filtri opzionali:
-      - dal / al: range scadenza (YYYY-MM-DD) — sovrascrive `giorni`
+      - dal / al: range sulla DATA RATA del titolo (effetto, YYYY-MM-DD)
       - collaboratore_id: filtra polizze e titoli per collaboratore
       - mezzo_pagamento: filtra titoli per mezzo di pagamento
+      - stato_titoli: 'arretrati' (default) | 'coperti' | 'tutti'
     """
     if giorni is None:
         az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
         giorni = int(az.get("notifica_scadenze_giorni") or 15)
     giorni = max(1, min(giorni, 365))
-    data = await avvisi_scadenze.cerca_scadenze(db, giorni)
+    if stato_titoli not in ("arretrati", "coperti", "tutti"):
+        stato_titoli = "arretrati"
+    data = await avvisi_scadenze.cerca_scadenze(
+        db, giorni, dal=dal, al=al, stato=stato_titoli)
 
     pol = data["polizze"]
     tit = data["titoli"]
-    # Applicazione filtri post-query (semplice: la dataset è già limitato)
+    # Applicazione filtri post-query. Per i titoli la finestra sulla DATA RATA
+    # (effetto) è già applicata nella query; qui restano i filtri su polizze e
+    # collaboratore/mezzo di pagamento.
     if dal:
-        tit = [t for t in tit if (t.get("scadenza") or "") >= dal]
         pol = [p for p in pol if (p.get("scadenza") or "") >= dal]
     if al:
-        tit = [t for t in tit if (t.get("scadenza") or "") <= al]
         pol = [p for p in pol if (p.get("scadenza") or "") <= al]
     if collaboratore_id and collaboratore_id != "all":
         tit = [t for t in tit if t.get("collaboratore_id") == collaboratore_id]

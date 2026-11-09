@@ -56,7 +56,7 @@ export default function Avvisi() {
     const [showFilters, setShowFilters] = useState(false);
     const [qSearch, setQSearch] = useState("");
     const [filters, setFilters] = useState({
-        dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all",
+        dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all", stato_titoli: "arretrati",
     });
 
     useEffect(() => {
@@ -76,6 +76,7 @@ export default function Avvisi() {
             if (filters.al) params.al = filters.al;
             if (filters.collaboratore_id !== "all") params.collaboratore_id = filters.collaboratore_id;
             if (filters.mezzo_pagamento !== "all") params.mezzo_pagamento = filters.mezzo_pagamento;
+            if (filters.stato_titoli) params.stato_titoli = filters.stato_titoli;
             const r = await api.get("/avvisi-scadenze/preview", { params });
             setData(r.data);
         } catch (e) {
@@ -83,10 +84,10 @@ export default function Avvisi() {
         } finally { setLoading(false); }
     };
     useEffect(() => { load(); /* eslint-disable-next-line */ },
-        [giorni, filters.dal, filters.al, filters.collaboratore_id, filters.mezzo_pagamento]);
+        [giorni, filters.dal, filters.al, filters.collaboratore_id, filters.mezzo_pagamento, filters.stato_titoli]);
 
-    const resetFilters = () => setFilters({ dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all" });
-    const hasActiveFilters = filters.dal || filters.al || filters.collaboratore_id !== "all" || filters.mezzo_pagamento !== "all";
+    const resetFilters = () => setFilters({ dal: "", al: "", collaboratore_id: "all", mezzo_pagamento: "all", stato_titoli: "arretrati" });
+    const hasActiveFilters = filters.dal || filters.al || filters.collaboratore_id !== "all" || filters.mezzo_pagamento !== "all" || filters.stato_titoli !== "arretrati";
 
     // Fasce di scaduto a DATA ESATTA sulla DATA EFFETTO ("Rata del")
     const inBucket = (t, b) => {
@@ -188,7 +189,7 @@ export default function Avvisi() {
 
             {showFilters && (
                 <Card className="border-slate-200 p-4 mb-4" data-testid="filters-panel">
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-3 items-end">
                         <div>
                             <label className="text-xs font-medium text-slate-600">Dal</label>
                             <Input type="date" value={filters.dal}
@@ -224,6 +225,18 @@ export default function Avvisi() {
                                     {mezziPagamento.map((m) => (
                                         <SelectItem key={m.id || m.codice} value={m.codice}>{m.label || m.codice}</SelectItem>
                                     ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div>
+                            <label className="text-xs font-medium text-slate-600">Stato titoli</label>
+                            <Select value={filters.stato_titoli}
+                                onValueChange={(v) => setFilters((p) => ({ ...p, stato_titoli: v }))}>
+                                <SelectTrigger data-testid="filter-stato-titoli"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="arretrati">Solo arretrati</SelectItem>
+                                    <SelectItem value="coperti">Solo coperti</SelectItem>
+                                    <SelectItem value="tutti">Tutti (arretrati + coperti)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

@@ -1,5 +1,19 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Avvisi di scadenza: filtro per data rata, titoli in arrivo e filtro stato (arretrati/coperti/tutti)
+- **Problema utente**: (a) il filtro Dal/Al doveva mostrare solo i titoli con la DATA RATA nel range; (b) un titolo RC Auto (polizza 183629579, rata 29/11, "da incassare") non compariva negli Avvisi nemmeno senza date; (c) serviva un filtro stato (tutti / solo coperti / solo arretrati).
+- **Causa**: la query titoli (`avvisi_scadenze._query_titoli_arretrati`) includeva SOLO titoli con `effetto < oggi` (già scaduti). I titoli "da incassare" con data rata **futura** (es. 29/11) venivano esclusi a monte, quindi nessun filtro poteva mostrarli. Il filtro Dal/Al già agiva sulla data rata (il record formatta `scadenza = effetto`), ma su un dataset incompleto.
+- **Fix backend** (`avvisi_scadenze.py` + `server.py`):
+  - Nuova query `_query_titoli_avvisi` con finestra sulla **data rata (effetto)**: se `dal`/`al` → effetto nel range; altrimenti effetto ≤ oggi+giorni (scaduti + prossime rate nel periodo).
+  - Filtro stato a 3 vie (`_filtro_stato_titoli`): `arretrati` (da incassare/insoluto, non coperti), `coperti` (titolo_coperto, non incassati/stornati), `tutti` (tutti i pendenti).
+  - `cerca_scadenze(..., dal, al, stato)` parametrizzata; il job email resta invariato (stato=None → solo scaduti).
+  - Endpoint `/avvisi-scadenze/preview`: nuovo param `stato_titoli` (default `arretrati`); il filtro data rata è applicato nella query.
+- **Fix frontend** (`Avvisi.jsx`): aggiunto select **"Stato titoli"** (Solo arretrati / Solo coperti / Tutti) nei filtri, inviato come `stato_titoli`.
+- **Verifica (preview)**: inserito un titolo di prova analogo (effetto futuro 29/11/2026, da incassare, 906,50) → compare sia nella vista default (60gg) sia nel range 01–30/11; filtro `coperti` lo esclude, `tutti` lo include; poi rimosso. Il titolo reale dell'utente esiste solo in produzione (in preview c'è la quietanza 2025 incassata), quindi dopo il deploy comparirà.
+- **Nota deploy**: attivo in produzione dopo "Save to Github".
+
+
+
 ## 2026-11-09 — Tutte le date su fuso Europe/Rome + formato gg/mm/aaaa
 - **Richiesta**: tutte le date in ora di Roma e visualizzate come gg/mm/aaaa, in tutto il programma.
 - **Backend**: nuovo helper centrale `tzutil.py` (`oggi_italia()` = data odierna Roma, `adesso_italia()` = datetime Roma naive, `fmt_it()` = gg/mm/aaaa). Sostituiti ~60 usi di `date.today()` / `_date.today()` / `datetime.now()` (server.py + routes dashboard/kpi/anagrafiche/cumulativa/mup/modelli/firma/regolazione/comunicazioni/documenti + tutti i `pdf_*` + inps_calculator + sollecito_veicoli) con le versioni in ora italiana. `avvisi_scadenze` e lo `scheduler_alert` erano già su Roma.
