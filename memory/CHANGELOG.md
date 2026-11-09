@@ -1,5 +1,18 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Alert & Automazioni: validazione conformità (controllo rigido attivo:true + per-regola)
+- **Richiesta**: validazione finale + rilascio del controllo rigoroso degli alert.
+- **Test di conformità eseguiti su DB locale (tenant isolato, con cleanup) — 7/7 PASS**:
+  1. Regola `active:false` → `dispatch_rule` esce subito (`not rule.attivo`), stats tutti 0, **comm_queue resta VUOTA**.
+  2. Regola `active:true` → accodati 2 item (email+whatsapp) in `comm_queue` stato `pending`, con `rule_id`+`rule_nome` tracciati correttamente.
+  3. `dispatch_evento` su regola spenta → `matched=0`, nessun accodamento.
+  4. Scheduler: regola `schedule` ATTIVA ma **senza cron resta in attesa** (non eseguibile); `_cron_due` TRUE per l'orario corrente e FALSE per +40min.
+  5. Scheduler usa fuso `Europe/Rome` (verificato `ROME_TZ.key` + `_now_rome()`).
+- **Rate-limiting**: enqueue confermato; il throttling 5-10s/tenant e retry/backoff restano in `comm_queue._drain_tenant` (worker per-agenzia).
+- **Commit locale pronto al deploy**: `477609e`. Push su GitHub/Railway via "Save to Github" (azione utente).
+
+
+
 ## 2026-11-05 — Fix VISION360: set-folder ora auto-adotta la connessione legacy (split-tenant) + logging stdout/stderr
 - **Sintomo utente**: "jacopo@schiantarelli.it collegato al Drive, ho scelto la cartella VISION360 ma non si popola con INBOX e Archivio".
 - **RCA produzione (deployer)**: in `cloud_connections` esisteva UN SOLO doc `google_drive` intestato al tenant legacy `tenant-principale-schiantarelli` (folder_name "Assicura CRM"); per il tenant attivo `c5ae2d0e-283e-4513-aaf2-cbd97ef62d78` NESSUNA connessione (count 0). Lo switch a VISION360 non è mai stato persistito.
