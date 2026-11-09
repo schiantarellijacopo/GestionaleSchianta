@@ -12,8 +12,7 @@ Uso reportlab (già installato per gli altri PDF del CRM).
 """
 from __future__ import annotations
 import io
-from datetime import datetime
-from typing import Optional
+from tzutil import adesso_italia
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -22,7 +21,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_LEFT
 from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer,
-    PageBreak, KeepTogether,
+    PageBreak,
 )
 
 
@@ -135,7 +134,7 @@ def genera_pdf_scheda_calcolo(scheda: dict, ragione_sociale: str = "Assicura CRM
 
     story = []
     categoria = scheda.get("categoria", "(senza categoria)")
-    anno = scheda.get("anno") or datetime.now().year
+    anno = scheda.get("anno") or adesso_italia().year
     gen_at = str(scheda.get("generated_at") or "")[:10]
     gen_by = scheda.get("generato_da") or "—"
     stato = scheda.get("stato_verifica") or ""

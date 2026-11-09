@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 from datetime import date
+from tzutil import oggi_italia
 from typing import Optional
 
 from reportlab.lib.pagesizes import A4
@@ -20,7 +21,7 @@ def _fmt_data(s: Optional[str]) -> str:
     if not s:
         return ""
     try:
-        return date.fromisoformat(s[:10]).strftime("%d-%m-%Y")
+        return date.fromisoformat(s[:10]).strftime("%d/%m/%Y")
     except (TypeError, ValueError):
         return s
 
@@ -120,7 +121,7 @@ def generate_lettera_abbuono(
     flow.append(Spacer(1, 8 * mm))
 
     # Data e luogo
-    data_inc = lettera.get("data_incasso") or date.today().isoformat()
+    data_inc = lettera.get("data_incasso") or oggi_italia().isoformat()
     flow.append(Paragraph(f"<para align='right'>{_fmt_data(data_inc)}</para>", st["body"]))
     flow.append(Spacer(1, 4 * mm))
 

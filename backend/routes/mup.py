@@ -16,6 +16,7 @@ from database import db
 from auth import current_user, require_user
 from db_models import Allegato, _now_iso
 from storage_service import StorageService
+from tzutil import adesso_italia
 
 router = APIRouter()
 
@@ -162,7 +163,6 @@ async def _ctx(pid: str):
 async def _ph_context(pol, ana, comp, az):
     """Costruisce il dizionario di segnaposto per il testo del MUP."""
     import re as _re  # noqa
-    from datetime import datetime
     collab = pol.get("collaboratore_nome") or ""
     cid = pol.get("collaboratore_id")
     if cid and not collab:
@@ -183,7 +183,7 @@ async def _ph_context(pol, ana, comp, az):
         "numero_polizza": pol.get("numero_polizza") or "", "ramo": pol.get("ramo") or "",
         "prodotto": pol.get("prodotto") or "", "mandato": pol.get("mandato") or "",
         "premio_lordo": _eur(pol.get("premio_lordo") or pol.get("ultimo_premio_pagato")),
-        "data_oggi": datetime.now().strftime("%d/%m/%Y"),
+        "data_oggi": adesso_italia().strftime("%d/%m/%Y"),
     }
 
 
@@ -273,7 +273,6 @@ async def mup_firma(pid: str, body: dict, user=Depends(current_user)):
     """Genera il MUP con i campi FIRMA e DATA posizionati (segnaposto {firma}/{data_firma})
     e lo invia a firma digitale Yousign al contraente. Recapita il link via WhatsApp/Email."""
     import fitz  # pymupdf
-    import storage as obj_storage
     from routes.firma_modelli import _invia_yousign, _recapita_link
 
     pol, ana, comp, az = await _ctx(pid)

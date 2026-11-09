@@ -30,6 +30,7 @@ import storage as obj_storage
 import inps_calculator
 import geocoder as geocoder_svc
 from tenant import user_tenant_id
+from tzutil import oggi_italia
 
 
 def _google_sync(user: dict, ana_id: str) -> None:
@@ -320,8 +321,7 @@ async def list_anagrafiche(
     if con_figli:
         flt["numero_figli"] = {"$gt": 0}
     if eta_min is not None or eta_max is not None:
-        from datetime import date as _date
-        oggi = _date.today()
+        oggi = oggi_italia()
         cond = {}
         if eta_min is not None:  # età >= eta_min → nato entro (oggi - eta_min anni)
             cond["$lte"] = (oggi.replace(year=oggi.year - int(eta_min))).isoformat()
@@ -474,7 +474,7 @@ async def _ids_con_polizze_attive() -> set:
 
 
 async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, dir, page, page_size):
-    from datetime import date, timedelta
+    from datetime import timedelta
     import copy as _copy
     conteggi_flt = _copy.deepcopy(flt)  # q+tag+role, senza categoria/compleanno
     ids_con = None
@@ -503,7 +503,7 @@ async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, d
 
     # Compleanno (server-side su data_nascita YYYY-MM-DD)
     if compleanno:
-        today = date.today()
+        today = oggi_italia()
         if compleanno == "oggi":
             flt["data_nascita"] = {"$regex": f"-{today.strftime('%m-%d')}$"}
         elif compleanno == "settimana":
@@ -521,8 +521,8 @@ async def _list_anagrafiche_paged(*, flt, q, categoria, compleanno, doc, sort, d
     if doc:
         proj = dict(_ANAG_LEAN_PROJ); proj["documenti"] = 1
         all_rows = await db.anagrafiche.find(flt, proj).sort(sort_field, sort_dir).to_list(20000)
-        today_iso = date.today().isoformat()
-        in30 = (date.today() + timedelta(days=30)).isoformat()
+        today_iso = oggi_italia().isoformat()
+        in30 = (oggi_italia() + timedelta(days=30)).isoformat()
 
         def _match_doc(a):
             docs = a.get("documenti") or {}
@@ -716,7 +716,7 @@ def _age_tags(data_nascita) -> list:
         d = date.fromisoformat(str(data_nascita)[:10])
     except Exception:
         return []
-    today = date.today()
+    today = oggi_italia()
     eta = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
     tags = [f"gen_anni_{str((d.year // 10) * 10)[-2:]}"]
     if eta >= 65:

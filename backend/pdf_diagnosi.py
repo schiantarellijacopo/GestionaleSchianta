@@ -7,6 +7,7 @@ Stile ispirato ai report HubSicura.
 from __future__ import annotations
 import io
 from datetime import datetime, date
+from tzutil import oggi_italia, adesso_italia
 from typing import Optional
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm, cm
@@ -157,7 +158,7 @@ def _build_doc(buf: io.BytesIO):
 def _eta(data_nascita_iso: str) -> int:
     try:
         d = date.fromisoformat(data_nascita_iso)
-        t = date.today()
+        t = oggi_italia()
         return t.year - d.year - (1 if (t.month, t.day) < (d.month, d.day) else 0)
     except Exception:
         return 0
@@ -175,7 +176,7 @@ def genera_diagnosi_reddito(ana: dict, ac: dict, pens: dict, scop: dict, azienda
     buf = io.BytesIO()
     doc = _build_doc(buf)
     el = []
-    now = datetime.now()
+    now = adesso_italia()
     rnum = _next_report_num(now, ana["id"])
     nome_op = (user.get("name") or "OPERATORE").upper()
 
@@ -478,7 +479,7 @@ def genera_progetto_azzob(ana: dict, ac: dict, pens: dict, scop: dict, patr: dic
     buf = io.BytesIO()
     doc = _build_doc(buf)
     el = []
-    now = datetime.now()
+    now = adesso_italia()
     rnum = f"{now.year}/BOZZA"
     nome_op = (user.get("name") or "OPERATORE").upper()
     nome_cliente = (f"{ana.get('nome', '') or ''} {ana.get('cognome', '') or ''}").strip() or ana.get("ragione_sociale", "")

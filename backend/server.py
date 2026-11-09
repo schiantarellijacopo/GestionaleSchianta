@@ -14,6 +14,7 @@ import sys
 import re
 import uuid
 from datetime import datetime, timezone
+from tzutil import oggi_italia, adesso_italia
 from typing import Optional, List, Literal
 from pymongo.errors import DuplicateKeyError
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, UploadFile, File, Query, Form
@@ -3976,7 +3977,7 @@ async def list_polizze(
 
     # filtri di scadenza (presets)
     from datetime import date, timedelta
-    today = date.today()
+    today = oggi_italia()
     today_s = today.isoformat()
     scad_cond: dict = {}
     if in_scadenza_giorni is not None:
@@ -4111,7 +4112,7 @@ async def ricalcola_scadute(user=Depends(require_user("admin"))):
     rispecchia così solo i contratti realmente in corso."""
     from datetime import date
     flt = await visibility_filter(user)
-    today = date.today().isoformat()
+    today = oggi_italia().isoformat()
     # polizze con copertura attiva (rinnovo in corso) → NON scadute
     coperte = set()
     async for t in db.titoli.find({"coperto_fino_a": {"$gte": today}}, {"_id": 0, "polizza_id": 1}):
@@ -4962,7 +4963,7 @@ async def applica_auto_tag(body: dict = None, user=Depends(require_user("admin",
     - titoli: 'insoluto' (stato insoluto).
     """
     from datetime import date as _date, timedelta as _td
-    oggi = _date.today()
+    oggi = oggi_italia()
     limite = (oggi + _td(days=30)).isoformat()
     oggi_s = oggi.isoformat()
     con_sinistri = set(await db.sinistri.distinct("polizza_id"))
@@ -5094,7 +5095,7 @@ async def statistiche_incassi_situazione(
          Provvigioni Attive, Provvigioni Nette, Premi Lordi, Premi Netti.
     """
     from datetime import date as _date
-    oggi = _date.today()
+    oggi = oggi_italia()
     anno = int(anno or oggi.year)
     mese = int(mese or oggi.month)
 
@@ -5658,7 +5659,7 @@ async def list_titoli(
         flt["conto_cassa_id"] = conto_cassa_id
 
     from datetime import date, timedelta
-    today = date.today()
+    today = oggi_italia()
     today_s = today.isoformat()
 
     if in_scadenza_giorni is not None:
@@ -6264,7 +6265,7 @@ def _giorni_da_oggi(data_iso: Optional[str]) -> Optional[int]:
     try:
         from datetime import date as _date
         d = _date.fromisoformat(data_iso[:10])
-        return (_date.today() - d).days
+        return (oggi_italia() - d).days
     except Exception:
         return None
 
@@ -12928,7 +12929,7 @@ async def calcolo_pensione_preview(aid: str, user=Depends(current_user)):
     if ana.get("data_nascita"):
         try:
             d = date.fromisoformat(ana["data_nascita"])
-            today = date.today()
+            today = oggi_italia()
             eta = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
         except Exception:
             pass
@@ -12948,7 +12949,7 @@ async def calcolo_pensione_preview(aid: str, user=Depends(current_user)):
     if not settimane and ana.get("data_inizio_contribuzione"):
         try:
             di = date.fromisoformat(ana["data_inizio_contribuzione"])
-            anni = (date.today() - di).days / 365.25
+            anni = (oggi_italia() - di).days / 365.25
             settimane = int(anni * 52)
         except Exception:
             settimane = 0
@@ -13297,7 +13298,7 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
     if ana.get("data_nascita"):
         try:
             d = date.fromisoformat(ana["data_nascita"])
-            today = date.today()
+            today = oggi_italia()
             eta_attuale = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
         except Exception:
             pass
@@ -13312,7 +13313,7 @@ async def calcola_pensioni_future(aid: str, user=Depends(current_user)):
         for p in periodi:
             try:
                 ini = _date.fromisoformat(p["inizio_periodo"])
-                fin = _date.fromisoformat(p["fine_periodo"]) if p.get("fine_periodo") else _date.today()
+                fin = _date.fromisoformat(p["fine_periodo"]) if p.get("fine_periodo") else oggi_italia()
                 gg = (fin - ini).days
                 settimane += gg // 7
             except Exception:
@@ -13451,7 +13452,7 @@ async def calcola_scoperture_analisi(aid: str, user=Depends(current_user)):
             if con and con.get("data_nascita"):
                 try:
                     d = date.fromisoformat(con["data_nascita"])
-                    today = date.today()
+                    today = oggi_italia()
                     eta_coniuge = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
                 except Exception:
                     pass
@@ -13461,7 +13462,7 @@ async def calcola_scoperture_analisi(aid: str, user=Depends(current_user)):
             if figlio and figlio.get("data_nascita"):
                 try:
                     d = date.fromisoformat(figlio["data_nascita"])
-                    today = date.today()
+                    today = oggi_italia()
                     eta_f = today.year - d.year - (1 if (today.month, today.day) < (d.month, d.day) else 0)
                     if eta_figlio_piu_piccolo is None or eta_f < eta_figlio_piu_piccolo:
                         eta_figlio_piu_piccolo = eta_f
@@ -15668,7 +15669,7 @@ def _render_avviso_titoli_email(*, ragione_sociale: str, corpo_lettera: str,
         scad = t.get("scadenza") or ""
         try:
             from datetime import date as _date
-            scad_fmt = _date.fromisoformat(scad[:10]).strftime("%d-%m-%Y") if scad else ""
+            scad_fmt = _date.fromisoformat(scad[:10]).strftime("%d/%m/%Y") if scad else ""
         except Exception:
             scad_fmt = scad
         imp = float(t.get("importo_lordo") or 0)
@@ -15738,7 +15739,7 @@ def _render_avviso_titoli_email(*, ragione_sociale: str, corpo_lettera: str,
 async def genera_avvisi_scadenze(giorni: int = 30, user=Depends(require_user("admin", "collaboratore"))):
     """Genera email di avviso per polizze in scadenza nei prossimi N giorni."""
     from datetime import date, timedelta
-    oggi = date.today()
+    oggi = oggi_italia()
     limite = (oggi + timedelta(days=giorni)).isoformat()
     polizze = await db.polizze.find(
         {"stato": "attiva", "scadenza": {"$gte": oggi.isoformat(), "$lte": limite}},
@@ -15880,8 +15881,8 @@ async def list_attivita(
 async def stats_dashboard(user=Depends(current_user)):
     flt = await visibility_filter(user)
     today = _now_iso()[:10]
-    from datetime import date, timedelta
-    sessanta_gg = (date.today() + timedelta(days=60)).isoformat()
+    from datetime import timedelta
+    sessanta_gg = (oggi_italia() + timedelta(days=60)).isoformat()
 
     # Clienti: solo anagrafiche con almeno una polizza attiva
     if user["role"] == "cliente":
@@ -15923,10 +15924,9 @@ async def stats_dashboard(user=Depends(current_user)):
     rami = await db.polizze.aggregate(pipeline_ramo).to_list(20)
 
     # Incassi ultimi 6 mesi
-    from datetime import date
     sei_mesi = []
     for i in range(5, -1, -1):
-        d = date.today().replace(day=1)
+        d = oggi_italia().replace(day=1)
         # naive: scendi di i mesi
         m = d.month - i
         y = d.year
@@ -15957,7 +15957,7 @@ async def stats_dashboard_admin(user=Depends(require_user("admin"))):
     """KPI estesi solo admin: provvigioni, nuova produzione per ramo, sinistri liquidati,
     clienti per categoria, scadenze 5/10/15 gg."""
     from datetime import date, timedelta
-    today = date.today()
+    today = oggi_italia()
     today_iso = today.isoformat()
     inizio_anno = f"{today.year}-01-01"
 
@@ -16745,7 +16745,7 @@ async def cron_disdette_reminder(request: Request):
     from database import raw_db
     from alert_models import Notification
     giorni_preavviso = int(os.environ.get("DISDETTE_REMINDER_DAYS") or 5)
-    oggi = _date.today()
+    oggi = oggi_italia()
     oggi_s = oggi.isoformat()
     limite = (oggi + _td(days=giorni_preavviso)).isoformat()
     created = 0
@@ -17477,7 +17477,7 @@ async def auto_genera_tags(user=Depends(require_user("admin", "collaboratore")))
       - dipendente / autonomo / professionista / imprenditore / pensionato (da tipologia_lavoratore)
     """
     from datetime import date
-    today = date.today()
+    today = oggi_italia()
     AUTO_TAGS_GESTITI = {
         "genitore_con_figli_minori", "figli_minori",
         "cliente_attivo", "prospect", "top_cliente",
@@ -18233,8 +18233,8 @@ async def notifiche_sommario(user=Depends(current_user)):
     res = {"chat": chat_unread, "totale": chat_unread}
     if user["role"] in ("admin", "collaboratore", "dipendente"):
         from datetime import date, timedelta
-        oggi = date.today().isoformat()
-        in_scad = (date.today() + timedelta(days=15)).isoformat()
+        oggi = oggi_italia().isoformat()
+        in_scad = (oggi_italia() + timedelta(days=15)).isoformat()
         polizze_scad = await db.polizze.count_documents({
             "stato": "attiva", "scadenza": {"$gte": oggi, "$lte": in_scad},
         })
@@ -18752,7 +18752,7 @@ async def stampa_titoli_sospesi(
     rows.append(["", "", "", "", "", "", "TOTALE", totale])
 
     headers = ["Cliente", "Collaboratore", "Polizza", "Ramo / Targa", "Coperto il", "Anticipo", "Scad. polizza", "Importo €"]
-    sottotitolo = f"{len(rows) - 1} titoli sospesi — Data stampa: {_date.today().strftime('%d/%m/%Y')}"
+    sottotitolo = f"{len(rows) - 1} titoli sospesi — Data stampa: {oggi_italia().strftime('%d/%m/%Y')}"
     pdf = pdf_report.stampa_elenco(
         "Sospesi Anticipi", sottotitolo, headers, rows,
         col_widths_mm=[45, 35, 28, 30, 22, 18, 22, 25],
@@ -18791,7 +18791,7 @@ async def stampa_titoli_sospesi_storico(
     periodo = ""
     if dal or al:
         periodo = f" — periodo {(dal or '…')} / {(al or '…')}"
-    sottotitolo = f"{len(rows) - 1} sospesi incassati{periodo} — Data stampa: {_date.today().strftime('%d/%m/%Y')}"
+    sottotitolo = f"{len(rows) - 1} sospesi incassati{periodo} — Data stampa: {oggi_italia().strftime('%d/%m/%Y')}"
     pdf = pdf_report.stampa_elenco(
         "Storico Sospesi Anticipi", sottotitolo, headers, rows,
         col_widths_mm=[42, 33, 28, 28, 22, 22, 18, 25],
@@ -18936,7 +18936,7 @@ async def stampa_singolo_sinistro(sid: str, user=Depends(current_user)):
                 y -= 4.5 * mm
 
     c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.grey)
-    c.drawString(15 * mm, 15 * mm, f"Stampato il {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    c.drawString(15 * mm, 15 * mm, f"Stampato il {adesso_italia().strftime('%d/%m/%Y %H:%M')}")
     c.showPage(); c.save()
     return _pdf_response(buf.getvalue(), f"sinistro_{s.get('numero_sinistro','x')}.pdf")
 
@@ -19086,7 +19086,7 @@ async def stampa_cid(sid: str, user=Depends(current_user)):
     c.drawString(110 * mm, y, "Firma del conducente B: ___________________________")
     y -= 8 * mm
     c.setFont("Helvetica-Oblique", 7); c.setFillColor(colors.grey)
-    c.drawString(15 * mm, 12 * mm, f"Documento generato il {datetime.now().strftime('%d/%m/%Y %H:%M')} — Sinistro N. {s.get('numero_sinistro','')}")
+    c.drawString(15 * mm, 12 * mm, f"Documento generato il {adesso_italia().strftime('%d/%m/%Y %H:%M')} — Sinistro N. {s.get('numero_sinistro','')}")
 
     c.showPage(); c.save()
     return _pdf_response(buf.getvalue(), f"cid_{s.get('numero_sinistro','x')}.pdf")

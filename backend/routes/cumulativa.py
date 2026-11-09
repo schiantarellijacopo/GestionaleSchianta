@@ -10,7 +10,8 @@ import csv
 import io
 import re
 import uuid
-from datetime import datetime, date, timezone
+from datetime import datetime, date
+from tzutil import oggi_italia
 from typing import Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -46,7 +47,7 @@ def _stato_da_uscita(data_uscita: Optional[str]) -> str:
     if not data_uscita:
         return "attivo"
     try:
-        return "uscito" if date.fromisoformat(data_uscita[:10]) <= date.today() else "attivo"
+        return "uscito" if date.fromisoformat(data_uscita[:10]) <= oggi_italia() else "attivo"
     except (TypeError, ValueError):
         return "uscito"
 

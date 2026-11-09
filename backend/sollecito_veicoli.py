@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
+from tzutil import oggi_italia
 from typing import Optional
 
 import jwt
@@ -192,11 +193,10 @@ async def run_sollecito_documento_veicolo(rule: dict, db) -> dict:
       - canali (email, whatsapp, sms, inapp)
       - template_oggetto / template_corpo
     """
-    from datetime import date
     soglia = int(rule.get("soglia_giorni") or 3)
     canali = rule.get("canali") or ["email"]
     tenant_id = rule.get("tenant_id")
-    limite_data = (date.today() - timedelta(days=soglia)).isoformat()
+    limite_data = (oggi_italia() - timedelta(days=soglia)).isoformat()
 
     # Trova applicazioni cessate senza atto e con giorni sufficienti
     flt = {

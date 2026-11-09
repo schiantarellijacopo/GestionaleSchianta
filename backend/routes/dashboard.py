@@ -4,6 +4,7 @@ Estratto da server.py. Tutti gli endpoint sono prefissati `/api/dashboard`
 quando il router viene incluso nell'app principale.
 """
 from datetime import date, timedelta
+from tzutil import oggi_italia
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -127,7 +128,7 @@ def _build_task_list(*, n_comp_oggi: int, n_comp_sett: int,
 @router.get("/dashboard/tasks")
 async def dashboard_tasks(user: dict = Depends(require_user("admin", "collaboratore", "dipendente"))) -> list[dict]:
     """Task azionabili sulla dashboard."""
-    today = date.today()
+    today = oggi_italia()
     today_iso = today.isoformat()
     in_30 = (today + timedelta(days=30)).isoformat()
     days_5_ago = (today - timedelta(days=5)).isoformat()
@@ -195,7 +196,7 @@ async def dashboard_automazioni_oggi(
 ) -> dict:
     """Feed delle automazioni eseguite oggi (invii alert + sinistri aperti/liquidati),
     raggruppate per categoria con drill-down degli invii."""
-    today_iso = date.today().isoformat()
+    today_iso = oggi_italia().isoformat()
 
     # 1) Eventi alert di oggi
     events = await db.alert_events.find(

@@ -15,13 +15,13 @@ from __future__ import annotations
 
 import io
 from datetime import date
+from tzutil import oggi_italia
 from typing import Optional
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.utils import ImageReader
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether, Image,
 )
@@ -37,7 +37,7 @@ def _fmt_data(s: Optional[str]) -> str:
     if not s:
         return ""
     try:
-        return date.fromisoformat(s[:10]).strftime("%d-%m-%Y")
+        return date.fromisoformat(s[:10]).strftime("%d/%m/%Y")
     except (TypeError, ValueError):
         return s
 
@@ -124,7 +124,7 @@ def generate_avviso_pdf(
         "azienda_telefono": azienda.get("telefono") or "",
         "azienda_email": azienda.get("smtp_from") or azienda.get("smtp_user") or "",
         "totale": _fmt_eur(totale),
-        "data_oggi": date.today().strftime("%d-%m-%Y"),
+        "data_oggi": oggi_italia().strftime("%d/%m/%Y"),
         "numero_titoli": str(len(righe)),
     }
 

@@ -37,7 +37,7 @@ def _eur_zero(v: float) -> str:
 def _format_data_it(s: str) -> str:
     try:
         d = datetime.strptime(s, "%Y-%m-%d")
-        return d.strftime("%d-%m-%Y")
+        return d.strftime("%d/%m/%Y")
     except Exception:
         return s
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, timedelta
+from tzutil import oggi_italia
 from typing import Optional
 from urllib.parse import quote
 
@@ -115,7 +116,7 @@ async def list_regolazioni(
         {"_id": 0, "id": 1, "stato": 1, "titolo_coperto": 1},
     )}
 
-    today = date.today().isoformat()
+    today = oggi_italia().isoformat()
     out = []
     for p in polizze:
         a = anags.get(p.get("contraente_id"), {})

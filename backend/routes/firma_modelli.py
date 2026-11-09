@@ -15,7 +15,6 @@ così restano valide a prescindere dalla risoluzione di rendering.
 from __future__ import annotations
 
 import base64
-import io
 import logging
 import os
 import shutil
@@ -23,6 +22,7 @@ import subprocess
 import tempfile
 import uuid
 from datetime import datetime, timezone
+from tzutil import oggi_italia
 
 import fitz  # pymupdf
 import httpx
@@ -247,7 +247,6 @@ async def _valori_dato(db, anagrafica_id, polizza_id, collaboratore_id=None, use
     collab = collab or {}
     # agenzia (singleton config)
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
-    from datetime import date
     nome_cliente = ana.get("ragione_sociale") or f"{ana.get('cognome','')} {ana.get('nome','')}".strip()
     indirizzo = ana.get("indirizzo") or ""
     comune = ana.get("comune") or ana.get("citta") or ""
@@ -288,7 +287,7 @@ async def _valori_dato(db, anagrafica_id, polizza_id, collaboratore_id=None, use
         "agenzia_piva": az.get("partita_iva") or "",
         "agenzia_rui": az.get("rui") or "",
         "agenzia_rui_sezione": az.get("rui_sezione") or "",
-        "data_oggi": date.today().strftime("%d/%m/%Y"),
+        "data_oggi": oggi_italia().strftime("%d/%m/%Y"),
         "x": "X",
         # --- Alias vocabolario "Modelli" (cliente_* / operatore_*) ---
         "cliente": nome_cliente, "cliente_nome": nome_cliente,

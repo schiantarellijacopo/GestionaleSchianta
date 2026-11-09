@@ -256,7 +256,7 @@ async def genera_brogliaccio_pdf(db, data_giorno: str, conti: list[dict],
     elements: list = []
     elements.append(Paragraph(f"<b>{ragione_sociale}</b>", h_style))
     d = date.fromisoformat(data_giorno)
-    elements.append(Paragraph(f"Brogliaccio del {d.strftime('%d-%m-%Y')}", sub_style))
+    elements.append(Paragraph(f"Brogliaccio del {d.strftime('%d/%m/%Y')}", sub_style))
     elements.append(Spacer(1, 4 * mm))
 
     movs, polizze, anagrafiche, compagnie = await _load_movimenti_arricchiti(db, data_giorno)

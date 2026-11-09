@@ -1,8 +1,8 @@
 """Generatore PDF generico per stampe elenco di una sezione."""
 from __future__ import annotations
 import io
-from datetime import datetime
-from typing import List, Sequence
+from tzutil import adesso_italia
+from typing import Sequence
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -114,7 +114,7 @@ def stampa_elenco(
     if note_footer:
         el.append(Paragraph(note_footer, foot_style))
     el.append(Paragraph(
-        f"Generato il {datetime.now().strftime('%d/%m/%Y %H:%M')} · {len(rows)} righe",
+        f"Generato il {adesso_italia().strftime('%d/%m/%Y %H:%M')} · {len(rows)} righe",
         foot_style,
     ))
     doc.build(el)

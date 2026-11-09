@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Tutte le date su fuso Europe/Rome + formato gg/mm/aaaa
+- **Richiesta**: tutte le date in ora di Roma e visualizzate come gg/mm/aaaa, in tutto il programma.
+- **Backend**: nuovo helper centrale `tzutil.py` (`oggi_italia()` = data odierna Roma, `adesso_italia()` = datetime Roma naive, `fmt_it()` = gg/mm/aaaa). Sostituiti ~60 usi di `date.today()` / `_date.today()` / `datetime.now()` (server.py + routes dashboard/kpi/anagrafiche/cumulativa/mup/modelli/firma/regolazione/comunicazioni/documenti + tutti i `pdf_*` + inps_calculator + sollecito_veicoli) con le versioni in ora italiana. `avvisi_scadenze` e lo `scheduler_alert` erano già su Roma.
+  - Nota tecnica: le funzioni sono state nominate `oggi_italia`/`adesso_italia` per evitare lo shadowing con la variabile locale `oggi` usata in molte funzioni (sarebbe stato UnboundLocalError).
+- **Formato stampa**: nei PDF/export le date stampate passano da `gg-mm-aaaa` a **gg/mm/aaaa** (pdf_avviso/avvisi/brogliaccio/lettera_abbuono, brogliaccio, libro_matricola, server, cumulativa, import_*).
+  - **Attenzione preservata**: i parser input (`strptime`) in import_massivo/import_anagrafiche/cumulativa/libro_matricola continuano ad accettare sia `gg-mm-aaaa` sia `gg/mm/aaaa` (ripristinato `%d-%m-%Y` nelle liste formati — regressione verificata).
+- **Frontend**: già conforme — patch globale `lib/timezone.js` forza `it-IT` + `Europe/Rome` su tutte le `toLocaleDateString/Time/String` (→ gg/mm/aaaa in ora di Roma) e `lib/api.js fmtDate` idem. Nessuna modifica necessaria.
+- **Verifica (preview)**: avvio backend pulito; endpoint dashboard/titoli/anagrafiche + PDF saldi-cassa + export CSV = 200; `oggi_italia()` = data Roma, `fmt_it` = gg/mm/aaaa; parsing `09-11-2026` e `09/11/2026` entrambi OK.
+- **Nota deploy**: attivo in produzione dopo "Save to Github".
+
+
+
 ## 2026-11-09 — Alert: fix segnaposto {cliente}, riarmo scheduler al cambio orario, ora Roma
 - **Bug segnaposto `{cliente}`** (WhatsApp/email mostravano "Gentile {cliente}," letterale): il context di rendering esponeva solo `nome`/`cliente_nome`, non `cliente`. Fix in `alert_dispatcher.dispatch_rule`: aggiunti alias `cliente`, `nome_cliente` (= nome cliente) prima di `render_template`. Verificato: corpo → "Gentile Mario Rossi, …".
 - **Bug "Esegui ora funziona ma col solo orario no"**: il tick imposta `last_run_date=oggi` alla prima esecuzione giornaliera (idempotenza 1 run/giorno), quindi cambiando l'orario per ritestare la regola veniva saltata fino al giorno dopo; "Esegui ora" invece bypassa `last_run_date`. Fix in `routes/alert.py`: al salvataggio dell'orario (`cron`) e alla riattivazione (toggle ON) si azzera `last_run_date` → la regola si ri-arma e può scattare al nuovo orario anche in giornata. Verificato.

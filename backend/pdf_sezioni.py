@@ -6,17 +6,14 @@ Logo aziendale in alto a sinistra in ogni pagina.
 """
 from __future__ import annotations
 import io
-import os
-from datetime import datetime, date
-from typing import Optional
+from tzutil import adesso_italia
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY, TA_RIGHT
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak,
-    Image as RLImage, KeepTogether, HRFlowable,
 )
 
 
@@ -118,7 +115,7 @@ def _make_header(azienda: dict, titolo: str, nome_cliente: str):
         ]))
         canvas.drawString(15 * mm, 10 * mm, ind[:140])
         canvas.drawRightString(w - 15 * mm, 10 * mm,
-                               f"Pagina {doc.page}  ·  {datetime.now().strftime('%d/%m/%Y')}")
+                               f"Pagina {doc.page}  ·  {adesso_italia().strftime('%d/%m/%Y')}")
         canvas.restoreState()
     return _draw
 
@@ -457,7 +454,7 @@ def genera_pdf_sezione(sezione: str, ana: dict, ac: dict, azienda: dict, dati: d
         el.append(Paragraph(f"<b>{nome_cliente.upper()}</b>", s["h2"]))
         el.append(Spacer(1, 6 * mm))
         el.append(Paragraph(f"Codice Fiscale: <b>{ana.get('codice_fiscale') or ana.get('partita_iva') or '—'}</b>", s["body"]))
-        el.append(Paragraph(f"Data del report: {datetime.now().strftime('%d/%m/%Y')}", s["body"]))
+        el.append(Paragraph(f"Data del report: {adesso_italia().strftime('%d/%m/%Y')}", s["body"]))
         el.append(Spacer(1, 30 * mm))
         # Indice
         el.append(Paragraph("<b>Contenuti del Report</b>", s["h3"]))

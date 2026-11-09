@@ -15,7 +15,7 @@ FONTI UFFICIALI (verifica 12/02/2026):
 
 Questo modulo fornisce stime indicative e non sostituisce il calcolo ufficiale INPS.
 """
-from datetime import datetime
+from tzutil import adesso_italia
 from typing import Literal, Optional
 
 
@@ -144,7 +144,7 @@ def calcola_montante_rivalutato(storico_redditi: list, aliquota: float = 0.33) -
     """
     if not storico_redditi:
         return 0.0
-    anno_corrente = datetime.now().year
+    anno_corrente = adesso_italia().year
     montante = 0.0
     for r in storico_redditi:
         anno = int(r.get("anno", 0))

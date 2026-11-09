@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime, timezone
+from tzutil import oggi_italia
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
@@ -1426,7 +1427,6 @@ async def build_context(cliente_id: Optional[str] = None,
     """Contesto placeholder standard: agenzia + cliente + polizza + titolo +
     sinistro + compagnia + collaboratore. Risolve a cascata le entità mancanti
     (es. da titolo/sinistro ricava polizza e cliente)."""
-    from datetime import date
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
     ctx: dict = {
         "azienda_nome": az.get("ragione_sociale") or az.get("nome") or "",
@@ -1450,7 +1450,7 @@ async def build_context(cliente_id: Optional[str] = None,
         "azienda_banca": az.get("banca") or "",
         "azienda_capitale_sociale": az.get("capitale_sociale") or "",
         "azienda_rea": az.get("rea") or "",
-        "data_oggi": date.today().strftime("%d/%m/%Y"),
+        "data_oggi": oggi_italia().strftime("%d/%m/%Y"),
     }
     # Risoluzione a cascata: sinistro → polizza/cliente; titolo → polizza → cliente
     sin = None

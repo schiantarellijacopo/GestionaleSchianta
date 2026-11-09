@@ -8,7 +8,7 @@ espanso dai familiari del cliente (campo ``parente_di``).
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from tzutil import adesso_italia
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -136,7 +136,7 @@ async def _context(entita_tipo: str, entita_id: str, user: dict = None) -> dict:
         "stato_sinistro": sin.get("stato") or "", "descrizione_sinistro": sin.get("descrizione") or "",
         "azienda_nome": az.get("ragione_sociale") or "", "agenzia_nome": az.get("ragione_sociale") or "",
         "azienda_indirizzo": ", ".join([x for x in [az.get("indirizzo"), az.get("cap"), az.get("comune")] if x]),
-        "data_oggi": datetime.now().strftime("%d/%m/%Y"),
+        "data_oggi": adesso_italia().strftime("%d/%m/%Y"),
     }
     # Via/indirizzo cliente (alias) + operatore/intermediario.
     # L'operatore è SEMPRE l'utente loggato che esegue l'operazione (non il

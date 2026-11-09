@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from tzutil import adesso_italia
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from auth import current_user, require_user
+from auth import current_user
 from database import db
 from db_models import _now_iso
 
@@ -392,7 +393,7 @@ async def _stats_avvisi(scope_filter: dict) -> list[dict]:
 
 async def _stats_prima_nota(scope_filter: dict) -> list[dict]:
     """KPI Prima Nota: entrate/uscite/saldo del mese corrente."""
-    today = datetime.now()
+    today = adesso_italia()
     first_day = today.replace(day=1).strftime("%Y-%m-%d")
     pipeline = [
         {"$match": {

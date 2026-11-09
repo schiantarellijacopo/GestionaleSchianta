@@ -30,6 +30,7 @@ from auth import require_user
 from database import db
 from db_models import ComunicazioneCopertura, _now_iso
 from shared import log_attivita
+from tzutil import oggi_italia
 
 logger = logging.getLogger(__name__)
 
@@ -380,8 +381,7 @@ async def auto_invia_ora(body: dict | None = None, user=Depends(require_user("ad
     dello scheduler), utile per test o invio manuale immediato."""
     giorno = (body or {}).get("giorno")
     if not giorno:
-        import datetime
-        giorno = datetime.date.today().isoformat()
+        giorno = oggi_italia().isoformat()
     if not (len(giorno) == 10 and giorno[4] == "-" and giorno[7] == "-"):
         raise HTTPException(400, "Parametro 'giorno' non valido (YYYY-MM-DD)")
     res = await invia_coperture_giorno(giorno, user)

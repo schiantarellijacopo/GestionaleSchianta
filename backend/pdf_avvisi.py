@@ -22,7 +22,7 @@ def _fmt_data(s: str | None) -> str:
     if not s:
         return ""
     try:
-        return date.fromisoformat(s[:10]).strftime("%d-%m-%Y")
+        return date.fromisoformat(s[:10]).strftime("%d/%m/%Y")
     except (TypeError, ValueError):
         return s
 

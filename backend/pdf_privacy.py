@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import base64
 from datetime import datetime, date
+from tzutil import oggi_italia, adesso_italia
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib import colors
@@ -389,7 +390,7 @@ def genera_privacy_pdf(ana: dict, azienda: dict, dipendente_nome: str = "") -> b
     today = (
         ana.get("data_consenso_privacy")
         or ana.get("privacy_firmata_il", "")[:10]
-        or date.today().isoformat()
+        or oggi_italia().isoformat()
     )
     try:
         d = date.fromisoformat(today)
@@ -424,7 +425,7 @@ def genera_privacy_pdf(ana: dict, azienda: dict, dipendente_nome: str = "") -> b
         el.append(Spacer(1, 4 * mm))
         el.append(Paragraph(
             f"<font size=7 color='{MID.hexval()}'>Documento generato da: <b>{dipendente_nome}</b> "
-            f"il {datetime.now().strftime('%d/%m/%Y %H:%M')}</font>",
+            f"il {adesso_italia().strftime('%d/%m/%Y %H:%M')}</font>",
             s["small"]))
 
     doc.build(

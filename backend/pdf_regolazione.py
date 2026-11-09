@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 from datetime import date
+from tzutil import oggi_italia
 from typing import Optional
 
 from reportlab.lib.pagesizes import A4
@@ -89,7 +90,7 @@ def genera_lettera_regolazione(
     if contraente_indirizzo:
         els.append(Paragraph(contraente_indirizzo, body))
     els.append(Spacer(1, 6 * mm))
-    els.append(Paragraph(f"Luogo e data: ______________, {date.today().strftime('%d/%m/%Y')}", right))
+    els.append(Paragraph(f"Luogo e data: ______________, {oggi_italia().strftime('%d/%m/%Y')}", right))
     els.append(Spacer(1, 6 * mm))
 
     # Oggetto
