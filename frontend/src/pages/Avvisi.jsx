@@ -761,7 +761,7 @@ function BulkAvvisoDialog({ titoli_ids, onClose }) {
 
     const [sendingAuto, setSendingAuto] = useState(false);
     const inviaAuto = async () => {
-        if (!window.confirm(`Invio AUTOMATICO: il sistema sceglierà per ogni cliente il canale (WhatsApp/Email/SMS) in base ai flag di preferenza salvati nella sua anagrafica.\n\nProseguire con ${titoli_ids.length} titoli?`)) return;
+        if (!window.confirm(`Invio AUTOMATICO: per ogni cliente verranno usati TUTTI i canali preferiti attivi in anagrafica (WhatsApp, Email e/o SMS). Se un cliente ha più canali spuntati, riceverà l'avviso su ciascuno di essi.\n\nProseguire con ${titoli_ids.length} titoli?`)) return;
         setSendingAuto(true);
         try {
             const r = await api.post("/avvisi/invia-bulk-auto", {

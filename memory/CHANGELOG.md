@@ -1,5 +1,16 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Avvisi "Invia in AUTOMATICO": invio MULTICANALE a tutti i canali preferiti
+- **Richiesta utente**: se in anagrafica sono spuntati più "Canali preferiti avvisi" (es. Email + WhatsApp), l'invio automatico deve partire su TUTTI, non solo sul primo.
+- **Prima**: `/avvisi/invia-bulk-auto` sceglieva UN SOLO canale per cliente (il primo attivo secondo la priorità) e si fermava lì.
+- **Fix** (`server.py`): ora costruisce la lista di TUTTI i canali attivi con recapito (`canale_whatsapp`/`canale_email`/`canale_sms` + cell/email presenti) e invia su ciascuno; esito/errori tracciati per canale.
+  - Email: passa prima da **Gmail API (OAuth agenzia)** via `gmail_send.send_tenant_email`, con fallback SMTP; rimosso il gate `smtp_host` che impediva l'email ai tenant che usano solo Gmail OAuth.
+- **Frontend** (`Avvisi.jsx`): messaggio di conferma aggiornato ("verranno usati TUTTI i canali preferiti attivi … riceverà l'avviso su ciascuno").
+- **Verifica (preview)**: contraente di test con Email+WhatsApp → entrambi i canali tentati (CANALI TENTATI: ['email','whatsapp']); prima ne partiva uno solo. Gli errori di consegna sono dovuti a Evolution/Gmail non collegati in preview per il destinatario fittizio; in produzione (canali collegati) partono realmente. Dati di test rimossi.
+- **Nota deploy**: attivo in produzione dopo "Save to Github".
+
+
+
 ## 2026-11-09 — Avvisi di scadenza: filtro per data rata, titoli in arrivo e filtro stato (arretrati/coperti/tutti)
 - **Problema utente**: (a) il filtro Dal/Al doveva mostrare solo i titoli con la DATA RATA nel range; (b) un titolo RC Auto (polizza 183629579, rata 29/11, "da incassare") non compariva negli Avvisi nemmeno senza date; (c) serviva un filtro stato (tutti / solo coperti / solo arretrati).
 - **Causa**: la query titoli (`avvisi_scadenze._query_titoli_arretrati`) includeva SOLO titoli con `effetto < oggi` (già scaduti). I titoli "da incassare" con data rata **futura** (es. 29/11) venivano esclusi a monte, quindi nessun filtro poteva mostrarli. Il filtro Dal/Al già agiva sulla data rata (il record formatta `scadenza = effetto`), ma su un dataset incompleto.

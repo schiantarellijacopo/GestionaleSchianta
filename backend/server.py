@@ -15385,6 +15385,8 @@ async def invia_bulk_auto(
             {"tipo": "sms", "default": True, "attivo": True}, {"_id": 0})
 
     az = await db.azienda_config.find_one({}, {"_id": 0}) or {}
+    from tenant import user_tenant_id as _utid
+    tid = _utid(user)
 
     def _fmt_scad_giorno(s: str | None) -> str:
         """Converte ``YYYY-MM-DD`` in ``DD/MM/YYYY``."""
@@ -15446,22 +15448,20 @@ async def invia_bulk_auto(
                "azienda_indirizzo": az.get("indirizzo") or "",
                "azienda_pec": az.get("pec") or ""}
 
-        # Scelta canale: primo della priorità che è abilitato E ha il recapito
+        # Invio MULTICANALE: a TUTTI i canali preferiti attivi in anagrafica
+        # (con recapito disponibile), non solo al primo della priorità.
         cell = (a.get("cellulare") or a.get("telefono") or "").strip()
         email_addr = (a.get("email") or "").strip()
-        canale_scelto = None
+        canali_da_inviare: list[str] = []
         for canale in priorita:
             if canale == "whatsapp" and a.get("canale_whatsapp") and cell:
-                canale_scelto = "whatsapp"
-                break
-            if canale == "email" and a.get("canale_email") and email_addr and az.get("smtp_host"):
-                canale_scelto = "email"
-                break
-            if canale == "sms" and a.get("canale_sms") and cell:
-                canale_scelto = "sms"
-                break
+                canali_da_inviare.append("whatsapp")
+            elif canale == "email" and a.get("canale_email") and email_addr:
+                canali_da_inviare.append("email")
+            elif canale == "sms" and a.get("canale_sms") and cell:
+                canali_da_inviare.append("sms")
 
-        if not canale_scelto:
+        if not canali_da_inviare:
             skipped.append({
                 "contraente": nome,
                 "motivo": "Nessun canale abilitato con recapito disponibile",
@@ -15473,74 +15473,82 @@ async def invia_bulk_auto(
             })
             continue
 
-        try:
-            esito_ok = False
-            if canale_scelto == "whatsapp":
-                corpo_wa = (mod_wa or {}).get("corpo") or \
-                    "Buongiorno {cliente_nome}, le ricordiamo i seguenti titoli in scadenza:\n\n{elenco_titoli}\n\nTotale: {totale}"
-                base = _rt(corpo_wa, ctx)
-                # Backward-compat: se il modello non contiene {elenco_titoli} né {totale}
-                # aggiungiamo comunque l'elenco (così i modelli vecchi non risultano tronchi).
-                if "{elenco_titoli}" not in corpo_wa and "{totale}" not in corpo_wa:
-                    msg = base + "\n" + righe_txt + f"\nTotale: {totale_fmt}"
-                else:
-                    msg = base
-                r = await send_text_via_evolution(cell, msg)
-                esito_ok = r.get("ok", False)
-                from shared import log_storico_e_diario
-                await log_storico_e_diario(
-                    canale="whatsapp", contraente_id=cid, contraente_nome=nome,
-                    destinatario=cell, messaggio=msg, oggetto="Sollecito titoli scaduti",
-                    titoli_ids=[t["id"] for t in ts],
-                    tipo_avviso="sollecito_titoli", importo=tot,
-                    esito="inviato" if esito_ok else f"errore: {r.get('error')}",
-                    operatore=user,
-                    diario_tipo="sollecito_pagamento",
-                    diario_titolo=f"WhatsApp · Sollecito {len(ts)} titolo/i · €{tot:,.2f}",
-                )
-            elif canale_scelto == "email":
-                from avvisi_scadenze import _invia_email as _send_mail
-                corpo_lettera = _rt((mod_email or {}).get("corpo") or _CORPO_LETTERA_DEFAULT, ctx)
-                soggetto = _rt((mod_email or {}).get("oggetto") or "Promemoria pagamento polizza/e", ctx)
-                text, html = _render_avviso_titoli_email(
-                    ragione_sociale=nome, corpo_lettera=corpo_lettera, titoli=ts, azienda=az,
-                )
-                _send_mail(az, email_addr, soggetto, text, html)
-                esito_ok = True
-                from shared import log_storico_e_diario
-                await log_storico_e_diario(
-                    canale="email", contraente_id=cid, contraente_nome=nome,
-                    destinatario=email_addr, messaggio=text, oggetto=soggetto,
-                    titoli_ids=[t["id"] for t in ts],
-                    tipo_avviso="sollecito_titoli", importo=tot,
-                    esito="inviato", operatore=user,
-                    diario_tipo="avviso_scadenza",
-                    diario_titolo=f"Email · {soggetto}",
-                )
-            elif canale_scelto == "sms":
-                # Se non c'è integrazione SMS configurata, marca come sospeso
-                base = _rt((mod_sms or {}).get("corpo") or
-                           "Ciao {cliente_nome}, hai {numero_titoli} titolo/i in scadenza per {totale}. Contatta l'agenzia.", ctx)
-                msg = base[:459]  # limite SMS
-                # TODO: integrazione SMS reale (Twilio/Skebby). Per ora simula insert storico
-                from shared import log_storico_e_diario
-                await log_storico_e_diario(
-                    canale="sms", contraente_id=cid, contraente_nome=nome,
-                    destinatario=cell, messaggio=msg, oggetto="SMS avviso scadenza",
-                    titoli_ids=[t["id"] for t in ts],
-                    tipo_avviso="sollecito_titoli", importo=tot,
-                    esito="in_coda_sms", operatore=user,
-                    diario_tipo="sms",
-                    diario_titolo=f"SMS · Avviso {len(ts)} titolo/i",
-                )
-                esito_ok = True
+        for canale_scelto in canali_da_inviare:
+            try:
+                esito_ok = False
+                if canale_scelto == "whatsapp":
+                    corpo_wa = (mod_wa or {}).get("corpo") or \
+                        "Buongiorno {cliente_nome}, le ricordiamo i seguenti titoli in scadenza:\n\n{elenco_titoli}\n\nTotale: {totale}"
+                    base = _rt(corpo_wa, ctx)
+                    # Backward-compat: se il modello non contiene {elenco_titoli} né {totale}
+                    # aggiungiamo comunque l'elenco (così i modelli vecchi non risultano tronchi).
+                    if "{elenco_titoli}" not in corpo_wa and "{totale}" not in corpo_wa:
+                        msg = base + "\n" + righe_txt + f"\nTotale: {totale_fmt}"
+                    else:
+                        msg = base
+                    r = await send_text_via_evolution(cell, msg)
+                    esito_ok = r.get("ok", False)
+                    from shared import log_storico_e_diario
+                    await log_storico_e_diario(
+                        canale="whatsapp", contraente_id=cid, contraente_nome=nome,
+                        destinatario=cell, messaggio=msg, oggetto="Sollecito titoli scaduti",
+                        titoli_ids=[t["id"] for t in ts],
+                        tipo_avviso="sollecito_titoli", importo=tot,
+                        esito="inviato" if esito_ok else f"errore: {r.get('error')}",
+                        operatore=user,
+                        diario_tipo="sollecito_pagamento",
+                        diario_titolo=f"WhatsApp · Sollecito {len(ts)} titolo/i · €{tot:,.2f}",
+                    )
+                elif canale_scelto == "email":
+                    from avvisi_scadenze import _invia_email as _send_mail
+                    corpo_lettera = _rt((mod_email or {}).get("corpo") or _CORPO_LETTERA_DEFAULT, ctx)
+                    soggetto = _rt((mod_email or {}).get("oggetto") or "Promemoria pagamento polizza/e", ctx)
+                    text, html = _render_avviso_titoli_email(
+                        ragione_sociale=nome, corpo_lettera=corpo_lettera, titoli=ts, azienda=az,
+                    )
+                    # Prima Gmail API (OAuth agenzia); se non collegato, fallback SMTP.
+                    from gmail_send import send_tenant_email, GmailNotConnected, GmailNeedsReconsent
+                    try:
+                        if not tid:
+                            raise GmailNotConnected("tenant assente")
+                        await send_tenant_email(tid, email_addr, soggetto, html, text)
+                    except (GmailNotConnected, GmailNeedsReconsent):
+                        _send_mail(az, email_addr, soggetto, text, html)
+                    esito_ok = True
+                    from shared import log_storico_e_diario
+                    await log_storico_e_diario(
+                        canale="email", contraente_id=cid, contraente_nome=nome,
+                        destinatario=email_addr, messaggio=text, oggetto=soggetto,
+                        titoli_ids=[t["id"] for t in ts],
+                        tipo_avviso="sollecito_titoli", importo=tot,
+                        esito="inviato", operatore=user,
+                        diario_tipo="avviso_scadenza",
+                        diario_titolo=f"Email · {soggetto}",
+                    )
+                elif canale_scelto == "sms":
+                    # Se non c'è integrazione SMS configurata, marca come sospeso
+                    base = _rt((mod_sms or {}).get("corpo") or
+                               "Ciao {cliente_nome}, hai {numero_titoli} titolo/i in scadenza per {totale}. Contatta l'agenzia.", ctx)
+                    msg = base[:459]  # limite SMS
+                    # TODO: integrazione SMS reale (Twilio/Skebby). Per ora simula insert storico
+                    from shared import log_storico_e_diario
+                    await log_storico_e_diario(
+                        canale="sms", contraente_id=cid, contraente_nome=nome,
+                        destinatario=cell, messaggio=msg, oggetto="SMS avviso scadenza",
+                        titoli_ids=[t["id"] for t in ts],
+                        tipo_avviso="sollecito_titoli", importo=tot,
+                        esito="in_coda_sms", operatore=user,
+                        diario_tipo="sms",
+                        diario_titolo=f"SMS · Avviso {len(ts)} titolo/i",
+                    )
+                    esito_ok = True
 
-            if esito_ok:
-                inviati[canale_scelto] += 1
-            dettaglio.append({"contraente": nome, "canale": canale_scelto,
-                              "esito": "ok" if esito_ok else "errore"})
-        except Exception as e:
-            skipped.append({"contraente": nome, "motivo": f"{canale_scelto}: {e}"})
+                if esito_ok:
+                    inviati[canale_scelto] += 1
+                dettaglio.append({"contraente": nome, "canale": canale_scelto,
+                                  "esito": "ok" if esito_ok else "errore"})
+            except Exception as e:
+                skipped.append({"contraente": nome, "motivo": f"{canale_scelto}: {e}"})
 
     await log_attivita(user, "avvisi_bulk_auto", "avvisi", None,
                        f"wa={inviati['whatsapp']} em={inviati['email']} sms={inviati['sms']}")
