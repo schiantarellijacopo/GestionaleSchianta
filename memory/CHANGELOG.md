@@ -1,5 +1,14 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — UX: scroll con rotellina del mouse nei dropdown con ricerca (globale)
+- **Richiesta utente**: oltre alla ricerca, poter scorrere TUTTE le voci col mouse in ogni menù a tendina del programma (es. "Tipo pagamento" in Incasso/Copertura).
+- **Causa**: i dropdown (`Select` e `SearchableSelect`) sono basati su `cmdk` e, quando aperti dentro un modale (Dialog con blocco-scroll `react-remove-scroll`), la rotellina veniva bloccata perché il popover è in un portale esterno al Dialog. Ricerca e click funzionavano, lo scroll col mouse no.
+- **Fix (1 solo punto, `components/ui/command.jsx` → `CommandList`)**: aggiunto un listener `wheel` NON passivo sull'elemento lista che fa `preventDefault` + scroll manuale (`scrollTop += deltaY`), con guardie a inizio/fine corsa per non "rubare" lo scroll alla pagina. Vale ovunque (Select, SearchableSelect, command palette).
+- **Verifica (preview, modale Incasso/Copertura, tenant reale)**: dropdown "Tipo pagamento" con `scrollHeight 608 > clientHeight 300` → eventi wheel spostano la lista `scrollTop 0 → 150 → 300`. PASS.
+- **Nota deploy**: attivo in produzione dopo il prossimo "Save to Github".
+
+
+
 ## 2026-11-09 — FIX: "Documento d'identità in scadenza" non inviava (match esatto → range)
 - **Sintomo utente**: documento (CI) in scadenza OGGI, regola ATTIVA, ma nessun invio email/WhatsApp (né con "Esegui ora").
 - **Root cause** (`scheduler_alert._res_documento_id_in_scadenza`): il resolver cercava `ci_data_scadenza == oggi + soglia_giorni` (match ESATTO; soglia vuota → default 30). Un documento che scade OGGI (0 giorni) non combaciava mai con "oggi+30" → 0 destinatari → niente in coda. La dashboard invece usava già un range `$gte oggi / $lte +30`, da cui il documento appariva "in scadenza" ma l'alert non partiva.

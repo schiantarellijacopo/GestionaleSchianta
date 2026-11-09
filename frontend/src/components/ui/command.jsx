@@ -47,12 +47,39 @@ const CommandInput = React.forwardRef(({ className, ...props }, ref) => (
 
 CommandInput.displayName = CommandPrimitive.Input.displayName
 
-const CommandList = React.forwardRef(({ className, ...props }, ref) => (
-  <CommandPrimitive.List
-    ref={ref}
-    className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
-    {...props} />
-))
+const CommandList = React.forwardRef(({ className, ...props }, ref) => {
+  const innerRef = React.useRef(null)
+  // Scroll con la rotellina del mouse SEMPRE attivo, anche quando il dropdown
+  // è dentro un modale (il Dialog blocca lo scroll nativo del popover). Usiamo
+  // un listener wheel NON passivo per poter scorrere la lista manualmente.
+  React.useEffect(() => {
+    const el = innerRef.current
+    if (!el) return undefined
+    const onWheel = (e) => {
+      if (el.scrollHeight <= el.clientHeight) return
+      const atTop = el.scrollTop === 0
+      const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight
+      // consenti lo scroll SOLO finché la lista non è a fine corsa
+      if ((e.deltaY < 0 && atTop) || (e.deltaY > 0 && atBottom)) return
+      e.preventDefault()
+      e.stopPropagation()
+      el.scrollTop += e.deltaY
+    }
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => el.removeEventListener("wheel", onWheel)
+  }, [])
+  const setRefs = (node) => {
+    innerRef.current = node
+    if (typeof ref === "function") ref(node)
+    else if (ref) ref.current = node
+  }
+  return (
+    <CommandPrimitive.List
+      ref={setRefs}
+      className={cn("max-h-[300px] overflow-y-auto overflow-x-hidden", className)}
+      {...props} />
+  )
+})
 
 CommandList.displayName = CommandPrimitive.List.displayName
 
