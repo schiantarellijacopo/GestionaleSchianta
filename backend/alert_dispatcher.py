@@ -462,6 +462,17 @@ async def send_whatsapp(rule: dict, dest: dict, ctx: dict) -> dict:
     try:
         import httpx  # type: ignore
         async with httpx.AsyncClient(timeout=20.0) as client:
+            # Simula "sta scrivendo…" (composing) per ~2s: più naturale, evita i
+            # filtri anti-bot di Meta sugli invii automatici.
+            try:
+                await client.post(
+                    f"{url_base}/chat/sendPresence/{instance_name}",
+                    headers={"apikey": api_key, "Content-Type": "application/json"},
+                    json={"number": to_clean, "presence": "composing", "delay": 2000},
+                )
+                await asyncio.sleep(2)
+            except Exception:
+                pass  # presence best-effort: non blocca l'invio
             r = await client.post(
                 f"{url_base}/message/sendText/{instance_name}",
                 headers={"apikey": api_key, "Content-Type": "application/json"},
@@ -589,18 +600,33 @@ async def dispatch_rule(rule: dict, payload: dict) -> dict:
             if not adapter:
                 ev.status = "skipped"
                 ev.error_message = f"canale '{canale}' non riconosciuto"
-            else:
-                try:
-                    if canale == "whatsapp" and indirizzo:
-                        await throttle_whatsapp(rule.get("agenzia_tenant_id") or dest.get("agenzia_tenant_id") or "global")
-                    res = await adapter(rule, dest, ctx_dest)
-                    ev.status = res.get("status") or "errore"
-                    ev.error_message = res.get("error")
-                    if ev.status == "ok":
-                        ev.sent_at = _now_iso()
-                except Exception as e:
-                    ev.status = "errore"
-                    ev.error_message = str(e)
+                await db.alert_events.insert_one(ev.model_dump())
+                stats["events"].append(ev.id)
+                stats["skipped"] += 1
+                continue
+            # Email e WhatsApp: NON inviare inline → accoda per invio throttled
+            # (anti-spam / anti rate-limit), con worker per-agenzia indipendente.
+            if canale in ("email", "whatsapp") and indirizzo:
+                ev.status = "queued"
+                await db.alert_events.insert_one(ev.model_dump())
+                import comm_queue
+                tenant_q = rule.get("agenzia_tenant_id") or dest.get("agenzia_tenant_id") or "global"
+                await comm_queue.enqueue(
+                    tenant_id=tenant_q, canale=canale, event_id=ev.id,
+                    rule=rule, dest=dest, ctx=ctx_dest)
+                stats["events"].append(ev.id)
+                stats["queued"] = stats.get("queued", 0) + 1
+                continue
+            # inapp / sms: invio immediato inline
+            try:
+                res = await adapter(rule, dest, ctx_dest)
+                ev.status = res.get("status") or "errore"
+                ev.error_message = res.get("error")
+                if ev.status == "ok":
+                    ev.sent_at = _now_iso()
+            except Exception as e:
+                ev.status = "errore"
+                ev.error_message = str(e)
             await db.alert_events.insert_one(ev.model_dump())
             stats["events"].append(ev.id)
             if ev.status == "ok":

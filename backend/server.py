@@ -20531,6 +20531,8 @@ async def startup():
             from scheduler_alert import start_alert_scheduler
             from database import raw_db as _raw_db
             start_alert_scheduler(_raw_db)
+            import comm_queue
+            comm_queue.start_comm_queue()
         except Exception as e:
             logger.warning("Scheduler avvisi scadenze non avviato: %s", e)
         # Cloud OCR notturno (legge le INBOX dei tenant collegati e smista i file).

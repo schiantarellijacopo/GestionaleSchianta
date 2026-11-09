@@ -458,6 +458,15 @@ async def update_comunicazioni(body: ComunicazioniBody,
     return await get_comunicazioni(user)
 
 
+@router.get("/librerie/comunicazioni/queue-status")
+async def comunicazioni_queue_status(user: dict = Depends(require_user("admin"))) -> dict:
+    """Stato delle code di invio (email/WhatsApp) dell'agenzia per la dashboard."""
+    from tenant import user_tenant_id, TENANT_PRINCIPALE_ID
+    import comm_queue
+    tid = user_tenant_id(user) or TENANT_PRINCIPALE_ID
+    return await comm_queue.queue_status(tid)
+
+
 @router.post("/librerie/comunicazioni/test")
 async def test_comunicazioni(body: dict,
                                user: dict = Depends(require_user("admin"))) -> dict:

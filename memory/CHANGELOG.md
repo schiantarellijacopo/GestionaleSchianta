@@ -855,3 +855,16 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - **Frontend** `Librerie.jsx`: sezione Comunicazioni → Email, provider Google ora mostra card `GmailOAuthCard` (stato connesso + mittente, credenziali proprie/globali, Connetti/Ricollega/Scollega); App Password nascosta per Google (resta per Microsoft/SMTP).
 - Verificato preview: gmail/status source=env configured; oauth-url scope = SOLO gmail.send+userinfo.email, prompt=consent; UI card renderizza; import+backend OK.
 - AZIONE UTENTE: redeploy Railway → Comunicazioni → Email (Google) → "Connetti Gmail" (serve Gmail API abilitata + scope gmail.send nella OAuth consent screen del progetto Google). Drive e Contatti restano collegamenti separati.
+
+## 2026-11-09 (4) — Coda di invio asincrona con throttling per-agenzia (anti-spam / anti rate-limit)
+- NUOVO `comm_queue.py`: collezione `comm_queue`; worker asincrono in background per-tenant (isolamento: 1 drain task per agenzia, parallelo tra agenzie; `_active_tenants` evita doppioni).
+  - Delay 5-10s tra invii della STESSA agenzia (`asyncio.sleep(random.uniform(5,10))`), non blocca il thread principale.
+  - Retry con exponential backoff (30s·2^n + jitter) su errori retryable (429/rate/timeout/disconnect/5xx), max 3 tentativi → poi `failed`. Errori permanenti (es. auth 535) → subito failed. Verificato offline: ok→sent, 429→retry attempts=1.
+  - Stati: pending→sending→sent|failed|retry. Aggiorna anche l'AlertEvent collegato (storico).
+  - `queue_status(tenant)` per dashboard.
+- `alert_dispatcher.dispatch_rule`: email e whatsapp NON più inline → `comm_queue.enqueue(...)` + AlertEvent status "queued" (stats["queued"]); inapp/sms restano inline. Rimosso il throttle inline (il delay lo dà la coda).
+- `alert_dispatcher.send_whatsapp`: prima dell'invio chiama Evolution `/chat/sendPresence/{instance}` presence "composing" + `asyncio.sleep(2)` (anti-bot Meta), best-effort.
+- `server.py` startup: `comm_queue.start_comm_queue()` accanto allo scheduler avvisi.
+- `routes/librerie.py`: `GET /librerie/comunicazioni/queue-status` (admin).
+- Frontend `Librerie.jsx`: `CodeInvioCard` in cima a Comunicazioni → contatori (in attesa/in invio/inviati/falliti) per canale + ultimi falliti, polling 5s.
+- Verificato: worker avviato nei log, endpoint OK, transizioni coda OK (test offline, nessun invio reale), UI renderizza.

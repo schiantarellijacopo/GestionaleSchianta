@@ -4410,6 +4410,69 @@ function PolizzeMittentiSection({ f, set }) {
     );
 }
 
+function CodeInvioCard() {
+    const [d, setD] = useState(null);
+    const load = async () => {
+        try {
+            const r = await api.get("/librerie/comunicazioni/queue-status");
+            setD(r.data);
+        } catch (e) { /* noop */ }
+    };
+    useEffect(() => {
+        load();
+        const t = setInterval(load, 5000);
+        return () => clearInterval(t);
+    }, []);
+    if (!d) return null;
+    const Stat = ({ label, val, cls }) => (
+        <div className={`flex-1 min-w-[88px] rounded-md border px-3 py-2 text-center ${cls}`}>
+            <div className="text-lg font-semibold tabular-nums" data-testid={`queue-${label}`}>{val}</div>
+            <div className="text-[11px] uppercase tracking-wide">{label}</div>
+        </div>
+    );
+    const t = d.totali || {};
+    const inAttesa = (t.pending || 0) + (t.retry || 0);
+    return (
+        <section className="border border-indigo-200 rounded-lg p-4 bg-indigo-50/40" data-testid="lib-com-code">
+            <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <h4 className="text-base font-semibold text-slate-800">Code di invio (anti-spam)</h4>
+                <span className="text-[11px] text-slate-500">
+                    Invii distanziati 5-10s per agenzia, con riprova automatica. Aggiornamento ogni 5s.
+                </span>
+                {inAttesa > 0 && (
+                    <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300">
+                        {inAttesa} in lavorazione
+                    </span>
+                )}
+            </div>
+            <div className="flex gap-2 flex-wrap">
+                <Stat label="in attesa" val={inAttesa} cls="bg-white border-slate-200 text-slate-700" />
+                <Stat label="in invio" val={t.sending || 0} cls="bg-sky-50 border-sky-200 text-sky-800" />
+                <Stat label="inviati" val={t.sent || 0} cls="bg-emerald-50 border-emerald-200 text-emerald-800" />
+                <Stat label="falliti" val={t.failed || 0} cls="bg-rose-50 border-rose-200 text-rose-800" />
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-2 text-[11px] text-slate-500">
+                <div>✉️ Email — attesa {(d.email?.pending || 0) + (d.email?.retry || 0)} · inviati {d.email?.sent || 0} · falliti {d.email?.failed || 0}</div>
+                <div>💬 WhatsApp — attesa {(d.whatsapp?.pending || 0) + (d.whatsapp?.retry || 0)} · inviati {d.whatsapp?.sent || 0} · falliti {d.whatsapp?.failed || 0}</div>
+            </div>
+            {d.ultimi_falliti && d.ultimi_falliti.length > 0 && (
+                <div className="mt-3 text-[12px] bg-white border border-rose-200 rounded p-2" data-testid="queue-falliti">
+                    <div className="font-semibold text-rose-800 mb-1">Ultimi invii falliti</div>
+                    <ul className="space-y-0.5">
+                        {d.ultimi_falliti.map((x, i) => (
+                            <li key={i} className="text-rose-900">
+                                <span className="text-[10px] uppercase px-1 rounded bg-rose-100 text-rose-700">{x.canale}</span>{" "}
+                                <strong>{x.dest_label || x.to}</strong> — <span className="italic break-words">{x.error || "errore"}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+        </section>
+    );
+}
+
+
 function ComunicazioniSezione() {
     const [f, setF] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -4484,6 +4547,9 @@ function ComunicazioniSezione() {
                     Sarà usata da: Avvisi scadenze, Marketing, Notifiche, Sollecitazioni, Pipeline Email.
                 </p>
             </div>
+
+            {/* DASHBOARD CODE DI INVIO (throttling anti-spam) */}
+            <CodeInvioCard />
 
             {/* EMAIL — Provider con preset (Google / Microsoft / SMTP personalizzato) */}
             <EmailSection f={f} set={set} onSet={setF} />
