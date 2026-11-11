@@ -4402,11 +4402,12 @@ async def get_polizza(pid: str, user=Depends(current_user)):
         polizza_ids_catena.append(prev["id"])
         cursor_rif = prev.get("sostituisce_polizza")
     # Carica titoli di tutta la catena (polizza corrente + sostituite).
-    # ESCLUDE i carichi ancora 'in_attesa' (importati ma non validati): quelli
-    # vivono solo in Carichi Mensili finché l'operatore non li valida.
+    # Mostriamo TUTTI i titoli della catena polizza, inclusi i carichi mensili
+    # 'in_attesa' (importi reali da incassare). Vengono nascosti solo i carichi
+    # esplicitamente ANNULLATI.
     doc["titoli"] = await db.titoli.find(
         {"polizza_id": {"$in": polizza_ids_catena},
-         "stato_carico": {"$ne": "in_attesa"}}, {"_id": 0},
+         "stato_carico": {"$ne": "annullato_carico"}}, {"_id": 0},
     ).sort("effetto", -1).to_list(500)
     # Ordine: i titoli della polizza CORRENTE per primi (in cima), poi quelli delle
     # polizze sostituite; a parità, per effetto decrescente (stable sort preserva l'ordine).
@@ -5596,9 +5597,10 @@ async def list_titoli(
     flt: dict = {}
     if polizza_id:
         flt["polizza_id"] = polizza_id
-    # I carichi non ancora validati (in_attesa) e gli annullati NON compaiono nei
-    # Titoli ufficiali: restano visibili solo nella sezione Carichi mensili.
-    flt["stato_carico"] = {"$nin": ["in_attesa", "annullato_carico"]}
+    # Ogni titolo con stato arretrato/coperto presente in polizza deve comparire
+    # nei Titoli. Escludiamo SOLO i carichi ANNULLATI; i carichi mensili generati
+    # automaticamente ('in_attesa') restano visibili (sono importi reali da incassare).
+    flt["stato_carico"] = {"$ne": "annullato_carico"}
     if tag:
         flt["tags"] = tag
     if stato:

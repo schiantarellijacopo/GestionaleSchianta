@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-11-09 — Titoli: i titoli arretrati/coperti della polizza ora compaiono sempre nell'elenco Titoli
+- **Problema utente**: un titolo "da incassare" presente nella polizza non compariva cercandolo nella sezione Titoli ("Nessun risultato"). Richiesta: TUTTI i titoli con stato arretrato/coperto presenti in polizza devono essere visibili in Titoli (indipendentemente dai Carichi).
+- **Causa**: quei titoli erano carichi mensili con `stato_carico="in_attesa"`; l'endpoint `/titoli` li escludeva (`stato_carico $nin [in_attesa, annullato_carico]`), quindi non comparivano nell'elenco né nella ricerca.
+- **Fix** (`server.py`):
+  - `list_titoli`: esclusione cambiata in `stato_carico != "annullato_carico"` → i carichi mensili `in_attesa` (importi reali da incassare) ora compaiono tra i Titoli; restano nascosti solo i carichi esplicitamente annullati.
+  - `get_polizza`: rimossa l'esclusione dei titoli `in_attesa` dal dettaglio polizza (ora anch'esso esclude solo gli annullati) → piena coerenza tra polizza e Titoli.
+- **Verifica (preview, polizza 730105336)**: ricerca "730105336" in Titoli (tutti da incassare) → prima 0, ora **2** titoli da_incassare; dettaglio polizza continua a mostrare tutti i 16 titoli (14 incassati + 2 da incassare).
+- **Nota**: i carichi `in_attesa` restano visibili anche in "Carichi mensili"; la validazione resta disponibile ma non è più un prerequisito per vederli in Titoli.
+- **Deploy**: attivo in produzione dopo "Save to Github".
+
+
+
 ## 2026-11-09 — Fix: errore "Configurazione automatica cartelle non riuscita" (provider gmail)
 - **Sintomo (produzione)**: toast "Configurazione automatica cartelle non riuscita: String should match pattern '^(google_drive|onedrive)$'" nella pagina Librerie → Cloud Storage.
 - **Causa**: dopo l'aggiunta della connessione Gmail OAuth dedicata, l'endpoint `status` restituisce anche una connessione `provider="gmail"`. Il frontend `CloudStorageSezione.maybeAutoInit` iterava su TUTTE le connessioni collegate e chiamava `/cloud-storage/init-structure` anche per `gmail`, ma l'endpoint accetta solo `google_drive|onedrive` → errore di validazione. Il Drive era comunque collegato correttamente (nessun problema di credenziali).
