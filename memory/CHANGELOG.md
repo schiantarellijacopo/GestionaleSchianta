@@ -983,3 +983,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - TOGGLE (`routes/alert.toggle_alert_rule`): all'attivazione di una regola schedule/soglia SENZA cron, assegna un orario esplicito di default (dalla config globale) e restituisce `warning`; così la regola diventa subito operativa senza ereditare runtime.
 - UI (`Alert.jsx`): card "Avvisi programmati" ora spiega che l'orario è solo un default PROPOSTO per le nuove regole e che una regola senza orario/disattivata NON parte. `cronLabel(null)` → "⚠ Orario non impostato". Modal regola: rimosso il check "usa orario globale"; selettore "Quando eseguire" SEMPRE esplicito (Ripeti giorno/settimana/mese + ora) con anteprima; al salvataggio il cron è sempre valorizzato (buildCron). Toggle mostra il warning. Storico invii: mostra data+ora in Europe/Rome, nome regola + id (#8char), tooltip id completo.
 - Verificato: toggle su regola senza cron → cron "0 11 * * *" + warning; ripristinato compleanno 09:00; frontend compila; pagina Alert render OK.
+
+## 2026-11-11 — Titoli: visibilità per stato_carico
+- Lista globale **Titoli** mostra solo titoli UFFICIALI: validati + creati a mano (default `validato`) + legacy senza stato_carico.
+- I Carichi mensili ancora **da validare** (`in_attesa`) restano nei Carichi e compaiono in Titoli solo dopo la validazione. Annullati sempre esclusi.
+- Dettaglio polizza continua a mostrare tutti i titoli non annullati (incl. in_attesa).
+- Verificato (polizza 730105336): Titoli=14 validati, 2 in_attesa nascosti.

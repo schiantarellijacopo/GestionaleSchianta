@@ -5597,10 +5597,11 @@ async def list_titoli(
     flt: dict = {}
     if polizza_id:
         flt["polizza_id"] = polizza_id
-    # Ogni titolo con stato arretrato/coperto presente in polizza deve comparire
-    # nei Titoli. Escludiamo SOLO i carichi ANNULLATI; i carichi mensili generati
-    # automaticamente ('in_attesa') restano visibili (sono importi reali da incassare).
-    flt["stato_carico"] = {"$ne": "annullato_carico"}
+    # In "Titoli" compaiono solo i titoli UFFICIALI: validati (incl. quelli creati
+    # a mano, che nascono come 'validato') e i legacy senza stato_carico. I carichi
+    # mensili ancora DA VALIDARE ('in_attesa') restano nei Carichi mensili finché non
+    # vengono validati; gli annullati sono sempre esclusi.
+    flt["stato_carico"] = {"$nin": ["in_attesa", "annullato_carico"]}
     if tag:
         flt["tags"] = tag
     if stato:
