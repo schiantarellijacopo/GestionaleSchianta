@@ -989,3 +989,13 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - I Carichi mensili ancora **da validare** (`in_attesa`) restano nei Carichi e compaiono in Titoli solo dopo la validazione. Annullati sempre esclusi.
 - Dettaglio polizza continua a mostrare tutti i titoli non annullati (incl. in_attesa).
 - Verificato (polizza 730105336): Titoli=14 validati, 2 in_attesa nascosti.
+
+## 2026-11-11 — Azzera accessori/diritti: ricalcolo premio (fix) + conferme import Omnia
+- **Fix bug #1**: lendpoint POST /admin/azzera-accessori-diritti ora RICALCOLA il premio.
+  - Titoli (da_incassare, non in prima nota, accessori>0): importo_lordo = netto+imposte+ssn, accessori=0 (toglie accessori sia inclusi che separati). Validato: 132->122.
+  - Polizze (accessori/diritti POSITIVI, anche su garanzie): premio_lordo -= (premio_accessori+diritti); garanzie lordo -= (accessori+diritti); azzera entrambi.
+  - Filtro corretto da $ne:0 (matchava anche campi assenti) a $gt:0.
+  - Protezione: titoli con solo lordo senza scomposizione (netto=0) NON vengono toccati.
+  - LIMITE noto: i record gia azzerati in un run precedente (accessori=0) non sono recuperabili (importo perso); il premio resta quello attuale.
+- **Conferma #2**: import Omnia NON importa accessori/diritti (forzati a 0 in ania_importer).
+- **Conferma #3**: import Omnia NON riscrive i titoli validati; crea arretrati solo per polizze nuove/sostituenti in modo idempotente (anti-doppione su effetto); storna solo i da_incassare non coperti delle sostituite.

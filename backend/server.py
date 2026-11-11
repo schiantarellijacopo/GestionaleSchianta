@@ -19444,16 +19444,23 @@ async def ricalcola_titoli_netto(user=Depends(require_user("admin"))):
 async def azzera_accessori_diritti(dry_run: bool = False,
                                    user=Depends(require_user("admin"))):
     """Bonifica una tantum (richiesta utente): gli ACCESSORI e i DIRITTI non
-    vengono più importati, quindi azzera i dati già presenti.
-      - Titoli: accessori = 0 SOLO per quelli in stato 'da_incassare' e MAI
-        registrati in prima nota (nessun incasso/copertura/pagamento/chiusura).
-      - Polizze: diritti = 0 su TUTTE le polizze (anche nelle singole garanzie).
+    vengono più importati, quindi azzera i dati già presenti E RICALCOLA il premio
+    sottraendo quegli importi (premio ridotto di accessori+diritti).
+      - Titoli: accessori = 0 e importo_lordo -= accessori, SOLO per quelli in
+        stato 'da_incassare' e MAI registrati in prima nota (nessun incasso/
+        copertura/pagamento/chiusura). I titoli non hanno diritti.
+      - Polizze: diritti = 0, premio_accessori = 0 e premio_lordo -=
+        (premio_accessori + diritti); stesso trattamento su ogni garanzia
+        (lordo garanzia -= accessori+diritti).
     Scoped al tenant dell'utente loggato. Con dry_run=true mostra solo l'anteprima.
     """
-    # ── Titoli 'da_incassare' NON in prima nota, con accessori != 0 ──
+    # ── Titoli 'da_incassare' NON in prima nota, con accessori POSITIVI ──
+    # Il premio corretto diventa netto+imposte+ssn (toglie gli accessori, che
+    # siano inclusi nel lordo o separati). Limitato ad accessori>0: in quei titoli
+    # la scomposizione netto/imposte esiste sempre, quindi il ricalcolo è sicuro.
     titoli_flt = {
         "stato": "da_incassare",
-        "accessori": {"$ne": 0},
+        "accessori": {"$gt": 0},
         "$and": [
             {"$or": [{"data_incasso": None}, {"data_incasso": {"$exists": False}}]},
             {"$or": [{"data_copertura": None}, {"data_copertura": {"$exists": False}}]},
@@ -19463,9 +19470,14 @@ async def azzera_accessori_diritti(dry_run: bool = False,
             {"$or": [{"chiusura_id": None}, {"chiusura_id": {"$exists": False}}]},
         ],
     }
-    # ── Polizze con diritti (livello polizza o garanzia) != 0 ──
-    polizze_flt = {"$or": [{"diritti": {"$ne": 0}},
-                           {"garanzie": {"$elemMatch": {"diritti": {"$ne": 0}}}}]}
+    # ── Polizze con accessori/diritti POSITIVI (livello polizza o garanzia) ──
+    # NB: usiamo $gt:0 (non $ne:0) perché $ne:0 matcherebbe anche i campi ASSENTI.
+    polizze_flt = {"$or": [
+        {"diritti": {"$gt": 0}},
+        {"premio_accessori": {"$gt": 0}},
+        {"garanzie": {"$elemMatch": {"$or": [{"diritti": {"$gt": 0}},
+                                             {"accessori": {"$gt": 0}}]}}},
+    ]}
 
     titoli_match = await db.titoli.count_documents(titoli_flt)
     polizze_match = await db.polizze.count_documents(polizze_flt)
@@ -19477,21 +19489,47 @@ async def azzera_accessori_diritti(dry_run: bool = False,
     if dry_run:
         return report
 
+    _ts = _now_iso()
     if titoli_match:
-        r_t = await db.titoli.update_many(
-            titoli_flt, {"$set": {"accessori": 0, "updated_at": _now_iso()}})
+        # pipeline update: premio = netto+imposte+ssn, accessori azzerati
+        r_t = await db.titoli.update_many(titoli_flt, [
+            {"$set": {
+                "importo_lordo": {"$round": [{"$add": [
+                    {"$ifNull": ["$importo_netto", 0]},
+                    {"$ifNull": ["$imposte", 0]},
+                    {"$ifNull": ["$ssn", 0]}]}, 2]},
+                "accessori": 0,
+                "updated_at": _ts,
+            }},
+        ])
         report["titoli_azzerati"] = r_t.modified_count
     if polizze_match:
-        r_p1 = await db.polizze.update_many(
-            {"diritti": {"$ne": 0}},
-            {"$set": {"diritti": 0, "updated_at": _now_iso()}})
-        r_p2 = await db.polizze.update_many(
-            {"garanzie": {"$elemMatch": {"diritti": {"$ne": 0}}}},
-            {"$set": {"garanzie.$[el].diritti": 0, "updated_at": _now_iso()}},
-            array_filters=[{"el.diritti": {"$ne": 0}}])
-        report["polizze_azzerate"] = polizze_match - await db.polizze.count_documents(polizze_flt)
-        report["polizze_diritti_azzerati"] = r_p1.modified_count
-        report["polizze_garanzie_azzerate"] = r_p2.modified_count
+        # pipeline update: scala (premio_accessori+diritti) dal premio_lordo e
+        # dalle garanzie, poi azzera accessori/diritti ovunque
+        r_p = await db.polizze.update_many(polizze_flt, [
+            {"$set": {
+                "premio_lordo": {"$round": [{"$subtract": [
+                    {"$ifNull": ["$premio_lordo", 0]},
+                    {"$add": [{"$ifNull": ["$premio_accessori", 0]},
+                              {"$ifNull": ["$diritti", 0]}]}]}, 2]},
+                "diritti": 0,
+                "premio_accessori": 0,
+                "garanzie": {"$map": {
+                    "input": {"$ifNull": ["$garanzie", []]},
+                    "as": "g",
+                    "in": {"$mergeObjects": ["$$g", {
+                        "lordo": {"$round": [{"$subtract": [
+                            {"$ifNull": ["$$g.lordo", 0]},
+                            {"$add": [{"$ifNull": ["$$g.accessori", 0]},
+                                      {"$ifNull": ["$$g.diritti", 0]}]}]}, 2]},
+                        "accessori": 0,
+                        "diritti": 0,
+                    }]},
+                }},
+                "updated_at": _ts,
+            }},
+        ])
+        report["polizze_azzerate"] = r_p.modified_count
 
     await log_attivita(user, "manutenzione", "titoli_polizze", "batch",
                        f"azzera accessori/diritti: titoli={report['titoli_azzerati']} polizze={report['polizze_azzerate']}")
