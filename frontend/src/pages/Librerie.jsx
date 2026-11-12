@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import RowActions from "@/components/RowActions";
 import { refreshTipiPagamento } from "@/hooks/useTipiPagamento";
-import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette, Layers, Printer, Image as ImageIcon } from "lucide-react";
+import { Plus, Landmark, Wallet, Package, Tags, Building2, UserCog, Shield, Building, Percent, Upload, FileText, ClipboardList, Trash2, GraduationCap, RotateCw, Pencil, Mail, Search, MessageCircle, AlertTriangle, QrCode, Send, Archive, ArchiveRestore, Cloud, CheckCircle2, XCircle, ExternalLink, FolderOpen, GitMerge, Users, Eye, EyeOff, Undo2, GripVertical, Paperclip, Braces, Copy, Star, Table2, Bold, Italic, Underline, Palette, Layers, Printer, Image as ImageIcon, Handshake, Banknote, ArrowRightLeft } from "lucide-react";
 import { Reorder, useDragControls } from "framer-motion";
 import EmojiPicker from "@/components/EmojiPicker";
 import { QuestionariManager } from "@/components/Questionari";
@@ -53,7 +53,21 @@ function RiassegnaProvvigioniButton({ schema }) {
 }
 
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { CollabCard } from "@/pages/DocumentiAnnualiCollab";
+import Agenzie from "@/pages/Agenzie";
+import SetupIniziale from "@/pages/SetupIniziale";
+import ScambioDati from "@/pages/ScambioDati";
+import WhatsAppInstances from "@/pages/WhatsAppInstances";
+
+// Sezioni "pagina intera" spostate dentro Librerie (ex voci sidebar).
+// `roles`: chi vede la scheda (gating lato UI, oltre al ProtectedRoute delle rotte).
+const EXTRA_SECTIONS = [
+    { key: "agenzie-partner", label: "Agenzie (partner)", icon: <Handshake size={14} />, roles: ["admin"] },
+    { key: "setup-iniziale", label: "Setup iniziale", icon: <Banknote size={14} />, roles: ["admin"] },
+    { key: "scambio-dati", label: "Scambio dati agenzie", icon: <ArrowRightLeft size={14} />, roles: ["admin"] },
+    { key: "whatsapp-agenzie", label: "WhatsApp Agenzie", icon: <MessageCircle size={14} />, roles: ["admin", "collaboratore"] },
+];
 
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
@@ -267,6 +281,10 @@ function VisibilitaDocSezione() {
 }
 
 export default function Librerie() {
+    const { user } = useAuth();
+    const role = user?.role;
+    const extraVisible = EXTRA_SECTIONS.filter((s) => !s.roles || s.roles.includes(role));
+    const allSections = [...SECTIONS, ...extraVisible];
     return (
         <div data-testid="librerie-page">
             <PageHeader
@@ -275,7 +293,7 @@ export default function Librerie() {
             />
             <Tabs defaultValue="azienda">
                 <TabsList className="bg-slate-100 flex-wrap h-auto">
-                    {SECTIONS.map((s) => (
+                    {allSections.map((s) => (
                         <TabsTrigger key={s.key} value={s.key} data-testid={`lib-tab-${s.key}`}>
                             {s.icon}<span className="ml-1.5">{s.label}</span>
                         </TabsTrigger>
@@ -295,6 +313,15 @@ export default function Librerie() {
                             : s.key === "permessi" ? <PermessiSezione />
                             : s.key === "visibilita-doc" ? <VisibilitaDocSezione />
                             : <Sezione section={s} />}
+                    </TabsContent>
+                ))}
+                {extraVisible.map((s) => (
+                    <TabsContent key={s.key} value={s.key} className="mt-4">
+                        {s.key === "agenzie-partner" ? <Agenzie />
+                            : s.key === "setup-iniziale" ? <SetupIniziale />
+                            : s.key === "scambio-dati" ? <ScambioDati />
+                            : s.key === "whatsapp-agenzie" ? <WhatsAppInstances />
+                            : null}
                     </TabsContent>
                 ))}
             </Tabs>
@@ -2158,21 +2185,40 @@ function CompagniaForm({ section, editing, onClose }) {
     useEffect(() => {
         api.get("/agenzie").then((r) => setAgenzie((r.data || []).filter((a) => a.tipo !== "principale"))).catch(() => {});
     }, []);
-    return <GenericForm section={section} editing={editing} onClose={onClose}
+    return <GenericForm section={section} editing={editing} onClose={onClose} dialogClass="max-w-2xl"
+        omitOnSave={["documenti", "logo_storage_path", "logo_mime"]}
         defaults={{
-            codice: "", ragione_sociale: "", referente: "", email: "", telefono: "",
+            codice: "", ragione_sociale: "", referente: "", email: "", pec: "", telefono: "",
+            indirizzo: "", cap: "", citta: "", provincia: "", partita_iva: "", codice_fiscale: "",
+            iban: "", note: "",
             sito_web: "", mandato: "", agenzie_partner_ids: [], trattiene_provvigioni: true, attiva: true,
         }}
         fields={(f, set) => (
             <>
                 <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Codice *</Label><Input value={f.codice || ""} onChange={(e) => set("codice", e.target.value.toUpperCase())} /></div>
-                    <div><Label>Ragione sociale *</Label><Input value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
+                    <div><Label>Codice *</Label><Input data-testid="comp-codice-input" value={f.codice || ""} onChange={(e) => set("codice", e.target.value.toUpperCase())} /></div>
+                    <div><Label>Ragione sociale *</Label><Input data-testid="comp-rs-input" value={f.ragione_sociale || ""} onChange={(e) => set("ragione_sociale", e.target.value)} /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Referente</Label><Input value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} /></div>
-                    <div>
-                        <Label>Agenzia partner <span className="text-[10px] text-slate-400 font-normal">(anche più di una)</span></Label>
+
+                {/* DATI ANAGRAFICI / FISCALI */}
+                <div className="border-t pt-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Dati anagrafici e fiscali</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="col-span-2"><Label>Indirizzo</Label><Input data-testid="comp-indirizzo-input" value={f.indirizzo || ""} onChange={(e) => set("indirizzo", e.target.value)} /></div>
+                        <div><Label>CAP</Label><Input data-testid="comp-cap-input" value={f.cap || ""} onChange={(e) => set("cap", e.target.value)} /></div>
+                        <div><Label>Città</Label><Input data-testid="comp-citta-input" value={f.citta || ""} onChange={(e) => set("citta", e.target.value)} /></div>
+                        <div><Label>Provincia</Label><Input data-testid="comp-provincia-input" value={f.provincia || ""} maxLength={2} onChange={(e) => set("provincia", e.target.value.toUpperCase())} /></div>
+                        <div><Label>Partita IVA</Label><Input data-testid="comp-piva-input" value={f.partita_iva || ""} onChange={(e) => set("partita_iva", e.target.value)} /></div>
+                        <div><Label>Codice fiscale</Label><Input data-testid="comp-cf-input" value={f.codice_fiscale || ""} onChange={(e) => set("codice_fiscale", e.target.value.toUpperCase())} /></div>
+                        <div className="col-span-2"><Label>IBAN</Label><Input data-testid="comp-iban-input" value={f.iban || ""} onChange={(e) => set("iban", e.target.value.toUpperCase())} /></div>
+                    </div>
+                </div>
+
+                <div className="border-t pt-3">
+                    <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Contatti</div>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div><Label>Referente</Label><Input data-testid="comp-referente-input" value={f.referente || ""} onChange={(e) => set("referente", e.target.value)} /></div>
+                        <div><Label>Agenzia partner <span className="text-[10px] text-slate-400 font-normal">(anche più di una)</span></Label>
                         <div className="max-h-28 overflow-auto border border-slate-200 rounded-md p-1.5 space-y-1 bg-white" data-testid="compagnia-agenzie-partner">
                             {agenzie.length === 0
                                 ? <span className="text-xs text-slate-400">Nessuna agenzia partner disponibile</span>
@@ -2191,13 +2237,14 @@ function CompagniaForm({ section, editing, onClose }) {
                                     );
                                 })}
                         </div>
+                        </div>
+                        <div><Label>Email</Label><Input data-testid="comp-email-input" value={f.email || ""} onChange={(e) => set("email", e.target.value)} /></div>
+                        <div><Label>PEC</Label><Input data-testid="comp-pec-input" value={f.pec || ""} onChange={(e) => set("pec", e.target.value)} /></div>
+                        <div><Label>Telefono</Label><Input data-testid="comp-telefono-input" value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
+                        <div><Label>Sito web</Label><Input data-testid="comp-sitoweb-input" value={f.sito_web || ""} onChange={(e) => set("sito_web", e.target.value)} /></div>
                     </div>
+                    <div className="mt-2"><Label>Note</Label><Textarea data-testid="comp-note-input" rows={2} value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                    <div><Label>Email</Label><Input value={f.email || ""} onChange={(e) => set("email", e.target.value)} /></div>
-                    <div><Label>Telefono</Label><Input value={f.telefono || ""} onChange={(e) => set("telefono", e.target.value)} /></div>
-                </div>
-                <div><Label>Sito web</Label><Input value={f.sito_web || ""} onChange={(e) => set("sito_web", e.target.value)} /></div>
                 <div className="bg-slate-50 border border-slate-200 rounded-md p-3">
                     <Label className="mb-1.5 block">Logo compagnia <span className="text-[10px] text-slate-400 font-normal">(visibile nella polizza)</span></Label>
                     <div className="flex items-center gap-3">
@@ -2246,9 +2293,65 @@ function CompagniaForm({ section, editing, onClose }) {
                     <input type="checkbox" id="comp_attiva" checked={f.attiva !== false} onChange={(e) => set("attiva", e.target.checked)} />
                     <Label htmlFor="comp_attiva" className="cursor-pointer">Attiva</Label>
                 </div>
+                {editing?.id ? (
+                    <div className="border-t pt-3" data-testid="comp-documenti-sezione">
+                        <div className="text-sm font-semibold text-slate-800 mb-2 flex items-center gap-1.5">
+                            <FileText size={14} className="text-slate-500" /> Documenti / Allegati
+                        </div>
+                        <DocumentiCompagnia cid={editing.id} iniziali={editing.documenti || []} />
+                    </div>
+                ) : (
+                    <div className="border-t pt-3 text-xs text-slate-400" data-testid="comp-documenti-hint">
+                        Salva la compagnia per poter caricare i documenti.
+                    </div>
+                )}
             </>
         )}
     />;
+}
+
+// =================== DOCUMENTI COMPAGNIA (card allegati, come agenzia partner) ===================
+function DocumentiCompagnia({ cid, iniziali }) {
+    const [list, setList] = useState(iniziali || []);
+    const aggiungi = async (tipologia, { file, descrizione, data_rilascio, data_scadenza }) => {
+        try {
+            const fd = new FormData();
+            fd.append("file", file);
+            fd.append("tipologia", tipologia || "Altro");
+            fd.append("descrizione", descrizione || "");
+            fd.append("data_rilascio", data_rilascio || "");
+            fd.append("data_scadenza", data_scadenza || "");
+            const r = await api.post(`/compagnie/${cid}/documenti`, fd,
+                { headers: { "Content-Type": "multipart/form-data" } });
+            setList((p) => [...p, r.data]);
+            toast.success("Documento aggiunto");
+        } catch (e) { toast.error(errMsg(e, "Errore")); throw e; }
+    };
+    const rimuovi = async (id) => {
+        if (!window.confirm("Eliminare il documento?")) return;
+        try {
+            await api.delete(`/compagnie/${cid}/documenti/${id}`);
+            setList((p) => p.filter((x) => x.id !== id));
+            toast.success("Eliminato");
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
+    };
+    const aggiornaAvviso = (itemId, patch) =>
+        setList((p) => p.map((x) => x.id === itemId ? { ...x, ...patch } : x));
+    return (
+        <div className="space-y-3" data-testid="documenti-compagnia">
+            <DocCardsScadenza
+                cardKey="compagnia"
+                fallbackTipi={["Convenzione / Mandato", "Accordo provvigionale", "Circolari", "Condizioni di assicurazione", "Listini / Tariffe", "Documento IBAN", "Altro"]}
+                files={list}
+                onUpload={aggiungi}
+                onDelete={rimuovi}
+                avvisoEntita="compagnia"
+                avvisoEntitaId={cid}
+                onAvviso={aggiornaAvviso}
+                testidPrefix="comp-doc"
+            />
+        </div>
+    );
 }
 
 function UtenteForm({ section, editing, onClose }) {

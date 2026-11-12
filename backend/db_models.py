@@ -286,7 +286,17 @@ class Compagnia(BaseDoc):
     sito_web: Optional[str] = None
     referente: Optional[str] = None
     email: Optional[str] = None
+    pec: Optional[str] = None
     telefono: Optional[str] = None
+    # Dati anagrafici / fiscali estesi
+    indirizzo: Optional[str] = None
+    cap: Optional[str] = None
+    citta: Optional[str] = None
+    provincia: Optional[str] = None
+    partita_iva: Optional[str] = None
+    codice_fiscale: Optional[str] = None
+    iban: Optional[str] = None
+    note: Optional[str] = None
     attiva: bool = True
     # Gestione contabile prima nota:
     # - True (default): "tratteniamo le provvigioni" → saldo = premio - provvigioni
