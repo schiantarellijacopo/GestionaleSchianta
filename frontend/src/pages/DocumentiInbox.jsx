@@ -84,6 +84,7 @@ export default function DocumentiInbox() {
     const [dragActive, setDragActive] = useState(false);
     const [retrying, setRetrying] = useState(false);
     const [retryStatus, setRetryStatus] = useState({}); // id -> "processing"|"archiviato"|"saltato"|"errore"
+    const [onlyPending, setOnlyPending] = useState(false);
 
     const load = () => api.get("/documenti-inbox").then((r) => setItems(r.data));
     useEffect(() => { load(); }, []);
@@ -242,6 +243,13 @@ export default function DocumentiInbox() {
             <div className="flex gap-2 text-sm items-center flex-wrap">
                 <span className="text-violet-700 font-medium">⏳ Da rivedere: {pendingCount}</span>
                 <span className="text-emerald-700 font-medium ml-3">✓ Salvati: {savedCount}</span>
+                {savedCount > 0 && (
+                    <Button size="sm" variant={onlyPending ? "default" : "outline"}
+                        className={`h-7 text-xs ml-3 ${onlyPending ? "bg-violet-700 hover:bg-violet-800" : "border-violet-300 text-violet-700 hover:bg-violet-50"}`}
+                        onClick={() => setOnlyPending((v) => !v)} data-testid="di-filter-pending">
+                        {onlyPending ? "Mostra tutti" : "Solo da rivedere"}
+                    </Button>
+                )}
                 {pendingCount > 0 && (
                     <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
                         disabled={retrying}
@@ -251,9 +259,10 @@ export default function DocumentiInbox() {
                 )}
             </div>
 
-            {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessun documento. Carica il primo!" /> : (
+            {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessun documento. Carica il primo!" /> : (onlyPending && pendingCount === 0) ? <Empty message="Nessun documento da rivedere: sono tutti archiviati." /> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {[...items]
+                        .filter((it) => !onlyPending || it.stato === "pending")
                         .sort((a, b) => (a.stato === "pending" ? 0 : 1) - (b.stato === "pending" ? 0 : 1))
                         .map((it) => {
                         const b = TIPO_BADGE[it.tipo_documento] || TIPO_BADGE.altro;
