@@ -82,9 +82,47 @@ export default function DocumentiInbox() {
     const [uploading, setUploading] = useState(false);
     const [reviewing, setReviewing] = useState(null);
     const [dragActive, setDragActive] = useState(false);
+    const [retrying, setRetrying] = useState(false);
+    const [retryStatus, setRetryStatus] = useState({}); // id -> "processing"|"archiviato"|"saltato"|"errore"
 
     const load = () => api.get("/documenti-inbox").then((r) => setItems(r.data));
     useEffect(() => { load(); }, []);
+
+    // Riprocessa i pending UNO ALLA VOLTA, mostrando la barra di avanzamento su ogni card.
+    const runRetry = async () => {
+        setRetrying(true);
+        setRetryStatus({});
+        let archived = 0, rematched = 0, failed = 0;
+        try {
+            const r = await api.get("/documenti-inbox/pending-ids");
+            const ids = r.data?.ids || [];
+            if (!ids.length) { toast.info("Nessun documento da riprocessare."); return; }
+            for (const id of ids) {
+                setRetryStatus((s) => ({ ...s, [id]: "processing" }));
+                try {
+                    const res = await api.post(`/documenti-inbox/${id}/retry-auto-archive`);
+                    const esito = res.data?.esito || "saltato";
+                    if (res.data?.rematched) rematched++;
+                    if (esito === "archiviato") archived++;
+                    else if (esito === "errore") failed++;
+                    setRetryStatus((s) => ({ ...s, [id]: esito }));
+                } catch (e) {
+                    failed++;
+                    setRetryStatus((s) => ({ ...s, [id]: "errore" }));
+                }
+            }
+            if (archived === 0 && rematched === 0 && failed === 0) {
+                toast.info("Nessun documento pronto per l'auto-archivio: non è stato trovato un abbinamento (numero polizza, targa, codice fiscale o cliente).");
+            } else {
+                toast.success(`Auto-archiviati ${archived} · ri-abbinati ${rematched} · falliti ${failed}`);
+            }
+            await load();
+        } catch (e) {
+            toast.error(e.response?.data?.detail || "Errore");
+        } finally {
+            setRetrying(false);
+        }
+    };
 
     const upload = async (files, scope = null) => {
         if (!files?.length) return;
@@ -206,26 +244,18 @@ export default function DocumentiInbox() {
                 <span className="text-emerald-700 font-medium ml-3">✓ Salvati: {savedCount}</span>
                 {pendingCount > 0 && (
                     <Button size="sm" variant="outline" className="ml-auto h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                        onClick={async () => {
-                            try {
-                                const r = await api.post("/documenti-inbox/retry-auto-archive");
-                                const { archived = 0, rematched = 0, failed = 0 } = r.data || {};
-                                if (archived === 0 && rematched === 0 && failed === 0) {
-                                    toast.info("Nessun documento pronto per l'auto-archivio: non è stato trovato un abbinamento (numero polizza, targa, codice fiscale o cliente).");
-                                } else {
-                                    toast.success(`Auto-archiviati ${archived} · ri-abbinati ${rematched} · falliti ${failed}`);
-                                }
-                                load();
-                            } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
-                        }} data-testid="di-retry-auto">
-                        ⚡ Riprova auto-archivio sui pending
+                        disabled={retrying}
+                        onClick={runRetry} data-testid="di-retry-auto">
+                        ⚡ {retrying ? "Auto-archivio in corso…" : "Riprova auto-archivio sui pending"}
                     </Button>
                 )}
             </div>
 
             {items === null ? <Loading /> : items.length === 0 ? <Empty message="Nessun documento. Carica il primo!" /> : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {items.map((it) => {
+                    {[...items]
+                        .sort((a, b) => (a.stato === "pending" ? 0 : 1) - (b.stato === "pending" ? 0 : 1))
+                        .map((it) => {
                         const b = TIPO_BADGE[it.tipo_documento] || TIPO_BADGE.altro;
                         return (
                             <Card key={it.id} className={`p-4 ${it.stato === "salvato" ? "opacity-60" : "hover:shadow-md transition"}`}
@@ -256,6 +286,27 @@ export default function DocumentiInbox() {
                                 {it.target_polizza && (
                                     <div className="text-[11px] text-indigo-700 bg-indigo-50 p-1.5 rounded mb-1">
                                         ✓ Polizza trovata: <strong>{it.target_polizza.numero_polizza || it.target_polizza.numero || "—"}</strong>
+                                    </div>
+                                )}
+                                {/* Avanzamento riprova auto-archivio per singola card */}
+                                {retryStatus[it.id] === "processing" && (
+                                    <div className="mt-1" data-testid={`di-retry-progress-${it.id}`}>
+                                        <OcrProgressBar active label="Auto-archivio in corso…" />
+                                    </div>
+                                )}
+                                {retryStatus[it.id] === "saltato" && (
+                                    <div className="text-[10px] text-slate-500 bg-slate-50 p-1 rounded mt-1" data-testid={`di-retry-result-${it.id}`}>
+                                        — Nessun abbinamento trovato
+                                    </div>
+                                )}
+                                {retryStatus[it.id] === "errore" && (
+                                    <div className="text-[10px] text-rose-600 bg-rose-50 p-1 rounded mt-1" data-testid={`di-retry-result-${it.id}`}>
+                                        ✕ Errore in archiviazione
+                                    </div>
+                                )}
+                                {retryStatus[it.id] === "archiviato" && (
+                                    <div className="text-[10px] text-emerald-700 bg-emerald-50 p-1 rounded mt-1" data-testid={`di-retry-result-${it.id}`}>
+                                        ✓ Archiviato
                                     </div>
                                 )}
                                 <div className="flex justify-between gap-1 mt-3 pt-3 border-t border-slate-100">

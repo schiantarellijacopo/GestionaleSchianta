@@ -1069,3 +1069,8 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fallback: se routed=polizza ma polizza non trovata, ripiega su anagrafica se presente.
 - Fix display card: "Polizza trovata" mostrava vuoto (usava .numero invece di .numero_polizza).
 - Testato: polizza_frontespizio -> Polizza (match per numero da nome file); retry gira senza errori.
+
+## 2026-11-12 — Inbox: avanzamento per-card su "Riprova auto" + ordinamento pending
+- Backend: estratto `_retry_one_pending()`; nuovi endpoint `GET /documenti-inbox/pending-ids` e `POST /documenti-inbox/{iid}/retry-auto-archive` (singolo doc). Bulk retry invariato nel comportamento.
+- Frontend (DocumentiInbox.jsx): "Riprova auto-archivio" ora riprocessa i pending UNO alla volta; ogni card mostra la barra OcrProgressBar mentre viene elaborata, poi esito (Archiviato / Nessun abbinamento / Errore).
+- Le card pending ("Da rivedere") sono ordinate in alto, i documenti salvati sotto.
