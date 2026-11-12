@@ -21,16 +21,18 @@ const BASI = [
     { v: "altro", l: "Altro" },
 ];
 
-export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
-    const [baseTipo, setBaseTipo] = useState(polizza.regolazione_base || "fatturato");
-    const [preventivo, setPreventivo] = useState(polizza.regolazione_base_preventivo ?? 0);
-    const [dichiarato, setDichiarato] = useState(polizza.regolazione_base_dichiarata_cliente ?? 0);
-    const [tasso, setTasso] = useState(polizza.regolazione_tasso || 0);
+export default function RegolazionePremioDialog({ polizza, onClose, onSaved, initial }) {
+    const ini = initial || {};
+    const [baseTipo, setBaseTipo] = useState(ini.base_tipo || polizza.regolazione_base || "fatturato");
+    const [preventivo, setPreventivo] = useState(ini.base_preventivo ?? polizza.regolazione_base_preventivo ?? 0);
+    const [dichiarato, setDichiarato] = useState(ini.base_effettiva ?? polizza.regolazione_base_dichiarata_cliente ?? 0);
+    const [tasso, setTasso] = useState(ini.tasso_applicato_pct ?? polizza.regolazione_tasso ?? 0);
     const [tassoUnita, setTassoUnita] = useState("percento"); // "percento" | "permille"
-    const [impostaPct, setImpostaPct] = useState(polizza.regolazione_imposta_pct ?? 22.25);
-    const [periodo, setPeriodo] = useState(String(new Date().getFullYear() - 1));
-    const [note, setNote] = useState("");
-    const [aCredito, setACredito] = useState(!!polizza.regolazione_a_credito);
+    const [impostaPct, setImpostaPct] = useState(ini.imposta_pct ?? polizza.regolazione_imposta_pct ?? 22.25);
+    const [periodo, setPeriodo] = useState(String(ini.periodo || (new Date().getFullYear() - 1)));
+    const [note, setNote] = useState(ini.note || "");
+    const [aCredito, setACredito] = useState(ini.a_credito ?? !!polizza.regolazione_a_credito);
+    const isEditing = !!(initial && initial.id);
     const [storico, setStorico] = useState([]);
     const [risultato, setRisultato] = useState(null);
     const [busy, setBusy] = useState(false);
@@ -62,10 +64,15 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
             });
             setRisultato(r.data);
             if (salva) {
-                toast.success(`Calcolo salvato · Dovuto ${fmtEur(r.data.dovuto)}`);
+                // In modifica: sostituisce la riga precedente (elimina il vecchio calcolo)
+                if (isEditing) {
+                    try { await api.delete(`/polizze/${polizza.id}/regolazione-premio/storico/${initial.id}`); } catch { /* ignore */ }
+                }
+                toast.success(`${isEditing ? "Regolazione aggiornata" : "Calcolo salvato"} · Dovuto ${fmtEur(r.data.dovuto)}`);
                 const upd = await api.get(`/polizze/${polizza.id}/regolazione-premio/storico`);
                 setStorico(upd.data || []);
                 if (onSaved) onSaved();
+                if (isEditing) onClose();
             }
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
         finally { setBusy(false); }
@@ -78,7 +85,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
             <DialogContent className="max-w-3xl" data-testid="regolazione-dialog">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Calculator className="text-violet-600" /> Regolazione Premio · Polizza {polizza.numero_polizza}
+                        <Calculator className="text-violet-600" /> {isEditing ? "Modifica" : "Regolazione Premio ·"} Polizza {polizza.numero_polizza}
                     </DialogTitle>
                 </DialogHeader>
 
@@ -151,7 +158,7 @@ export default function RegolazionePremioDialog({ polizza, onClose, onSaved }) {
                         </div>
                         <div className="flex gap-2">
                             <Button variant="outline" onClick={() => calcola(false)} disabled={busy} data-testid="reg-calcola-prova">Calcola (prova)</Button>
-                            <Button onClick={() => calcola(true)} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="reg-calcola-salva">Calcola e salva</Button>
+                            <Button onClick={() => calcola(true)} disabled={busy} className="bg-violet-700 hover:bg-violet-800" data-testid="reg-calcola-salva">{isEditing ? "Salva modifiche" : "Calcola e salva"}</Button>
                         </div>
                     </div>
 

@@ -1032,3 +1032,11 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Aggiunto min-w-[980px] cosi su schermi stretti la tabella scorre invece di comprimere le colonne.
 - Pattern identico a BrogliaccioTab/DatiCompagnieTab (gia funzionanti).
 - NB: verifica visiva via screenshot non riuscita per race di login nel tool; frontend compila senza errori.
+
+## 2026-11-12 — Regolazione premio (tab polizza): Crea/Modifica/Elimina + ordinamento
+- Dialog RegolazionePremioDialog ora RENDERIZZATO in PolizzaDetail (prima il bottone non apriva nulla nel tab).
+- Crea regolazione: apre il dialog vuoto per inserire i dati.
+- Modifica regolazione: abilitato solo con UNA riga selezionata; riapre il dialog pre-compilato (initial) e al salvataggio SOSTITUISCE la riga (elimina la vecchia).
+- Elimina regolazione: funziona solo su righe selezionate; backend BLOCCA (400) se la regolazione ha un titolo collegato coperto/incassato.
+- Regolazioni calcolate ordinate per periodo (anno) decrescente, poi per data.
+- Testato backend: elimina coperto->400, non-coperto->ok. Frontend compila.

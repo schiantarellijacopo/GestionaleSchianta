@@ -16,14 +16,22 @@ const STATO_TONE = {
     titolo_generato: "bg-emerald-100 text-emerald-700", chiusa: "bg-slate-200 text-slate-500",
 };
 
-export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGeneraTitolo }) {
+export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onModifica, onGeneraTitolo }) {
     const [eventi, setEventi] = useState([]);
     const [calcoli, setCalcoli] = useState([]);
     const [selCalcoli, setSelCalcoli] = useState(new Set());
     const [busy, setBusy] = useState(false);
 
     const loadEventi = () => api.get(`/regolazione-premio/${pol.id}/eventi`).then((r) => setEventi(r.data || [])).catch(() => {});
-    const loadCalcoli = () => api.get(`/polizze/${pol.id}/regolazione-premio/storico`).then((r) => { setCalcoli(r.data || []); setSelCalcoli(new Set()); }).catch(() => {});
+    const loadCalcoli = () => api.get(`/polizze/${pol.id}/regolazione-premio/storico`).then((r) => {
+        // Ordina per periodo (anno) dalla più recente alla meno recente
+        const rows = [...(r.data || [])].sort((a, b) => {
+            const pa = parseInt(a.periodo, 10) || 0, pb = parseInt(b.periodo, 10) || 0;
+            if (pb !== pa) return pb - pa;
+            return (b.data_calcolo || "").localeCompare(a.data_calcolo || "");
+        });
+        setCalcoli(rows); setSelCalcoli(new Set());
+    }).catch(() => {});
     useEffect(() => { loadEventi(); loadCalcoli(); /* eslint-disable-next-line */ }, [pol.id, pol.regolazione_stato, pol.regolazione_ultimo_calcolo]);
 
     const toggleCalcolo = (id) => setSelCalcoli((prev) => {
@@ -85,14 +93,6 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
         if (!window.confirm("Azzerare il calcolo della regolazione? La polizza resta soggetta a regolazione.")) return;
         try { await api.post(`/regolazione-premio/${pol.id}/annulla`); toast.success("Regolazione azzerata"); onReload(); loadEventi(); }
         catch { toast.error("Errore"); }
-    };
-    const elimina = async () => {
-        const anche = window.confirm("Eliminare la regolazione da questa polizza?\n\nOK = elimina anche l'eventuale titolo generato\nAnnulla = mantieni il titolo");
-        try {
-            await api.delete(`/regolazione-premio/${pol.id}`, { params: { elimina_titolo: anche } });
-            toast.success("Regolazione eliminata");
-            onReload();
-        } catch { toast.error("Errore"); }
     };
     const inviaLink = async (canale) => {
         try {
@@ -171,10 +171,28 @@ export default function RegolazionePolizzaTab({ pol, onReload, onCalcola, onGene
                 <span className="w-full text-[11px] text-sky-700">Il cliente apre il link, indica il dato aggiornato e si compila in automatico (riceverai una notifica).</span>
             </div>
 
-            {/* Modifica / annulla / elimina */}
+            {/* Crea / Modifica / Elimina regolazione (su riga selezionata) */}
             <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="ghost" className="text-amber-700 hover:bg-amber-50" onClick={annulla} data-testid="reg-tab-annulla">Annulla calcolo</Button>
-                <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50" onClick={elimina} data-testid="reg-tab-elimina">Elimina regolazione</Button>
+                <Button size="sm" className="bg-violet-700 hover:bg-violet-800" onClick={onCalcola} data-testid="reg-tab-crea">
+                    <Calculator size={14} className="mr-1" /> Crea regolazione
+                </Button>
+                <Button size="sm" variant="outline" disabled={selCalcoli.size !== 1}
+                    onClick={() => {
+                        const id = [...selCalcoli][0];
+                        const row = calcoli.find((c) => c.id === id);
+                        if (row && onModifica) onModifica(row);
+                    }}
+                    data-testid="reg-tab-modifica">
+                    Modifica regolazione
+                </Button>
+                <Button size="sm" variant="ghost" className="text-rose-600 hover:bg-rose-50"
+                    disabled={selCalcoli.size === 0 || busy} onClick={eliminaCalcoliSelezionati} data-testid="reg-tab-elimina">
+                    <Trash2 size={14} className="mr-1" /> Elimina regolazione{selCalcoli.size > 1 ? ` (${selCalcoli.size})` : ""}
+                </Button>
+                <Button size="sm" variant="ghost" className="text-amber-700 hover:bg-amber-50 ml-auto" onClick={annulla} data-testid="reg-tab-annulla">Annulla calcolo</Button>
+                {selCalcoli.size === 0 && (
+                    <span className="w-full text-[11px] text-slate-400">Seleziona una regolazione nella tabella sotto per modificarla o eliminarla.</span>
+                )}
             </div>
 
             <div>

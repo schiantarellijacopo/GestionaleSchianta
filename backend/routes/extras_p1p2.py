@@ -1040,7 +1040,16 @@ async def elimina_calcolo_regolazione(
     pid: str, sid: str,
     user=Depends(require_user("admin", "collaboratore")),
 ) -> dict:
-    """Elimina un singolo calcolo di regolazione dallo storico (non tutta la polizza)."""
+    """Elimina un singolo calcolo di regolazione dallo storico (non tutta la polizza).
+    Blocca l'eliminazione se la regolazione ha un titolo collegato già COPERTO o
+    INCASSATO (non si può cancellare un calcolo già contabilizzato)."""
+    pol = await db.polizze.find_one({"id": pid}, {"_id": 0, "regolazione_titolo_id": 1})
+    tit_id = (pol or {}).get("regolazione_titolo_id")
+    if tit_id:
+        tit = await db.titoli.find_one({"id": tit_id}, {"_id": 0, "stato": 1, "titolo_coperto": 1})
+        if tit and (tit.get("stato") in ("incassato", "coperto", "abbuonato")
+                    or bool(tit.get("titolo_coperto"))):
+            raise HTTPException(400, "Impossibile eliminare: la regolazione ha un titolo coperto/incassato.")
     res = await db.regolazione_storico.delete_one({"id": sid, "polizza_id": pid})
     if res.deleted_count == 0:
         raise HTTPException(404, "Calcolo non trovato")

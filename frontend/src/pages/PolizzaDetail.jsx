@@ -156,6 +156,7 @@ export default function PolizzaDetail() {
     const [letteraAbbuonoTitolo, setLetteraAbbuonoTitolo] = useState(null);
     const [titoloEditing, setTitoloEditing] = useState(null);
     const [regolazioneOpen, setRegolazioneOpen] = useState(false);
+    const [regEditRow, setRegEditRow] = useState(null);
     const load = () => api.get(`/polizze/${id}`).then((r) => setPol(r.data));
     useEffect(() => { load(); /* eslint-disable-next-line */ }, [id]);
     useEffect(() => {
@@ -1246,7 +1247,8 @@ export default function PolizzaDetail() {
                         <RegolazionePolizzaTab
                             pol={pol}
                             onReload={load}
-                            onCalcola={() => setRegolazioneOpen(true)}
+                            onCalcola={() => { setRegEditRow(null); setRegolazioneOpen(true); }}
+                            onModifica={(row) => { setRegEditRow(row); setRegolazioneOpen(true); }}
                             onGeneraTitolo={() => setTitoloEditing({
                                 _new: true,
                                 polizza_id: pol.id,
@@ -1400,6 +1402,14 @@ export default function PolizzaDetail() {
             </Tabs>
             {editOpen && (
                 <EditPolizzaDialog pol={pol} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); }} />
+            )}
+            {regolazioneOpen && (
+                <RegolazionePremioDialog
+                    polizza={pol}
+                    initial={regEditRow}
+                    onClose={() => { setRegolazioneOpen(false); setRegEditRow(null); }}
+                    onSaved={() => load()}
+                />
             )}
             {paying && (
                 <DialogIncassoCopertura
