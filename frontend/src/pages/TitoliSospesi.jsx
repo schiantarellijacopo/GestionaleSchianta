@@ -275,7 +275,8 @@ export default function TitoliSospesi() {
                         {ggMin > 0 ? `Nessun titolo sospeso da oltre ${ggMin} giorni.` : "Nessun titolo sospeso — tutti i clienti hanno pagato."}
                     </div>
                 ) : (
-                    <table className="tbl w-full">
+                  <div className="overflow-x-auto">
+                    <table className="tbl w-full min-w-[980px]">
                         <thead>
                             <tr>
                                 <th className="w-8">
@@ -294,7 +295,7 @@ export default function TitoliSospesi() {
                                 <th><SortHeader k="giorni_anticipo" sortKey={sortKey} dir={dir} toggle={toggle}>Anticipo</SortHeader></th>
                                 <th><SortHeader k="scadenza_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Scad. polizza</SortHeader></th>
                                 <th className="text-right"><SortHeader k="da_pagare" sortKey={sortKey} dir={dir} toggle={toggle}>Da Pagare €</SortHeader></th>
-                                <th></th>
+                                <th className="col-azioni"></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -336,7 +337,7 @@ export default function TitoliSospesi() {
                                         </td>
                                         <td className="num text-xs">{fmtDate(t.scadenza_polizza)}</td>
                                         <td className="num text-right font-bold">{fmtEur(t.importo_da_pagare != null ? t.importo_da_pagare : t.importo_lordo)}</td>
-                                        <td className="text-right">
+                                        <td className="col-azioni text-right">
                                             <Button size="sm" className="bg-emerald-600 hover:bg-emerald-700"
                                                     onClick={() => setPaying(t)}
                                                     data-testid={`sospeso-paga-${t.id}`}>
@@ -351,10 +352,11 @@ export default function TitoliSospesi() {
                             <tr className="bg-slate-50 font-semibold">
                                 <td colSpan="9" className="text-right">TOTALE ANTICIPI</td>
                                 <td className="num text-right">{fmtEur(totali.importo)}</td>
-                                <td></td>
+                                <td className="col-azioni"></td>
                             </tr>
                         </tfoot>
                     </table>
+                  </div>
                 )}
             </Card>
 

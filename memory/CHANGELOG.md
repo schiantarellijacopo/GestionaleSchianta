@@ -1026,3 +1026,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - _infer_targets: nuovo match anagrafica per CF e P.IVA del contraente (chiavi forti), dopo il contraente della polizza. Per i doc di polizza la P.IVA generica (spesso = compagnia) NON viene usata.
 - Cosi un documento di polizza aggancia il cliente anche se il numero polizza non e ancora nel DB -> meno scarti.
 - Testato: CF contraente, P.IVA contraente, e P.IVA compagnia (correttamente non associata).
+
+## 2026-11-12 — Sospesi: pulsante Incassa tagliato (fix layout tabella)
+- TitoliSospesi.jsx: tabella avvolta in <div overflow-x-auto>; colonna azioni resa sticky a destra (classe col-azioni) -> il pulsante Incassa resta sempre visibile (prima la Card overflow-hidden lo tagliava per header nowrap che eccedevano la larghezza).
+- Aggiunto min-w-[980px] cosi su schermi stretti la tabella scorre invece di comprimere le colonne.
+- Pattern identico a BrogliaccioTab/DatiCompagnieTab (gia funzionanti).
+- NB: verifica visiva via screenshot non riuscita per race di login nel tool; frontend compila senza errori.
