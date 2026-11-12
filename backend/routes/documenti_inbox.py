@@ -80,6 +80,12 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
 }
 
 REGOLE:
+- LIBRETTO di circolazione: la TARGA è nel campo "A" (in alto). Restituiscila in
+  MAIUSCOLO SENZA spazi né trattini (es. 'FR798LT', 'AB12345', 'MI123456').
+  Le targhe auto italiane moderne hanno 2 LETTERE + 3 CIFRE + 2 LETTERE: nelle
+  posizioni delle lettere non usare mai cifre e viceversa. Attenzione a NON confondere
+  la lettera O con lo zero 0, la I con 1, la B con 8, la S con 5, la Z con 2.
+  Il TELAIO (VIN, campo "E", 17 caratteri) è DIVERSO dalla targa: non scambiarli.
 - Restituisci null per i campi non leggibili o non pertinenti
 - Date sempre YYYY-MM-DD
 - POLIZZE/QUIETANZE/APPENDICI/LIBRETTI: distingui SEMPRE la COMPAGNIA assicuratrice
@@ -296,36 +302,46 @@ _FN_STOPWORDS = {
 }
 
 
+def _norm_targa(t: str) -> str:
+    """Normalizza una targa per il confronto: MAIUSCOLO, senza spazi/trattini/punti
+    e senza zeri di riempimento iniziali (alcune targhe sono salvate zero-padded)."""
+    t = re.sub(r"[^A-Z0-9]", "", (t or "").upper())
+    return t.lstrip("0")
+
+
 def _guess_from_filename(filename: str) -> dict:
     """Estrae dal NOME FILE indizi utili: numero polizza, targa e nome cliente.
     I file Omnia hanno tipicamente la forma '117264695 - ANGELINI ANNAMARIA.pdf'
-    oppure 'LIBRETTO FR798LT.pdf'."""
+    oppure 'LIBRETTO FR798LT.pdf'. Classifica ogni token una sola volta per evitare
+    che le cifre di una targa (es. AB12345) vengano prese come numero polizza."""
     out = {"numero_polizza": None, "targa": None, "nome": None}
     if not filename:
         return out
-    base = filename.rsplit(".", 1)[0]
-    up = base.upper().replace("-", " ").replace("_", " ")
-    m = _PLATE_RX.search(up)
-    if m:
-        out["targa"] = m.group(1).replace(" ", "")
-    mnum = re.search(r"\d{5,}", base)
-    if mnum:
-        out["numero_polizza"] = mnum.group(0)
-    txt = re.sub(r"\d{5,}", " ", base)
+    up = filename.rsplit(".", 1)[0].upper()
     for sep in ("–", "-", "_", "·", "|", ","):
-        txt = txt.replace(sep, " ")
-    toks = []
-    for t in re.split(r"\s+", txt.strip()):
-        tu = t.strip().upper()
-        if not tu or tu in _FN_STOPWORDS:
+        up = up.replace(sep, " ")
+    name_toks = []
+    for raw in re.split(r"\s+", up):
+        tk = re.sub(r"[^A-Z0-9]", "", raw)
+        if not tk or tk in _FN_STOPWORDS:
             continue
-        if re.fullmatch(r"[A-Z]{2}\d{3}[A-Z]{2}", tu):  # targa
+        has_a = bool(re.search(r"[A-Z]", tk))
+        has_d = bool(re.search(r"\d", tk))
+        # targa: formato standard oppure token alfanumerico lettere+cifre (vecchie/moto)
+        if _PLATE_RX.match(tk) or (5 <= len(tk) <= 8 and has_a and has_d):
+            if not out["targa"]:
+                out["targa"] = tk
             continue
-        if not re.search(r"[A-Za-zÀ-ÿ]", tu):  # scarta token senza lettere
+        # numero polizza: token tutto cifre, lungo
+        if tk.isdigit() and len(tk) >= 5:
+            if not out["numero_polizza"]:
+                out["numero_polizza"] = tk
             continue
-        toks.append(t.strip())
-    if toks:
-        out["nome"] = " ".join(toks).strip()
+        # nome cliente: token solo lettere
+        if has_a and not has_d:
+            name_toks.append(raw.strip())
+    if name_toks:
+        out["nome"] = " ".join(name_toks).strip()
     return out
 
 
@@ -371,10 +387,11 @@ async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
             target_p = await db.polizze.find_one(
                 {"$or": [{"numero_polizza": nump}, {"numero": nump}]}, proj_p)
         if not (target_p or {}).get("id"):
-            targa = (dati.get("targa") or "").strip().upper() or (fn["targa"] or "")
-            if targa:
+            targa = _norm_targa((dati.get("targa") or "") or (fn["targa"] or ""))
+            if targa and len(targa) >= 4:
+                # match robusto: ignora spazi/trattini e zeri di padding iniziali
                 target_p = await db.polizze.find_one(
-                    {"targa": {"$regex": f"^{re.escape(targa)}$", "$options": "i"}},
+                    {"targa": {"$regex": f"^0*{re.escape(targa)}$", "$options": "i"}},
                     proj_p, sort=[("effetto", -1)])
 
     # 2) ANAGRAFICA
@@ -488,7 +505,11 @@ async def analizza_documento(
     # Se l'utente ha scelto una cartella (scope), non auto-archiviare fuori da quello scope
     if scope in ("anagrafica", "polizza", "sinistro") and routed_entita != scope:
         has_target = False
-    if auto_archive and confidenza_ok and tipo_ok and has_target:
+    # Un match DETERMINISTICO su una polizza (per numero o targa) è una prova forte:
+    # consente l'auto-archiviazione anche a confidenza media/bassa (riduce gli scarti
+    # dei libretti, spesso a bassa confidenza ma con targa univoca).
+    strong_match = routed_entita == "polizza" and bool(target_polizza)
+    if auto_archive and (confidenza_ok or strong_match) and tipo_ok and has_target:
         try:
             # Tutti i campi disponibili vengono applicati
             campi_auto = [k for k, v in (dati or {}).items() if v not in (None, "", [])]
@@ -857,8 +878,6 @@ async def retry_auto_archive(
     rematched = 0
     errors = []
     async for inb in db.documenti_inbox.find({"stato": "pending"}, {"_id": 0}):
-        if inb.get("confidenza") != "alta":
-            continue
         tipo = inb.get("tipo_documento")
         if not tipo or tipo == "altro":
             continue
@@ -866,7 +885,9 @@ async def retry_auto_archive(
         if routed_entita == "sinistro":
             continue  # sinistro → solo manuale
 
-        # 🔄 Ri-match contro il DB attuale (polizze/targhe/anagrafiche create dopo l'ingest)
+        # 🔄 Ri-match contro il DB attuale (polizze/targhe/anagrafiche create dopo
+        # l'ingest). Eseguito SEMPRE, anche a bassa confidenza, così la modale di
+        # revisione si pre-compila con il cliente/polizza corretti.
         new_a, new_p = await _rematch_pending_targets(inb)
         persist = {}
         if (new_a or {}).get("id") and not (inb.get("target_anagrafica") or {}).get("id"):
@@ -882,6 +903,11 @@ async def retry_auto_archive(
         if routed_entita == "anagrafica" and not target_a.get("id"):
             continue
         if routed_entita == "polizza" and not target_p.get("id"):
+            continue
+        # Auto-archivia se confidenza alta OPPURE match deterministico su polizza
+        # (numero/targa): un libretto con targa univoca non va lasciato tra gli scarti.
+        strong_match = routed_entita == "polizza" and bool(target_p.get("id"))
+        if inb.get("confidenza") != "alta" and not strong_match:
             continue
         body = {
             "anagrafica_id": target_a.get("id"),

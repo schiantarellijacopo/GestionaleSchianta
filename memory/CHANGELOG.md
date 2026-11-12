@@ -1012,3 +1012,11 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Frontend DocumentiInbox.jsx: selettore Polizza ora ricercabile (numero/targa/cliente), non piu vincolato alla scelta del cliente; selezionando la polizza si auto-compila il cliente.
 - Testato: doc polizza con OCR=GROUPAMA -> cliente ANGELINI via numero da filename; libretto -> polizza per targa; nome-solo da filename -> anagrafica.
 - NB: i documenti pending gia salvati con cliente errato non si auto-correggono; nella modale si puo togliere il cliente (X) e cercare la polizza corretta (auto-compila il cliente). I nuovi scan matchano corretti.
+
+## 2026-11-12 — Inbox: match targhe libretti piu accurato (meno scarti)
+- OCR prompt libretto: targa senza spazi/trattini, formati IT (nuove/vecchie/moto), avviso confusione O/0 I/1 B/8 S/5 Z/2, distinzione targa vs telaio.
+- _guess_from_filename riscritto (per-token): estrae targa (nuove AA000AA + vecchie/moto alfanumeriche) senza prendere le cifre della targa come numero polizza.
+- _norm_targa + match regex ^0*TARGA$ (case-insensitive): ignora spazi/trattini e zeri di padding iniziali (targhe salvate zero-padded).
+- Auto-archiviazione: un match DETERMINISTICO su polizza (numero/targa) auto-archivia anche a confidenza media/bassa (riduce gli scarti dei libretti). Vale in /analyze e in retry-auto-archive.
+- retry-auto-archive ora ri-matcha e PERSISTE i target per TUTTI i pending polizza/anagrafica (anche bassa confidenza) -> la modale di revisione si pre-compila.
+- Testato: parsing filename (6 casi), match targhe padded/normali/con spazi.
