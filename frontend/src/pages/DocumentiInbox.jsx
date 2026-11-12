@@ -255,7 +255,7 @@ export default function DocumentiInbox() {
                                 )}
                                 {it.target_polizza && (
                                     <div className="text-[11px] text-indigo-700 bg-indigo-50 p-1.5 rounded mb-1">
-                                        ✓ Polizza trovata: <strong>{it.target_polizza.numero}</strong>
+                                        ✓ Polizza trovata: <strong>{it.target_polizza.numero_polizza || it.target_polizza.numero || "—"}</strong>
                                     </div>
                                 )}
                                 <div className="flex justify-between gap-1 mt-3 pt-3 border-t border-slate-100">

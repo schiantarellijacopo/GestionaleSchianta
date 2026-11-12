@@ -1062,3 +1062,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fix: _guess_tipo_from_filename deduce il tipo dal NOME FILE (es. "LIBRETTO FR798LT.pdf" -> libretto) quando OCR=altro; il retry ora li processa, aggancia la polizza dalla targa/numero del nome file, corregge la classificazione (tipo_documento) e auto-archivia se c è match deterministico.
 - Messaggio del pulsante piu chiaro: toast info quando nessun abbinamento trovato (prima mostrava 0/0/0 e sembrava rotto).
 - Testato: inferenza tipo + match polizza da targa nel nome file.
+
+## 2026-11-12 — Retry auto-archivio: frontespizio/ALTRO ora vanno in Polizza
+- CAUSA: tipo "polizza_frontespizio" NON era in DOC_ROUTING -> instradato per default su ANAGRAFICA; i doc "ALTRO" senza parola chiave nel nome venivano saltati anche con polizza trovata.
+- FIX: mappato polizza_frontespizio/frontespizio -> card Polizza. Retry ora decide la destinazione con priorita: tipo riconosciuto (incl. varianti polizza_*) -> cartella di upload (scope) -> target trovato (una polizza trovata vince sull anagrafica). Passato entita_tipo esplicito a _do_save.
+- Fallback: se routed=polizza ma polizza non trovata, ripiega su anagrafica se presente.
+- Fix display card: "Polizza trovata" mostrava vuoto (usava .numero invece di .numero_polizza).
+- Testato: polizza_frontespizio -> Polizza (match per numero da nome file); retry gira senza errori.

@@ -634,6 +634,8 @@ DOC_ROUTING = {
     "visura_camerale":   ("anagrafica", "visura_camerale"),
     "mandato_sdd":       ("anagrafica", "mandato_sdd"),
     "polizza":           ("polizza", "polizza"),
+    "polizza_frontespizio": ("polizza", "polizza"),
+    "frontespizio":      ("polizza", "polizza"),
     "condizioni":        ("polizza", "condizioni"),
     "appendice":         ("polizza", "appendici"),
     "libretto":          ("polizza", "libretto_veicolo"),
@@ -928,25 +930,33 @@ async def retry_auto_archive(
     errors = []
     async for inb in db.documenti_inbox.find({"stato": "pending"}, {"_id": 0}):
         tipo = inb.get("tipo_documento")
-        # Se l'OCR non ha classificato (altro), deduci il tipo dal NOME FILE
+        scope = inb.get("scope")
+        # tipo effettivo: OCR, altrimenti dedotto dal nome file
         eff_tipo = tipo if (tipo and tipo != "altro") else _guess_tipo_from_filename(inb.get("filename"))
-        if not eff_tipo or eff_tipo == "altro":
-            continue
-        routed_entita, _ = DOC_ROUTING.get(eff_tipo, ("anagrafica", "altro"))
-        if routed_entita == "sinistro":
+
+        # entità "hint" nota a priori: dal tipo (anche varianti 'polizza_*'), altrimenti
+        # dalla CARTELLA scelta in upload (scope). Può restare None per i doc 'altro'.
+        hint = None
+        if eff_tipo and eff_tipo != "altro":
+            if eff_tipo in DOC_ROUTING:
+                hint = DOC_ROUTING[eff_tipo][0]
+            elif eff_tipo.startswith("polizza") or eff_tipo.endswith("frontespizio"):
+                hint = "polizza"
+        if not hint and scope in ("anagrafica", "polizza"):
+            hint = scope
+        if hint == "sinistro":
             continue  # sinistro → solo manuale
 
-        # 🔄 Ri-match contro il DB attuale (polizze/targhe/anagrafiche create dopo
-        # l'ingest). Eseguito SEMPRE, anche a bassa confidenza, così la modale di
-        # revisione si pre-compila con il cliente/polizza corretti.
-        new_a, new_p = await _rematch_pending_targets({**inb, "tipo_documento": eff_tipo})
+        # 🔄 Ri-match: instrada con un tipo coerente (polizza se non sappiamo meglio)
+        tipo_for_match = eff_tipo if (eff_tipo and eff_tipo in DOC_ROUTING) else (
+            "polizza" if hint != "anagrafica" else "carta_identita")
+        new_a, new_p = await _rematch_pending_targets({**inb, "tipo_documento": tipo_for_match})
         persist = {}
         if (new_a or {}).get("id") and not (inb.get("target_anagrafica") or {}).get("id"):
             persist["target_anagrafica"] = new_a
         if (new_p or {}).get("id") and not (inb.get("target_polizza") or {}).get("id"):
             persist["target_polizza"] = new_p
-        # Se il tipo è stato dedotto dal nome file, correggi anche la classificazione
-        if eff_tipo != tipo and ((new_p or {}).get("id") or (new_a or {}).get("id")):
+        if eff_tipo and eff_tipo != tipo and ((new_p or {}).get("id") or (new_a or {}).get("id")):
             persist["tipo_documento"] = eff_tipo
         if persist:
             await db.documenti_inbox.update_one({"id": inb["id"]}, {"$set": persist})
@@ -954,16 +964,34 @@ async def retry_auto_archive(
 
         target_a = new_a or (inb.get("target_anagrafica") or {}) or {}
         target_p = new_p or (inb.get("target_polizza") or {}) or {}
+
+        # entità finale: hint se noto, altrimenti si deduce dai target trovati
+        # (una polizza trovata vince sull'anagrafica, es. frontespizio polizza).
+        routed_entita = hint
+        if not routed_entita:
+            if target_p.get("id"):
+                routed_entita = "polizza"
+            elif target_a.get("id"):
+                routed_entita = "anagrafica"
+            else:
+                continue
+        if routed_entita == "polizza" and not target_p.get("id"):
+            # polizza non trovata: ripiega sull'anagrafica se disponibile
+            if target_a.get("id"):
+                routed_entita = "anagrafica"
+            else:
+                continue
         if routed_entita == "anagrafica" and not target_a.get("id"):
             continue
-        if routed_entita == "polizza" and not target_p.get("id"):
-            continue
-        # Auto-archivia se confidenza alta OPPURE match deterministico su polizza
-        # (numero/targa): un libretto con targa univoca non va lasciato tra gli scarti.
-        strong_match = routed_entita == "polizza" and bool(target_p.get("id"))
+
+        # Auto-archivia se: confidenza alta, OPPURE match deterministico su polizza,
+        # OPPURE l'utente aveva scelto esplicitamente la cartella (scope).
+        strong_match = (routed_entita == "polizza" and bool(target_p.get("id"))) \
+            or (scope in ("anagrafica", "polizza"))
         if inb.get("confidenza") != "alta" and not strong_match:
             continue
         body = {
+            "entita_tipo": routed_entita,
             "anagrafica_id": target_a.get("id"),
             "polizza_id": target_p.get("id"),
             "campi_da_applicare": list((inb.get("dati") or {}).keys()),
