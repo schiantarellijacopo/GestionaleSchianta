@@ -1089,3 +1089,17 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - FIX minori frontend: checkbox "Salva come avatar" mostrata solo se destinazione=anagrafica; clear anagrafica ora resetta anche polLabel/appId.
 - NB: la targa GY308AK del PDF segnalato NON esiste in polizze/applicazioni/veicoli del tenant → non associabile automaticamente finché il record veicolo non esiste (limite dati, non bug). Resta possibile l'allegato manuale.
 - Testato: testing_agent iteration_133 (backend 6/6 pytest, frontend e2e) + screenshot e2e del selettore veicolo ricercabile sul tenant reale.
+
+## 2026-06-12 — Documenti annuali collaboratori (checklist conformità)
+- Nuova pagina sidebar "Documenti Collaboratori" (/documenti-collaboratori, pages/DocumentiAnnualiCollab.jsx).
+  - Admin: panoramica immediata di tutti i collaboratori con pallini stato + badge "Completo"/"N da sistemare", espansione riga, upload/replace/delete per voce, selettore anno (2027..2023).
+  - Collaboratore/dipendente: vede SOLO la propria checklist, upload via /api/me/documenti-annuali.
+- Checklist annuale configurabile (admin): GET/PUT /api/config/documenti-annuali-collab. Default: Casellario giudiziale, Carichi pendenti, Attestato corso IVASS (30h, stato auto dalle ore), Visura/iscrizione RUI, Autocertificazione antiriciclaggio. Possibile aggiungere/rimuovere card.
+- Stato per anno: Presente / In scadenza (<=30gg) / Scaduto / Mancante / Parziale (IVASS).
+- Documenti salvati in users.documenti_collab (campi req_key, anno, tipologia, data_scadenza). I certificati gia' presenti (users.certificati_collab, match per tipologia+anno) sono COLLEGATI alla checklist in sola lettura (etichetta "da Certificati").
+- Editor Librerie > tab Certificati: pannello inline "Checklist documenti annuali" (ChecklistAnnualeInline) che riusa CollabCard, con selettore anno e link "Apri vista completa".
+- Endpoint: GET /api/collaboratori/documenti-annuali (anno, uid opz.; admin=tutti, altri=solo se stessi, uid altrui=403), POST/DELETE /api/me/documenti-annuali, POST/DELETE /api/auth/users/{uid}/documenti-annuali (admin).
+- Sicurezza: GET /api/corsi-ivass/{id}/storico ora blocca (403) i non-admin che richiedono lo storico di un altro utente.
+- Bugfix Corsi IVASS: salvataggio corso con Crediti IVASS vuoto -> null (no piu' 422); campo crediti puo' restare vuoto; toast errori gestiscono detail array.
+- Link "Corsi IVASS" dalla checklist naviga a /corsi-ivass?uid=<id> e preseleziona il collaboratore; CorsiIvass limita la selezione ai non-admin al proprio profilo.
+- Testing: backend 14/14 pytest, frontend 100% flussi richiesti (iteration_134.json). Fix aggiuntivi verificati via curl.

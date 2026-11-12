@@ -1,0 +1,47 @@
+{
+  "summary": "Ho testato end-to-end la funzione 'Documenti annuali collaboratori' (backend + frontend). Backend: 14/14 test pytest passati. Coperti: panoramica admin (28 collaboratori, checklist di default con 5 voci), isolamento dei ruoli (collaboratore e dipendente vedono solo sé stessi; uid di un altro utente -> 403; upload admin e PUT config -> 403 per chi non è admin), upload /me e admin, stati Presente/In scadenza/Scaduto, filtro per anno, file vuoto o >10MB -> 400, aggiunta/rimozione di card nella config con chiave custom_* generata, stato IVASS Parziale/Presente in base alle ore, POST corso con crediti_ivass null. Frontend (Playwright): voce in sidebar -> /documenti-collaboratori, selettore anni 2027..2023, ricerca, espansione riga, upload Casellario (Presente + link al file, il PDF viene servito con 200), Carichi con scadenza a 10 giorni (In scadenza), Antiriciclaggio con data passata (Scaduto), eliminazione file, dialog config (aggiunta di TEST_Patente, che compare su tutte le righe con 6 pallini, poi rimossa). Collaboratore e dipendente: solo la propria card, nessuna barra di ricerca né pulsante config, upload e delete passano da /api/me/documenti-annuali. Editor Librerie, tab Certificati: il pannello checklist-annuale-inline funziona (upload, cambio anno, delete, 'Apri vista completa'). Il pulsante 'Corsi IVASS' naviga a /corsi-ivass. Bugfix: salvataggio di un corso con Crediti vuoti -> 201 (niente più 422), e lo stato IVASS diventa 'Parziale · 12/30h'. Tutti i dati di test sono stati rimossi.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "DELETE /api/me/documenti-annuali/{id} e DELETE /api/auth/users/{uid}/documenti-annuali/{id}", "issue": "Restituisce sempre 200 {ok:true} anche quando il documento non esiste (manca il 404 basato su modified_count). Inoltre il file resta nell'object storage (blob orfano)."},
+      {"endpoint": "POST /api/me/documenti-annuali e /api/auth/users/{uid}/documenti-annuali", "issue": "Nessuna validazione lato server del tipo di file (accetta qualsiasi content-type/estensione) e nessuna validazione che req_key esista nella checklist o che anno sia un anno valido."},
+      {"endpoint": "GET /api/corsi-ivass/{collaboratore_id}/storico (preesistente)", "issue": "Un collaboratore può leggere lo storico dei corsi IVASS di QUALSIASI utente (testato: collaboratore legge lo storico dell'admin -> 200). Contraddice il requisito 'il collaboratore vede SOLO i propri'. Va aggiunto un controllo di ownership per i ruoli non admin."},
+      {"endpoint": "POST /api/corsi-ivass (preesistente)", "issue": "Richiede require_user('admin','collaboratore'): il dipendente, che ha la voce IVASS nella sua checklist, non può registrare i corsi."},
+      {"endpoint": "GET /api/collaboratori/documenti-annuali", "issue": "N+1: una query corsi_ivass per ogni utente. Va bene con 28 utenti, ma conviene fare un'aggregazione unica per molti utenti."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "CollabCard - pulsante Corsi IVASS", "issue": "navigate('/corsi-ivass') non passa l'id del collaboratore: la pagina IVASS si apre sul primo collaboratore della lista (es. 'Mario Dipendente') e non su quello cliccato. Va passato ?uid= o uno state e preselezionato in CorsiIvass.", "selector": "[data-testid^=ivass-open-]", "priority": "MEDIUM"},
+      {"component": "CorsiIvass NuovoCorsoDialog", "issue": "onChange di crediti_ivass usa parseFloat(...) || 0: se l'utente tocca il campo e lo svuota, il valore diventa 0 (non null). Il campo non può tornare vuoto, cosa poco coerente con il bugfix. Inoltre toast.error(e.response.data.detail) con un detail 422 di tipo array può mandare in crash il rendering.", "selector": "CorsiIvass.jsx ~L229", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Editor Librerie, tab Certificati", "issue": "La checklist annuale legge solo users.documenti_collab: i certificati inseriti nella tabella certificati_collab dello stesso tab (es. 'Casellario giudiziale 2025' esistente) non vengono contati, quindi l'utente vede il certificato ma la checklist 2025 dice 'Mancante'. Anche gli upload dalla checklist inline non aggiornano la lista 'Documenti personali' sottostante (state f.documenti_collab non aggiornato) finché l'editor non viene riaperto.", "affected_selectors": ["[data-testid=checklist-annuale-inline]"]}
+    ],
+    "design_issues": [
+      {"screen": "/documenti-collaboratori panoramica admin", "issues": ["I pallini di stato 'Mancante' usano bg-rose-50 (e Facoltativo bg-slate-100) su sfondo bianco: quasi invisibili, quindi la panoramica non distingue a colpo d'occhio. Usare colori pieni (es. bg-rose-500/bg-amber-400/bg-emerald-500)."]},
+      {"screen": "Librerie > Utenti/Collaboratori", "issue_note": "", "issues": ["La tabella Utenti mostra 4 elementi mentre /documenti-collaboratori ne mostra 28 (utenti importati/senza accesso). Non è un bug in sé, ma può confondere: valutare un filtro o una nota."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter134_documenti_annuali_collab.py", "/app/test_reports/pytest/pytest_iter134.xml"],
+  "action_items": [
+    "Passare il collaboratore selezionato da CollabCard 'Corsi IVASS' a /corsi-ivass (query param) e preselezionarlo",
+    "Aggiungere un controllo di ownership a GET /api/corsi-ivass/{id}/storico per i ruoli non admin (e limitare il selettore collaboratori in CorsiIvass per collaboratore/dipendente)",
+    "Rendere i pallini di stato più visibili (colori pieni)",
+    "Opzionale: considerare certificati_collab (tipologia+anno) nella checklist, oppure unificare; aggiornare lo state dell'editor dopo un upload inline",
+    "Opzionale: 404 nelle DELETE quando il documento non esiste; validare il tipo di file e req_key lato server",
+    "Opzionale: crediti_ivass onChange -> '' quando il campo è vuoto invece di 0"
+  ],
+  "critical_code_review_comments": [
+    "server.py ha ~21000 righe: la nuova sezione documenti annuali (~200 righe) andrebbe spostata in routes/",
+    "put_config_documenti_annuali accetta un body: dict non tipizzato; meglio un modello Pydantic",
+    "Rimuovere una card dalla config lascia orfani i documenti con quel req_key (non più visibili da nessuna parte)",
+    "Upload e delete non hanno try/catch su doDelete nel frontend: se la DELETE fallisce, l'errore non viene gestito"
+  ],
+  "updated_files": ["/app/backend/tests/test_iter134_documenti_annuali_collab.py"],
+  "success_rate": {"backend": "100% (14/14)", "frontend": "100% dei flussi richiesti funzionanti; 1 problema UX di media priorità (il link IVASS non preseleziona il collaboratore)"},
+  "seed_data_creation": "Nessun seed. Creati e poi eliminati: documenti TEST_doc.pdf (collaboratore, dipendente), corsi TEST_corso/TEST_Corso UI, card config TEST_Patente. La config checklist è stata ripristinata alle 5 voci di default (ora persistita esplicitamente in azienda_config.doc_annuali_collab, con contenuto identico al default).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Collaboratore Sara id 3286874c-dd5d-488c-ab73-d35d434290d2. Nel preview la data odierna è 2026-11-12. Editor Librerie: tab lib-tab-utenti -> kebab dell'ultima cella della riga -> menuitem 'Modifica' -> tab-certificati. Il test pytest test_iter134 ripulisce da solo i propri dati."
+}

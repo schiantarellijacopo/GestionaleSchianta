@@ -3,6 +3,8 @@
  * grafico 30 ore annuali (obbligo formativo IVASS).
  */
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { api } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,6 +18,9 @@ import { GraduationCap, Upload, Sparkles, Trash2, Plus, TrendingUp } from "lucid
 import { toast } from "sonner";
 
 export default function CorsiIvass() {
+    const { user } = useAuth();
+    const [searchParams] = useSearchParams();
+    const isAdmin = user?.role === "admin";
     const [collaboratori, setCollaboratori] = useState([]);
     const [selected, setSelected] = useState("");
     const [anno, setAnno] = useState(new Date().getFullYear());
@@ -24,12 +29,16 @@ export default function CorsiIvass() {
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => {
-            const arr = (r.data || []).filter((u) => ["collaboratore", "dipendente", "admin"].includes(u.role));
+            let arr = (r.data || []).filter((u) => ["collaboratore", "dipendente", "admin"].includes(u.role));
+            if (!isAdmin && user?.id) arr = arr.filter((u) => u.id === user.id);
             setCollaboratori(arr);
-            if (arr.length && !selected) setSelected(arr[0].id);
+            const wanted = searchParams.get("uid");
+            if (wanted && arr.some((u) => u.id === wanted)) setSelected(wanted);
+            else if (!isAdmin && user?.id) setSelected(user.id);
+            else if (arr.length) setSelected((prev) => prev || arr[0].id);
         });
     /* eslint-disable-next-line */
-    }, []);
+    }, [user]);
 
     const load = () => {
         if (!selected) return;
@@ -167,6 +176,11 @@ function NuovoCorsoDialog({ collaboratore_id, onClose }) {
     const [f, setF] = useState({ titolo_corso: "", ente: "", data_corso: "", ore_riconosciute: 0, crediti_ivass: "", note: "" });
     const [busy, setBusy] = useState(false);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const errMsg = (e, fb) => {
+        const d = e.response?.data?.detail;
+        if (Array.isArray(d)) return d[0]?.msg || fb;
+        return (typeof d === "string" && d) || fb;
+    };
 
     const ocrPick = async (e) => {
         const file = e.target.files?.[0]; if (!file) return;
@@ -184,7 +198,7 @@ function NuovoCorsoDialog({ collaboratore_id, onClose }) {
                 crediti_ivass: d.crediti_ivass || p.crediti_ivass,
             }));
             toast.success(`OCR · confidenza ${d.confidenza || "n/d"}`);
-        } catch (err) { toast.error(err.response?.data?.detail || "Errore OCR"); }
+        } catch (err) { toast.error(errMsg(err, "Errore OCR")); }
         finally { setBusy(false); e.target.value = ""; }
     };
 
@@ -201,7 +215,7 @@ function NuovoCorsoDialog({ collaboratore_id, onClose }) {
                 collaboratore_id,
             });
             toast.success("Corso registrato"); onClose();
-        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+        } catch (e) { toast.error(errMsg(e, "Errore")); }
     };
 
     return (
@@ -226,7 +240,7 @@ function NuovoCorsoDialog({ collaboratore_id, onClose }) {
                             onChange={(e) => set("ore_riconosciute", parseFloat(e.target.value) || 0)} /></div>
                     <div><Label className="text-xs">Crediti IVASS</Label>
                         <Input type="number" step="0.5" value={f.crediti_ivass}
-                            onChange={(e) => set("crediti_ivass", parseFloat(e.target.value) || 0)} /></div>
+                            onChange={(e) => set("crediti_ivass", e.target.value === "" ? "" : parseFloat(e.target.value))} /></div>
                     <div className="col-span-2"><Label className="text-xs">Note</Label>
                         <Textarea rows={2} value={f.note} onChange={(e) => set("note", e.target.value)} /></div>
                 </div>

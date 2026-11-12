@@ -143,7 +143,8 @@ export function CollabCard({ collab, anno, canUpload, isAdmin, onChanged }) {
                                             className="text-sky-700 hover:underline max-w-[160px] truncate"
                                             data-testid={`file-link-${f.id}`}>{f.nome_file || "documento"}</a>
                                         {f.data_scadenza && <span className="text-slate-400">· scad. {f.data_scadenza}</span>}
-                                        {canUpload && (
+                                        {f.source === "cert" && <span className="text-[9px] text-violet-500 font-semibold">da Certificati</span>}
+                                        {canUpload && f.source !== "cert" && (
                                             <button onClick={() => doDelete(f.id)} className="text-rose-500 hover:text-rose-700" data-testid={`file-del-${f.id}`}>
                                                 <Trash2 size={11} />
                                             </button>
@@ -156,7 +157,7 @@ export function CollabCard({ collab, anno, canUpload, isAdmin, onChanged }) {
                     <div className="shrink-0">
                         {item.is_ivass ? (
                             <Button size="sm" variant="outline" className="h-7 text-xs"
-                                onClick={() => navigate("/corsi-ivass")} data-testid={`ivass-open-${collab.id}`}>
+                                onClick={() => navigate(`/corsi-ivass?uid=${collab.id}`)} data-testid={`ivass-open-${collab.id}`}>
                                 <GraduationCap size={13} className="mr-1" /> Corsi IVASS
                             </Button>
                         ) : canUpload ? (

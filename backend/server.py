@@ -17105,6 +17105,7 @@ def _stato_item_annuale(user_docs: list, item: dict, anno, ore_ivass: float) -> 
                 "is_ivass": True, "stato": stato, "ore_ivass": round(ore_ivass, 2), "obiettivo": 30, "files": []}
     docs = [d for d in user_docs if _doc_match_item(d, item) and _anno_doc(d) == anno_s]
     files = [{"id": d.get("id"), "url": d.get("url"), "nome_file": d.get("nome_file"),
+              "source": d.get("_src", "doc"),
               "data_rilascio": d.get("data_rilascio"), "data_scadenza": d.get("data_scadenza")} for d in docs]
     stato = "mancante" if item.get("obbligatorio", True) else "assente"
     if docs:
@@ -17131,7 +17132,8 @@ async def _ore_ivass_anno(uid: str, anno) -> float:
 
 
 async def _build_collab_annuale(u: dict, checklist: list, anno) -> dict:
-    docs = u.get("documenti_collab") or []
+    docs = [{**d, "_src": "doc"} for d in (u.get("documenti_collab") or [])]
+    docs += [{**c, "_src": "cert"} for c in (u.get("certificati_collab") or [])]
     ore = await _ore_ivass_anno(u["id"], anno)
     items = [_stato_item_annuale(docs, it, anno, ore) for it in checklist]
     mancanti = sum(1 for i in items if i["stato"] in ("mancante", "scaduto"))
@@ -17155,7 +17157,7 @@ async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str
         q = {"role": {"$in": _RUOLI_COLLAB}, "attivo": {"$ne": False}}
     else:
         q = {"id": uid or user.get("id")}
-    proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "documenti_collab": 1}
+    proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "documenti_collab": 1, "certificati_collab": 1}
     users = await db.users.find(q, proj).to_list(2000)
     out = [await _build_collab_annuale(u, checklist, anno) for u in users]
     out.sort(key=lambda x: (x["name"] or "").lower())

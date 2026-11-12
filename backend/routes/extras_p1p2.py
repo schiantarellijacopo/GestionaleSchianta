@@ -1240,6 +1240,8 @@ async def storico_corsi(
     user=Depends(current_user),
 ) -> dict:
     """Storico corsi + totale ore IVASS dell'anno (obiettivo 30h annuali)."""
+    if user.get("role") != "admin" and collaboratore_id != user.get("id"):
+        raise HTTPException(403, "Puoi consultare solo i tuoi corsi IVASS")
     flt = {"collaboratore_id": collaboratore_id}
     if anno:
         flt["data_corso"] = {"$gte": f"{anno}-01-01", "$lte": f"{anno}-12-31"}
