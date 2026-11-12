@@ -1,5 +1,11 @@
 # Changelog — Axicura CRM
 
+## 2026-11-12 — Documenti collaboratori: isolamento per tenant
+- **Bug**: la sezione "Documenti collaboratori" (Librerie → documenti annuali) elencava i collaboratori di TUTTI i tenant, perché la collezione `users` è condivisa (non tenant-scoped) e l'endpoint non filtrava per agenzia.
+- **Fix** (`server.py` · `GET /api/collaboratori/documenti-annuali`): la query admin ora filtra `is_super_admin != True` e `agenzia_tenant_id == user_tenant_id(user)`, come `GET /auth/users`. Il super-admin continua a vedere tutti i tenant.
+- **Verifica**: admin tenant-principale ora vede 4 collaboratori del proprio tenant (prima comparivano anche utenti di altri tenant).
+
+
 ## 2026-11-12 — Documenti veicolo (libro matricola): card per categoria + routing Drive/inbox corretto
 - **Richiesta utente**: nel modale "Documenti veicolo" i documenti non venivano mostrati DENTRO le card (come nelle altre sezioni) e i file smistati da Drive/inbox (libretto, quietanze…) finivano in "altro" invece che nella card giusta.
 - **Frontend** (`components/LibroMatricolaTab.jsx` · `DocsAppDialog`, `pages/LibroMatricolaPage.jsx` · `DocsApplicazioneDialog`): il modale ora usa `layout="quadrotti"` di `DocumentiSezioneSplit` con chiavi categoria canoniche (`libretto_veicolo, quietanza, atto_vendita, polizza, condizioni, appendici, mup, questionario, regolazione, preventivo, appunti, altri`). I file sono mostrati dentro ogni card, come in PolizzaDetail.

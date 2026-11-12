@@ -17154,7 +17154,12 @@ async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str
     if uid and not is_admin and uid != user.get("id"):
         raise HTTPException(403, "Permesso negato")
     if is_admin and not uid:
-        q = {"role": {"$in": _RUOLI_COLLAB}, "attivo": {"$ne": False}}
+        from tenant import user_tenant_id
+        _tid = user_tenant_id(user)
+        q = {"role": {"$in": _RUOLI_COLLAB}, "attivo": {"$ne": False},
+             "is_super_admin": {"$ne": True}}
+        if _tid:
+            q["agenzia_tenant_id"] = _tid
     else:
         q = {"id": uid or user.get("id")}
     proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "documenti_collab": 1, "certificati_collab": 1}
