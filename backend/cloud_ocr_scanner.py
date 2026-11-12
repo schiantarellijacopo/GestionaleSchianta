@@ -99,15 +99,64 @@ INBOX_SUBFOLDERS_TO_CREATE = [
 
 
 def _norm_folder_key(name: str) -> str:
-    """Normalizza un nome cartella per il match nella mappa (lower, no accenti extra)."""
-    return (name or "").strip().lower().replace("_", " ")
+    """Normalizza un nome cartella per il match nella mappa.
+    Robusto a maiuscole, underscore, punti, accenti e apostrofi (dritti o
+    tipografici), così 'Carta d'Identità', 'CARTA D_IDENTITA', 'carta didentita'
+    corrispondono tutti alla stessa chiave."""
+    import unicodedata
+    s = (name or "").strip().lower().replace("_", " ")
+    # rimuovi accenti (à→a, è→e, ...)
+    s = "".join(c for c in unicodedata.normalize("NFD", s)
+                if unicodedata.category(c) != "Mn")
+    # rimuovi apostrofi (dritto e tipografico), backtick e punti
+    for ch in ("'", "\u2019", "\u02bc", "`", "."):
+        s = s.replace(ch, "")
+    # comprimi spazi multipli
+    return " ".join(s.split())
+
+
+# Mappa normalizzata una volta sola: le chiavi canoniche sopra passate per
+# _norm_folder_key così il confronto è accent/apostrofo-insensitive.
+_INBOX_SUBFOLDERS_MAP_NORM = {
+    _norm_folder_key(k): v for k, v in INBOX_SUBFOLDERS_MAP.items()
+}
 
 
 def hint_from_folder_name(folder_name: Optional[str]) -> Optional[str]:
     """Ritorna il tipo_documento se il nome cartella è mappato, altrimenti None."""
     if not folder_name:
         return None
-    return INBOX_SUBFOLDERS_MAP.get(_norm_folder_key(folder_name))
+    return _INBOX_SUBFOLDERS_MAP_NORM.get(_norm_folder_key(folder_name))
+
+
+# Regole deterministiche nome-file → tipo_documento. Usate come FALLBACK quando
+# il classificatore AI è incerto (tipo 'altro' o confidenza bassa), così un file
+# chiaramente nominato (es. 'C.I. ROSSI MARIO.pdf') viene comunque instradato.
+_FILENAME_TIPO_RULES = [
+    ("patente",                 ("patent", "driving")),
+    ("passaporto",              ("passaport", "passport")),
+    ("libretto_circolazione",   ("libretto", "carta circ", "carta_circ", "circolazione")),
+    ("visura_camerale",         ("visura", "camerale", "cciaa")),
+    ("polizza_frontespizio",    ("polizza", "frontespizio", "contratto assic")),
+    ("quietanza",               ("quietanza", "ricevut")),
+    ("denuncia_sinistro",       ("sinistro", "denuncia", "cai ", "cai_")),
+    ("estratto_conto_compagnia",("estratto conto", "estratto_conto")),
+    ("bonifico",                ("bonifico", "sepa")),
+    ("privacy",                 ("privacy", "gdpr", "consenso")),
+    ("codice_fiscale",          ("codice fiscale", "codice_fisc", "tesserino")),
+    # carta d'identità per ultima: keyword generiche ('ci', 'cie') meno specifiche
+    ("carta_identita",          ("c.i.", "c.i ", "ci.", "carta ident", "carta_ident",
+                                 "cartaident", "carta didentita", "identita", "cie")),
+]
+
+
+def _tipo_from_filename(filename: str) -> Optional[str]:
+    """Deduce il tipo_documento da segnali forti nel nome file (fallback)."""
+    fl = (filename or "").lower()
+    for tipo, kws in _FILENAME_TIPO_RULES:
+        if any(k in fl for k in kws):
+            return tipo
+    return None
 
 
 # ============================================================
@@ -363,6 +412,14 @@ async def _classify_document(file_bytes: bytes, mime: str, filename: str = "") -
     parsed.setdefault("tipo_documento", "altro")
     parsed.setdefault("confidenza", "bassa")
     parsed.setdefault("dati_estratti", {})
+    # Fallback deterministico: se l'AI è incerta ma il nome file è chiaro, forza il tipo.
+    if parsed.get("tipo_documento") in ("altro", "", None) or parsed.get("confidenza") == "bassa":
+        ft = _tipo_from_filename(filename)
+        if ft:
+            parsed["tipo_documento"] = ft
+            if parsed.get("confidenza") == "bassa":
+                parsed["confidenza"] = "media"
+            parsed["tipo_source"] = "filename_fallback"
     return parsed
 
 

@@ -385,7 +385,7 @@ _FN_TIPO_KEYWORDS = [
     ("tessera_sanitaria", ("TESSERA SANITARIA", "SANITARIA")),
     ("visura_camerale", ("VISURA",)),
     ("mandato_sdd", ("MANDATO", "SDD")),
-    ("carta_identita", ("CARTA IDENTITA", "CARTA D'IDENTITA", "IDENTITA")),
+    ("carta_identita", ("CARTA IDENTITA", "CARTA D'IDENTITA", "IDENTITA", "C.I.", "C.I ", "CI.")),
     ("cid", ("CID", "CONSTATAZIONE")),
     ("fattura", ("FATTURA",)),
 ]

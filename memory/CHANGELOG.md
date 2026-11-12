@@ -1074,3 +1074,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Backend: estratto `_retry_one_pending()`; nuovi endpoint `GET /documenti-inbox/pending-ids` e `POST /documenti-inbox/{iid}/retry-auto-archive` (singolo doc). Bulk retry invariato nel comportamento.
 - Frontend (DocumentiInbox.jsx): "Riprova auto-archivio" ora riprocessa i pending UNO alla volta; ogni card mostra la barra OcrProgressBar mentre viene elaborata, poi esito (Archiviato / Nessun abbinamento / Errore).
 - Le card pending ("Da rivedere") sono ordinate in alto, i documenti salvati sotto.
+
+## 2026-11-12 — Fix routing OCR: "C.I." finiva in "Altri documenti"
+- cloud_ocr_scanner.py: `_norm_folder_key` reso robusto ad accenti/apostrofi (dritti e tipografici) e punti → il nome cartella Drive "Carta d'Identità" ora matcha sempre l'hint carta_identita (prima falliva con apostrofo tipografico o accento).
+- Aggiunto fallback deterministico filename→tipo in `_classify_document`: se l'AI è incerta (tipo 'altro'/confidenza bassa) ma il nome file è chiaro (es. "C.I. ...", "patente", "polizza"), il tipo viene forzato.
+- documenti_inbox.py: `_guess_tipo_from_filename` ora riconosce anche il prefisso "C.I.".
+- Testato a livello unitario (hint_from_folder_name + _tipo_from_filename + _guess_tipo_from_filename). E2e Drive-scan non riproducibile in preview (dati in produzione + connessione Drive live).
