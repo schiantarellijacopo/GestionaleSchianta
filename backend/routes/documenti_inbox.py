@@ -62,9 +62,12 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
     "telaio": "VIN 17 caratteri o null",
     "marca": "MAIUSCOLO o null",
     "modello": "MAIUSCOLO o null",
-    // SE polizza:
-    "numero_polizza": "stringa o null",
-    "compagnia": "MAIUSCOLO o null",
+    // SE polizza / libretto / quietanza / appendice / condizioni / mup / questionario / preventivo:
+    "numero_polizza": "numero del CONTRATTO/polizza (NON la P.IVA della compagnia) o null",
+    "compagnia": "ragione sociale della COMPAGNIA assicuratrice (es. GROUPAMA, CATTOLICA, UNIPOL) MAIUSCOLO o null",
+    "contraente_cognome": "COGNOME del CONTRAENTE/assicurato persona fisica (MAI la compagnia) o null",
+    "contraente_nome": "NOME del CONTRAENTE/assicurato persona fisica o null",
+    "contraente_ragione_sociale": "ragione sociale del CONTRAENTE se è un'azienda (MAI la compagnia assicuratrice) o null",
     "premio_lordo": "numero decimale o null",
     "decorrenza": "YYYY-MM-DD o null",
     "scadenza": "YYYY-MM-DD o null",
@@ -79,6 +82,11 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
 REGOLE:
 - Restituisci null per i campi non leggibili o non pertinenti
 - Date sempre YYYY-MM-DD
+- POLIZZE/QUIETANZE/APPENDICI/LIBRETTI: distingui SEMPRE la COMPAGNIA assicuratrice
+  (es. GROUPAMA, CATTOLICA, UNIPOL, ALLIANZ…) dal CONTRAENTE (il cliente assicurato).
+  NON mettere MAI il nome della compagnia nei campi cognome/nome/contraente_*.
+  Il campo "compagnia" è l'assicuratore; i campi "contraente_*" sono la persona/azienda
+  assicurata. Non usare la Partita IVA della compagnia come numero_polizza.
 - Per la CARTA D'IDENTITÀ italiana (anche elettronica CIE): l'immagine può contenere FRONTE e RETRO impilati.
   Cerca in TUTTO il documento (anche nella parte bassa/retro):
   * "COMUNE DI EMISSIONE" / "COMUNE DI" / "MUNICIPALITY" → campo comune_emissione (es. TIRANO)
@@ -278,6 +286,132 @@ async def ocr_veicolo(
 
 
 
+_PLATE_RX = re.compile(r"\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2})\b")
+_FN_STOPWORDS = {
+    "LIBRETTO", "POLIZZA", "POLIZZE", "QUIETANZA", "APPENDICE", "CONDIZIONI",
+    "MUP", "CID", "PATENTE", "CARTA", "IDENTITA", "IDENTITÀ", "FATTURA",
+    "PREVENTIVO", "QUESTIONARIO", "ATTO", "VENDITA", "PASSAPORTO", "TESSERA",
+    "SANITARIA", "VISURA", "CAMERALE", "MANDATO", "SDD", "PDF", "DOC", "SCAN",
+    "COPIA", "DOCUMENTO", "ALLEGATO",
+}
+
+
+def _guess_from_filename(filename: str) -> dict:
+    """Estrae dal NOME FILE indizi utili: numero polizza, targa e nome cliente.
+    I file Omnia hanno tipicamente la forma '117264695 - ANGELINI ANNAMARIA.pdf'
+    oppure 'LIBRETTO FR798LT.pdf'."""
+    out = {"numero_polizza": None, "targa": None, "nome": None}
+    if not filename:
+        return out
+    base = filename.rsplit(".", 1)[0]
+    up = base.upper().replace("-", " ").replace("_", " ")
+    m = _PLATE_RX.search(up)
+    if m:
+        out["targa"] = m.group(1).replace(" ", "")
+    mnum = re.search(r"\d{5,}", base)
+    if mnum:
+        out["numero_polizza"] = mnum.group(0)
+    txt = re.sub(r"\d{5,}", " ", base)
+    for sep in ("–", "-", "_", "·", "|", ","):
+        txt = txt.replace(sep, " ")
+    toks = []
+    for t in re.split(r"\s+", txt.strip()):
+        tu = t.strip().upper()
+        if not tu or tu in _FN_STOPWORDS:
+            continue
+        if re.fullmatch(r"[A-Z]{2}\d{3}[A-Z]{2}", tu):  # targa
+            continue
+        if not re.search(r"[A-Za-zÀ-ÿ]", tu):  # scarta token senza lettere
+            continue
+        toks.append(t.strip())
+    if toks:
+        out["nome"] = " ".join(toks).strip()
+    return out
+
+
+async def _match_anag_by_name(name: str):
+    """Trova un'anagrafica per nome testuale (ragione_sociale o cognome+nome)."""
+    name = (name or "").strip()
+    if len(name) < 3:
+        return None
+    proj = {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1}
+    a = await db.anagrafiche.find_one(
+        {"ragione_sociale": {"$regex": re.escape(name), "$options": "i"}}, proj)
+    if a:
+        return a
+    toks = name.split()
+    if len(toks) >= 2:
+        for cog, nom in ((toks[0], " ".join(toks[1:])), (toks[-1], " ".join(toks[:-1]))):
+            a = await db.anagrafiche.find_one(
+                {"cognome": {"$regex": f"^{re.escape(cog)}$", "$options": "i"},
+                 "nome": {"$regex": f"^{re.escape(nom)}$", "$options": "i"}}, proj)
+            if a:
+                return a
+    return None
+
+
+async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
+                         existing_a: dict = None, existing_p: dict = None) -> tuple:
+    """Deduce (anagrafica, polizza) dai dati OCR + nome file.
+    Per i documenti di POLIZZA la fonte autorevole del CLIENTE è il CONTRAENTE
+    della polizza trovata (numero/targa), NON il nome OCR (spesso è la COMPAGNIA)."""
+    dati = dati or {}
+    proj_a = {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1}
+    proj_p = {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1}
+    routed_entita = DOC_ROUTING.get(tipo_documento or "altro", ("anagrafica", "altro"))[0]
+    fn = _guess_from_filename(filename)
+
+    target_a = existing_a if (existing_a or {}).get("id") else None
+    target_p = existing_p if (existing_p or {}).get("id") else None
+
+    # 1) POLIZZA — per numero (OCR o filename), poi per targa (OCR o filename)
+    if not (target_p or {}).get("id"):
+        nump = (dati.get("numero_polizza") or dati.get("numero") or "").strip() or (fn["numero_polizza"] or "")
+        if nump:
+            target_p = await db.polizze.find_one(
+                {"$or": [{"numero_polizza": nump}, {"numero": nump}]}, proj_p)
+        if not (target_p or {}).get("id"):
+            targa = (dati.get("targa") or "").strip().upper() or (fn["targa"] or "")
+            if targa:
+                target_p = await db.polizze.find_one(
+                    {"targa": {"$regex": f"^{re.escape(targa)}$", "$options": "i"}},
+                    proj_p, sort=[("effetto", -1)])
+
+    # 2) ANAGRAFICA
+    # 2a) autorevole: contraente della polizza trovata
+    if not (target_a or {}).get("id") and (target_p or {}).get("contraente_id"):
+        target_a = await db.anagrafiche.find_one({"id": target_p["contraente_id"]}, proj_a)
+    # 2b) per codice fiscale
+    if not (target_a or {}).get("id"):
+        cf = (dati.get("codice_fiscale") or "").upper().strip()
+        if cf:
+            target_a = await db.anagrafiche.find_one({"codice_fiscale": cf}, proj_a)
+    # 2c) cognome+nome OCR SOLO per documenti anagrafici (CI, patente…); per le
+    #     polizze NON ci si fida del cognome OCR (è spesso la compagnia).
+    if not (target_a or {}).get("id") and routed_entita == "anagrafica":
+        cog = (dati.get("cognome") or "").strip(); nom = (dati.get("nome") or "").strip()
+        if cog and nom:
+            target_a = await db.anagrafiche.find_one(
+                {"cognome": {"$regex": f"^{re.escape(cog)}$", "$options": "i"},
+                 "nome": {"$regex": f"^{re.escape(nom)}$", "$options": "i"}}, proj_a)
+    # 2d) contraente esplicito estratto dalla polizza
+    if not (target_a or {}).get("id"):
+        cog = (dati.get("contraente_cognome") or "").strip()
+        nom = (dati.get("contraente_nome") or "").strip()
+        rs = (dati.get("contraente_ragione_sociale") or "").strip()
+        if cog and nom:
+            target_a = await db.anagrafiche.find_one(
+                {"cognome": {"$regex": f"^{re.escape(cog)}$", "$options": "i"},
+                 "nome": {"$regex": f"^{re.escape(nom)}$", "$options": "i"}}, proj_a)
+        if not (target_a or {}).get("id") and rs:
+            target_a = await _match_anag_by_name(rs)
+    # 2e) nome dedotto dal filename
+    if not (target_a or {}).get("id") and fn["nome"]:
+        target_a = await _match_anag_by_name(fn["nome"])
+
+    return (target_a or None), (target_p or None)
+
+
 @router.post("/documenti-inbox/analyze")
 async def analizza_documento(
     file: UploadFile = File(...),
@@ -301,45 +435,11 @@ async def analizza_documento(
         raise HTTPException(400, "Formato non supportato (PDF/JPG/PNG/WEBP)")
     result = await _ocr_classifica(img_bytes, img_ct)
 
-    # Inferenza target: se troviamo CF nei dati → ricerca anagrafica
+    # Inferenza target: polizza (per numero/targa/filename) + anagrafica autorevole
+    # (il CONTRAENTE della polizza, non il nome OCR che spesso è la COMPAGNIA).
     dati = result.get("dati") or {}
-    target_anagrafica = None
-    cf = (dati.get("codice_fiscale") or "").upper()
-    if cf:
-        anag = await db.anagrafiche.find_one(
-            {"codice_fiscale": cf},
-            {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
-        )
-        if anag:
-            target_anagrafica = anag
-    # Fallback: cerca per cognome + nome se non trovato per CF
-    if not target_anagrafica and dati.get("cognome") and dati.get("nome"):
-        anag = await db.anagrafiche.find_one(
-            {"cognome": {"$regex": f"^{re.escape(dati['cognome'])}$", "$options": "i"},
-             "nome": {"$regex": f"^{re.escape(dati['nome'])}$", "$options": "i"}},
-            {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
-        )
-        if anag:
-            target_anagrafica = anag
-
-    # Polizza: ricerca per numero (numero_polizza o numero)
-    target_polizza = None
-    nump = (dati.get("numero_polizza") or "").strip()
-    if nump:
-        pol = await db.polizze.find_one(
-            {"$or": [{"numero_polizza": nump}, {"numero": nump}]},
-            {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1},
-        )
-        if pol:
-            target_polizza = pol
-            # Se non c'è anagrafica ma la polizza ha un contraente, usa quello
-            if not target_anagrafica and pol.get("contraente_id"):
-                anag = await db.anagrafiche.find_one(
-                    {"id": pol["contraente_id"]},
-                    {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1},
-                )
-                if anag:
-                    target_anagrafica = anag
+    target_anagrafica, target_polizza = await _infer_targets(
+        dati, file.filename, result.get("tipo_documento"))
 
     # Salva temp nell'inbox (con il file binario in storage)
     inbox_id = str(uuid.uuid4())
@@ -736,55 +836,12 @@ async def elimina_inbox(
 
 
 async def _rematch_pending_targets(inb: dict) -> tuple:
-    """Ri-cerca anagrafica/polizza nel DB ATTUALE usando i dati OCR salvati.
-    Necessario quando la polizza/anagrafica/targa è stata creata DOPO l'ingest
-    del documento (il primo scan non la trovava e l'aveva lasciata senza target).
-    Ritorna (target_anagrafica | None, target_polizza | None)."""
-    dati = inb.get("dati") or {}
-    target_a = inb.get("target_anagrafica") or None
-    target_p = inb.get("target_polizza") or None
-
-    # Anagrafica: per CF, poi fallback cognome + nome
-    if not (target_a or {}).get("id"):
-        cf = (dati.get("codice_fiscale") or "").upper().strip()
-        if cf:
-            anag = await db.anagrafiche.find_one(
-                {"codice_fiscale": cf},
-                {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
-            if anag:
-                target_a = anag
-        if not (target_a or {}).get("id") and dati.get("cognome") and dati.get("nome"):
-            anag = await db.anagrafiche.find_one(
-                {"cognome": {"$regex": f"^{re.escape(dati['cognome'])}$", "$options": "i"},
-                 "nome": {"$regex": f"^{re.escape(dati['nome'])}$", "$options": "i"}},
-                {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
-            if anag:
-                target_a = anag
-
-    # Polizza: per numero_polizza/numero, poi per targa
-    if not (target_p or {}).get("id"):
-        nump = (dati.get("numero_polizza") or dati.get("numero") or "").strip()
-        pol = None
-        if nump:
-            pol = await db.polizze.find_one(
-                {"$or": [{"numero_polizza": nump}, {"numero": nump}]},
-                {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1})
-        if not pol:
-            targa = (dati.get("targa") or "").upper().strip()
-            if targa:
-                pol = await db.polizze.find_one(
-                    {"targa": targa},
-                    {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1})
-        if pol:
-            target_p = pol
-            if not (target_a or {}).get("id") and pol.get("contraente_id"):
-                anag = await db.anagrafiche.find_one(
-                    {"id": pol["contraente_id"]},
-                    {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1})
-                if anag:
-                    target_a = anag
-
-    return target_a, target_p
+    """Ri-cerca anagrafica/polizza nel DB ATTUALE usando i dati OCR salvati + nome
+    file. Necessario quando la polizza/anagrafica/targa è stata creata DOPO l'ingest
+    del documento. Ritorna (target_anagrafica | None, target_polizza | None)."""
+    return await _infer_targets(
+        inb.get("dati") or {}, inb.get("filename") or "", inb.get("tipo_documento"),
+        existing_a=inb.get("target_anagrafica"), existing_p=inb.get("target_polizza"))
 
 
 @router.post("/documenti-inbox/retry-auto-archive")

@@ -1005,3 +1005,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Fix: per is_sost crea comunque il titolo (anche premio negativo); salta solo lo zero esatto. New business puro invariato (lordo>0).
 - Testato: sostituente premio -96,50 -> titolo tipo sostituzione, da_incassare, stato_carico validato (visibile nei Titoli).
 - Per recuperare la polizza gia importata in produzione: ri-eseguire lo stesso flusso Omnia (idempotente, anti-doppione) dopo il deploy.
+
+## 2026-11-12 — Inbox documenti: cliente errato (compagnia) + selezione polizza
+- OCR polizze: il prompt ora distingue COMPAGNIA (assicuratore) dal CONTRAENTE (cliente); estrae contraente_cognome/nome/ragione_sociale e NON mette piu la compagnia nel cognome.
+- Nuovo helper _infer_targets (routes/documenti_inbox.py): per i documenti di polizza il cliente autorevole e il CONTRAENTE della polizza (trovata per numero/targa), NON il nome OCR (spesso la compagnia). Aggiunto parsing del NOME FILE (numero polizza, targa, nome cliente) come fallback. Usato sia in /analyze sia in retry-auto-archive.
+- Frontend DocumentiInbox.jsx: selettore Polizza ora ricercabile (numero/targa/cliente), non piu vincolato alla scelta del cliente; selezionando la polizza si auto-compila il cliente.
+- Testato: doc polizza con OCR=GROUPAMA -> cliente ANGELINI via numero da filename; libretto -> polizza per targa; nome-solo da filename -> anagrafica.
+- NB: i documenti pending gia salvati con cliente errato non si auto-correggono; nella modale si puo togliere il cliente (X) e cercare la polizza corretta (auto-compila il cliente). I nuovi scan matchano corretti.

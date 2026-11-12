@@ -300,6 +300,10 @@ function ReviewDialog({ item, onClose }) {
     const [anagOptions, setAnagOptions] = useState([]);
     const [anagLabel, setAnagLabel] = useState(item.target_anagrafica ? (item.target_anagrafica.ragione_sociale || `${item.target_anagrafica.cognome || ""} ${item.target_anagrafica.nome || ""}`) : "");
     const [polOptions, setPolOptions] = useState([]);
+    const [polSearch, setPolSearch] = useState("");
+    const [polSearchOptions, setPolSearchOptions] = useState([]);
+    const [polLabel, setPolLabel] = useState(
+        item.target_polizza ? (item.target_polizza.numero || item.target_polizza.numero_polizza || "") : "");
     const [sinOptions, setSinOptions] = useState([]);
 
     useEffect(() => {
@@ -314,6 +318,26 @@ function ReviewDialog({ item, onClose }) {
             api.get(`/sinistri?contraente_id=${anagId}&limit=50`).then((r) => setSinOptions(r.data)).catch(() => {});
         }
     }, [anagId]);
+
+    useEffect(() => {
+        if (polSearch.trim().length >= 2) {
+            api.get(`/polizze?q=${encodeURIComponent(polSearch.trim())}&limit=20`)
+                .then((r) => setPolSearchOptions(r.data || [])).catch(() => setPolSearchOptions([]));
+        } else {
+            setPolSearchOptions([]);
+        }
+    }, [polSearch]);
+
+    const pickPolizza = (p) => {
+        setPolId(p.id);
+        setPolLabel(p.numero || p.numero_polizza || "");
+        setPolSearch(""); setPolSearchOptions([]);
+        // auto-compila il cliente dal contraente della polizza
+        if (p.contraente_id && !anagId) {
+            setAnagId(p.contraente_id);
+            setAnagLabel(p.contraente_nome || p.contraente || "");
+        }
+    };
 
     const toggle = (k) => setCampi((p) => p.includes(k) ? p.filter((x) => x !== k) : [...p, k]);
 
@@ -414,16 +438,39 @@ function ReviewDialog({ item, onClose }) {
                             )}
                         </div>
 
-                        {/* Polizza — richiesta se entità = polizza */}
-                        {entitaTipo === "polizza" && anagId && (
+                        {/* Polizza — richiesta se entità = polizza. Ricercabile per
+                            numero, targa o cliente; selezionandola compila il cliente. */}
+                        {entitaTipo === "polizza" && (
                             <div>
                                 <Label>Polizza</Label>
-                                <Select value={polId} onValueChange={setPolId}>
-                                    <SelectTrigger data-testid="di-pol-select"><SelectValue placeholder="Seleziona polizza" /></SelectTrigger>
-                                    <SelectContent>
-                                        {polOptions.map((p) => <SelectItem key={p.id} value={p.id}>{p.numero || p.numero_polizza} · {p.ramo}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
+                                {polId ? (
+                                    <div className="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-300 rounded">
+                                        <CheckCircle2 size={14} className="text-emerald-600" />
+                                        <span className="text-sm">{polLabel || `${polId.slice(0, 8)}…`}</span>
+                                        <button onClick={() => { setPolId(""); setPolLabel(""); }} className="ml-auto text-rose-600" data-testid="di-pol-clear"><X size={12} /></button>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <Input value={polSearch} onChange={(e) => setPolSearch(e.target.value)}
+                                            placeholder="Cerca polizza (numero, targa o cliente)..." data-testid="di-pol-search" />
+                                        {(polSearchOptions.length > 0 || (!polSearch && anagId && polOptions.length > 0)) && (
+                                            <div className="border border-slate-200 rounded mt-1 max-h-40 overflow-y-auto">
+                                                {(polSearchOptions.length > 0 ? polSearchOptions : polOptions).map((p) => (
+                                                    <button key={p.id} onClick={() => pickPolizza(p)}
+                                                        className="w-full text-left p-2 hover:bg-slate-50 text-xs border-b border-slate-100" data-testid={`di-pol-opt-${p.id}`}>
+                                                        <span className="font-semibold">{p.numero || p.numero_polizza}</span>
+                                                        {p.ramo ? ` · ${p.ramo}` : ""}
+                                                        {p.targa ? ` · ${p.targa}` : ""}
+                                                        {p.contraente_nome ? ` · ${p.contraente_nome}` : ""}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                        {polSearch.trim().length >= 2 && polSearchOptions.length === 0 && (
+                                            <div className="text-[10px] text-amber-600 mt-1">Nessuna polizza trovata</div>
+                                        )}
+                                    </>
+                                )}
                             </div>
                         )}
 
