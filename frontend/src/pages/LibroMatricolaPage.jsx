@@ -497,13 +497,14 @@ function DocsApplicazioneDialog({ app, onClose }) {
                     entita_id={app.polizza_id}
                     applicazione_matricola_id={app.id}
                     canEdit={true}
+                    layout="quadrotti"
                     titolo={`Documenti del veicolo ${app.targa || app.matricola || ""}`}
-                    sottotitolo="Allega libretto, foto, certificati. Separa visibili al cliente da interni."
+                    sottotitolo="Documenti del veicolo organizzati per categoria. Ogni riquadro mostra i file ad esso collegati."
                     categorie={[
-                        { key: "libretto_circolazione", label: "Libretto", icon: "📕", default_visibile: true },
-                        { key: "foto_veicolo", label: "Foto", icon: "📸", default_visibile: true },
-                        { key: "certificato_proprieta", label: "Cert. proprietà", icon: "📜", default_visibile: false },
-                        { key: "preventivo_riparazione", label: "Preventivo", icon: "🔧", default_visibile: false },
+                        { key: "libretto_veicolo", label: "Libretto veicolo", icon: "📕", default_visibile: true, multiple: true, descrizione: "Libretto di circolazione del veicolo" },
+                        { key: "quietanza", label: "Quietanze", icon: "🧾", default_visibile: true, multiple: true },
+                        { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true },
+                        { key: "altri", label: "Documenti altri (foto)", icon: "🖼️", default_visibile: false, multiple: true },
                     ]}
                 />
             </DialogContent>

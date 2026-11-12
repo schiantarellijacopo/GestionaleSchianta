@@ -1,5 +1,12 @@
 # Changelog — Axicura CRM
 
+## 2026-11-12 — Documenti veicolo (libro matricola): card per categoria + routing Drive/inbox corretto
+- **Richiesta utente**: nel modale "Documenti veicolo" i documenti non venivano mostrati DENTRO le card (come nelle altre sezioni) e i file smistati da Drive/inbox (libretto, quietanze…) finivano in "altro" invece che nella card giusta.
+- **Frontend** (`components/LibroMatricolaTab.jsx` · `DocsAppDialog`, `pages/LibroMatricolaPage.jsx` · `DocsApplicazioneDialog`): il modale ora usa `layout="quadrotti"` di `DocumentiSezioneSplit` con chiavi categoria canoniche (`libretto_veicolo, quietanza, atto_vendita, polizza, condizioni, appendici, mup, questionario, regolazione, preventivo, appunti, altri`). I file sono mostrati dentro ogni card, come in PolizzaDetail.
+- **Backend** (`routes/documenti_inbox.py` · `DOC_ROUTING`): aggiunti alias per i `tipo_documento` prodotti dal cloud OCR scanner — `libretto_circolazione → libretto_veicolo`, `denuncia_sinistro → denuncia`, `privacy → privacy_firmata`, `rid → mandato_sdd`. I nuovi documenti smistati finiscono nella card corretta.
+- **Back-fill idempotente** (`server.py` startup, cross-tenant via `raw_db`): ricategorizza gli allegati già smistati da inbox finiti in `altro`/`altri` leggendo il tipo dalla descrizione `Documenti inbox (<tipo>)`. In preview: 49 allegati ricategorizzati. In produzione viene eseguito automaticamente al prossimo publish/deploy.
+
+
 ## 2026-11-12 — Compagnie: dati anagrafici/fiscali completi + sezione allegati · 4 sezioni spostate in Librerie
 - **Richiesta utente**: (1) nella scheda Compagnie (editor dentro Librerie) poter inserire TUTTI i dati compagnia + una sezione Allegati come per Agenzia Partner; (2) spostare dentro la pagina Librerie le sezioni WhatsApp Agenzie, Agenzie (partner), Setup iniziale, Scambio dati agenzie, rimuovendole dal menù a sinistra.
 - **Backend** (`db_models.py` · modello `Compagnia`): aggiunti campi `indirizzo, cap, citta, provincia, partita_iva, codice_fiscale, iban, pec, note`. POST/PUT `/compagnie` li persistono; allegati via endpoint esistenti `POST/DELETE /compagnie/{cid}/documenti`.

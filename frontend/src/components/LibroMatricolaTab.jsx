@@ -848,14 +848,22 @@ function AnnullaAppDialog({ applicazione, onClose }) {
 
 
 function DocsAppDialog({ polizzaId, applicazione, onClose }) {
-    // Categorie tipiche di documenti per veicolo/applicazione libro matricola
+    // Categorie veicolo/applicazione — chiavi allineate alle card canoniche polizza
+    // così i documenti smistati da Drive/inbox (libretto, quietanza…) finiscono
+    // nella card giusta e sono mostrati DENTRO ogni card (layout quadrotti).
     const categorieVeicolo = [
-        { key: "libretto", label: "Libretto di circolazione", visibile_default: true },
-        { key: "certificato", label: "Certificato assicurativo", visibile_default: true },
-        { key: "quietanza", label: "Quietanza / Ricevuta", visibile_default: true },
-        { key: "foto", label: "Foto veicolo / danni", visibile_default: false },
-        { key: "atto_vendita", label: "Atto di vendita / passaggio", visibile_default: false },
-        { key: "altro", label: "Altro documento veicolo", visibile_default: false },
+        { key: "polizza", label: "Polizza", icon: "📄", default_visibile: true, multiple: true },
+        { key: "condizioni", label: "Condizioni", icon: "📜", default_visibile: true, multiple: true },
+        { key: "appendici", label: "Appendici", icon: "➕", default_visibile: true, multiple: true },
+        { key: "libretto_veicolo", label: "Libretto veicolo", icon: "📕", default_visibile: true, multiple: true, descrizione: "Libretto di circolazione del veicolo" },
+        { key: "atto_vendita", label: "Atto di vendita", icon: "🖊️", default_visibile: true, multiple: true, descrizione: "Atto di vendita / passaggio proprietà" },
+        { key: "quietanza", label: "Quietanze", icon: "🧾", default_visibile: true, multiple: true, descrizione: "Quietanze / ricevute di pagamento" },
+        { key: "mup", label: "MUP", icon: "📋", default_visibile: true, multiple: true },
+        { key: "questionario", label: "Questionario", icon: "🗒️", default_visibile: true, multiple: true },
+        { key: "regolazione", label: "Regolazione", icon: "🧮", default_visibile: false, multiple: true },
+        { key: "preventivo", label: "Preventivi", icon: "📋", default_visibile: false, multiple: true },
+        { key: "appunti", label: "Appunti", icon: "📝", default_visibile: false, multiple: true },
+        { key: "altri", label: "Documenti altri (foto)", icon: "🖼️", default_visibile: false, multiple: true, descrizione: "Foto veicolo / danni e altri documenti" },
     ];
     return (
         <Dialog open onOpenChange={onClose}>
@@ -874,8 +882,10 @@ function DocsAppDialog({ polizzaId, applicazione, onClose }) {
                     entita_tipo="polizza"
                     entita_id={polizzaId}
                     applicazione_matricola_id={applicazione.id}
+                    layout="quadrotti"
                     categorie={categorieVeicolo}
                     titolo={`Veicolo ${applicazione.targa}`}
+                    sottotitolo="Documenti del veicolo organizzati per categoria. Ogni riquadro mostra i file ad esso collegati."
                 />
             </DialogContent>
         </Dialog>

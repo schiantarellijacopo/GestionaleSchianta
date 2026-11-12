@@ -20684,6 +20684,33 @@ async def startup():
     from auth_device_alert import ensure_device_indexes
     await ensure_device_indexes()
 
+    # Back-fill idempotente: ricategorizza gli allegati smistati da Drive/inbox
+    # finiti in 'altro'/'altri' quando il tipo dello scanner non era mappato
+    # (es. libretto_circolazione → libretto_veicolo). Deriva il tipo dalla
+    # descrizione 'Documenti inbox (<tipo>)'. Cross-tenant via raw_db.
+    try:
+        import re as _re
+        from routes.documenti_inbox import DOC_ROUTING as _DOC_ROUTING
+        _rx = _re.compile(r"Documenti inbox \(([^)]+)\)")
+        _cur = raw_db.allegati.find(
+            {"categoria": {"$in": ["altro", "altri", None]},
+             "descrizione": {"$regex": r"^Documenti inbox \("}},
+            {"_id": 0, "id": 1, "descrizione": 1})
+        _n = 0
+        async for _a in _cur:
+            _m = _rx.search(_a.get("descrizione") or "")
+            if not _m:
+                continue
+            _route = _DOC_ROUTING.get(_m.group(1).strip().lower())
+            if not _route or _route[1] in (None, "altro", "altri"):
+                continue
+            await raw_db.allegati.update_one({"id": _a["id"]}, {"$set": {"categoria": _route[1]}})
+            _n += 1
+        if _n:
+            logger.info("Back-fill categorie inbox: %s allegati ricategorizzati", _n)
+    except Exception as _e:
+        logger.warning("Back-fill categorie inbox non riuscito: %s", _e)
+
     # Chiavi AI dal vault super-admin: priorità al pannello Chiavi API.
     # ai_studio_api_key → GEMINI_API_KEY, openai_api_key → OPENAI_API_KEY.
     try:
