@@ -1020,3 +1020,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Auto-archiviazione: un match DETERMINISTICO su polizza (numero/targa) auto-archivia anche a confidenza media/bassa (riduce gli scarti dei libretti). Vale in /analyze e in retry-auto-archive.
 - retry-auto-archive ora ri-matcha e PERSISTE i target per TUTTI i pending polizza/anagrafica (anche bassa confidenza) -> la modale di revisione si pre-compila.
 - Testato: parsing filename (6 casi), match targhe padded/normali/con spazi.
+
+## 2026-11-12 — Inbox polizze: match per CF/P.IVA del contraente
+- OCR polizza: estrae contraente_codice_fiscale e contraente_partita_iva (del CLIENTE, mai della compagnia).
+- _infer_targets: nuovo match anagrafica per CF e P.IVA del contraente (chiavi forti), dopo il contraente della polizza. Per i doc di polizza la P.IVA generica (spesso = compagnia) NON viene usata.
+- Cosi un documento di polizza aggancia il cliente anche se il numero polizza non e ancora nel DB -> meno scarti.
+- Testato: CF contraente, P.IVA contraente, e P.IVA compagnia (correttamente non associata).

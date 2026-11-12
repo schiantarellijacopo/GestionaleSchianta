@@ -68,6 +68,8 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
     "contraente_cognome": "COGNOME del CONTRAENTE/assicurato persona fisica (MAI la compagnia) o null",
     "contraente_nome": "NOME del CONTRAENTE/assicurato persona fisica o null",
     "contraente_ragione_sociale": "ragione sociale del CONTRAENTE se è un'azienda (MAI la compagnia assicuratrice) o null",
+    "contraente_codice_fiscale": "CODICE FISCALE del CONTRAENTE/cliente (16 caratteri persona, MAIUSCOLO) o null",
+    "contraente_partita_iva": "PARTITA IVA del CONTRAENTE/cliente azienda (11 cifre, NON quella della compagnia) o null",
     "premio_lordo": "numero decimale o null",
     "decorrenza": "YYYY-MM-DD o null",
     "scadenza": "YYYY-MM-DD o null",
@@ -92,7 +94,9 @@ REGOLE:
   (es. GROUPAMA, CATTOLICA, UNIPOL, ALLIANZ…) dal CONTRAENTE (il cliente assicurato).
   NON mettere MAI il nome della compagnia nei campi cognome/nome/contraente_*.
   Il campo "compagnia" è l'assicuratore; i campi "contraente_*" sono la persona/azienda
-  assicurata. Non usare la Partita IVA della compagnia come numero_polizza.
+  assicurata. Non usare la Partita IVA della compagnia come numero_polizza né come
+  contraente_partita_iva: il CODICE FISCALE / P.IVA nei campi contraente_* deve essere
+  SEMPRE quello del CLIENTE assicurato, mai dell'assicuratore.
 - Per la CARTA D'IDENTITÀ italiana (anche elettronica CIE): l'immagine può contenere FRONTE e RETRO impilati.
   Cerca in TUTTO il documento (anche nella parte bassa/retro):
   * "COMUNE DI EMISSIONE" / "COMUNE DI" / "MUNICIPALITY" → campo comune_emissione (es. TIRANO)
@@ -398,11 +402,25 @@ async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
     # 2a) autorevole: contraente della polizza trovata
     if not (target_a or {}).get("id") and (target_p or {}).get("contraente_id"):
         target_a = await db.anagrafiche.find_one({"id": target_p["contraente_id"]}, proj_a)
-    # 2b) per codice fiscale
+    # 2b) codice fiscale / partita IVA del CLIENTE (chiavi forti e univoche)
     if not (target_a or {}).get("id"):
-        cf = (dati.get("codice_fiscale") or "").upper().strip()
-        if cf:
+        cf_vals = [v for v in (
+            (dati.get("contraente_codice_fiscale") or "").upper().strip(),
+            (dati.get("codice_fiscale") or "").upper().strip(),
+        ) if v and len(v) >= 11]
+        for cf in cf_vals:
             target_a = await db.anagrafiche.find_one({"codice_fiscale": cf}, proj_a)
+            if target_a:
+                break
+    if not (target_a or {}).get("id"):
+        # per i documenti di polizza NON usare la P.IVA generica (spesso è la compagnia)
+        piva_vals = [(dati.get("contraente_partita_iva") or "").strip()]
+        if routed_entita != "polizza":
+            piva_vals.append((dati.get("partita_iva") or "").strip())
+        for piva in [p for p in piva_vals if p and len(p) >= 8]:
+            target_a = await db.anagrafiche.find_one({"partita_iva": piva}, proj_a)
+            if target_a:
+                break
     # 2c) cognome+nome OCR SOLO per documenti anagrafici (CI, patente…); per le
     #     polizze NON ci si fida del cognome OCR (è spesso la compagnia).
     if not (target_a or {}).get("id") and routed_entita == "anagrafica":
