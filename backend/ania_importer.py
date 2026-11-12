@@ -2020,7 +2020,14 @@ async def _crea_titoli_import(db, polizza_id_map: Dict[str, str],
         if pol.get("stato") in ("annullata", "sostituita", "disdettata"):
             continue
         lordo = float(pol.get("premio_lordo") or 0)
-        if lordo <= 0:
+        # Le SOSTITUZIONI possono avere un premio di conguaglio NEGATIVO (rimborso
+        # / nota di credito): va comunque creato il titolo con l'importo della
+        # polizza. Saltiamo solo il premio esattamente a zero. Per il new business
+        # puro restiamo prudenti: niente titolo se lordo <= 0.
+        if is_sost:
+            if round(lordo, 2) == 0:
+                continue
+        elif lordo <= 0:
             continue
         effetto = (pol.get("effetto") or "")[:10]
         if not effetto:

@@ -999,3 +999,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
   - LIMITE noto: i record gia azzerati in un run precedente (accessori=0) non sono recuperabili (importo perso); il premio resta quello attuale.
 - **Conferma #2**: import Omnia NON importa accessori/diritti (forzati a 0 in ania_importer).
 - **Conferma #3**: import Omnia NON riscrive i titoli validati; crea arretrati solo per polizze nuove/sostituenti in modo idempotente (anti-doppione su effetto); storna solo i da_incassare non coperti delle sostituite.
+
+## 2026-11-12 — Import Omnia: titolo mancante su sostituzione con premio negativo (fix)
+- Causa: _crea_titoli_import saltava i titoli con premio_lordo <= 0. Le sostituzioni con conguaglio NEGATIVO (rimborso, es. -96,50) non generavano il titolo.
+- Fix: per is_sost crea comunque il titolo (anche premio negativo); salta solo lo zero esatto. New business puro invariato (lordo>0).
+- Testato: sostituente premio -96,50 -> titolo tipo sostituzione, da_incassare, stato_carico validato (visibile nei Titoli).
+- Per recuperare la polizza gia importata in produzione: ri-eseguire lo stesso flusso Omnia (idempotente, anti-doppione) dopo il deploy.
