@@ -1050,3 +1050,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 
 ## 2026-11-12 — Sospesi: griglia ottimizzata (gap rimosso)
 - TitoliSospesi.jsx: colonna Cliente resa "greedy" (w-full) per assorbire lo spazio extra; altre colonne whitespace-nowrap/compatte -> eliminato il gap tra Ramo/Targa e Coperto il. Frontend compila.
+
+## 2026-11-12 — Sospesi: riepilogo collaboratore come filtro rapido
+- Righe "Riepilogo per collaboratore" cliccabili: filtrano istantaneamente la tabella sottostante (toggle on/off), con riga attiva evidenziata e link "Mostra tutti".
+- Filtro collaboratore spostato lato CLIENT: il riepilogo e i KPI in alto restano sempre completi (si puo passare da un collaboratore all altro al volo); la tabella e il suo totale riflettono il filtro.
+- Il select "Filtra per collaboratore" e sincronizzato e include l opzione "Senza collaboratore".
+- Backend /titoli/sospesi e /titoli/sospesi-storico: gestito collaboratore_id="__none__" (titoli senza collaboratore) per export/stampa. Verificato via curl.

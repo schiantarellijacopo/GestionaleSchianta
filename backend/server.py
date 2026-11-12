@@ -6025,8 +6025,12 @@ async def titoli_sospesi(
         p = pols.get(t["polizza_id"], {})
         a = anas.get(p.get("contraente_id", ""), {})
         collab_id = p.get("collaboratore_id") or t.get("collaboratore_id")
-        if collaboratore_id and collab_id != collaboratore_id:
-            continue
+        if collaboratore_id:
+            if collaboratore_id == "__none__":
+                if collab_id:
+                    continue
+            elif collab_id != collaboratore_id:
+                continue
         result.append({
             "id": t["id"],
             "polizza_id": t["polizza_id"],
@@ -6087,8 +6091,12 @@ async def titoli_sospesi_storico(
         p = pols.get(t["polizza_id"], {})
         a = anas.get(p.get("contraente_id", ""), {})
         collab_id = p.get("collaboratore_id") or t.get("collaboratore_id")
-        if collaboratore_id and collab_id != collaboratore_id:
-            continue
+        if collaboratore_id:
+            if collaboratore_id == "__none__":
+                if collab_id:
+                    continue
+            elif collab_id != collaboratore_id:
+                continue
         result.append({
             "id": t["id"],
             "polizza_id": t["polizza_id"],

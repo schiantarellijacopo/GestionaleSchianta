@@ -32,10 +32,8 @@ export default function TitoliSospesi() {
     const [dataAl, setDataAl] = useState("");    // filtro data copertura (a)
 
     const load = useCallback(() => {
-        const params = {};
-        if (filtroCollab !== "all") params.collaboratore_id = filtroCollab;
-        api.get("/titoli/sospesi", { params }).then((r) => setItems(r.data));
-    }, [filtroCollab]);
+        api.get("/titoli/sospesi").then((r) => setItems(r.data));
+    }, []);
 
     useEffect(() => {
         api.get("/collaboratori").then((r) => setCollab(r.data));
@@ -46,7 +44,11 @@ export default function TitoliSospesi() {
     // Filtro derivato da URL ?gg_min=N
     const visibleItems = useMemo(() => {
         if (!items) return null;
-        let list = ggMin ? items.filter((t) => (t.giorni_anticipo || 0) >= ggMin) : items;
+        let list = items;
+        if (filtroCollab !== "all") {
+            list = list.filter((t) => filtroCollab === "__none__" ? !t.collaboratore_id : t.collaboratore_id === filtroCollab);
+        }
+        if (ggMin) list = list.filter((t) => (t.giorni_anticipo || 0) >= ggMin);
         if (dataDal) list = list.filter((t) => (t.data_copertura || "") >= dataDal);
         if (dataAl) list = list.filter((t) => (t.data_copertura || "") <= dataAl);
         const term = q.trim().toLowerCase();
@@ -67,7 +69,7 @@ export default function TitoliSospesi() {
             });
         }
         return list;
-    }, [items, ggMin, q, dataDal, dataAl]);
+    }, [items, filtroCollab, ggMin, q, dataDal, dataAl]);
 
     const { sorted: sortedItems, sortKey, dir, toggle } = useTableSort(
         visibleItems || [], null, "asc",
@@ -88,6 +90,15 @@ export default function TitoliSospesi() {
             piuVecchio: arr.reduce((m, t) => Math.max(m, t.giorni_anticipo || 0), 0),
         };
     }, [items]);
+
+    // Totale della vista FILTRATA (tabella sottostante), distinto dai totali globali
+    const totaliVisibili = useMemo(() => {
+        const arr = visibleItems || [];
+        return {
+            count: arr.length,
+            importo: arr.reduce((s, t) => s + (t.importo_da_pagare != null ? t.importo_da_pagare : (t.importo_lordo || 0)), 0),
+        };
+    }, [visibleItems]);
 
     const riepilogoCollab = useMemo(() => {
         const arr = items || [];
@@ -162,8 +173,14 @@ export default function TitoliSospesi() {
 
             {riepilogoCollab.length > 0 && (
                 <Card className="border-slate-200 mb-4 overflow-hidden" data-testid="sospesi-riepilogo-collab">
-                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-600 font-semibold">
-                        Riepilogo per collaboratore
+                    <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-600 font-semibold flex items-center gap-2">
+                        <span>Riepilogo per collaboratore</span>
+                        <span className="normal-case tracking-normal text-slate-400 font-normal">· clicca una riga per filtrare la tabella</span>
+                        {filtroCollab !== "all" && (
+                            <button onClick={() => setFiltroCollab("all")} className="ml-auto normal-case tracking-normal text-sky-600 hover:underline font-medium" data-testid="riep-collab-reset">
+                                Mostra tutti
+                            </button>
+                        )}
                     </div>
                     <table className="tbl w-full">
                         <thead>
@@ -174,13 +191,21 @@ export default function TitoliSospesi() {
                             </tr>
                         </thead>
                         <tbody>
-                            {riepilogoCollab.map((r) => (
-                                <tr key={r.id} data-testid={`riep-collab-${r.id}`}>
-                                    <td className="font-medium">{r.nome}</td>
-                                    <td className="num text-right">{r.count}</td>
-                                    <td className="num text-right font-semibold">{fmtEur(r.importo)}</td>
-                                </tr>
-                            ))}
+                            {riepilogoCollab.map((r) => {
+                                const attivo = filtroCollab === r.id;
+                                return (
+                                    <tr key={r.id} data-testid={`riep-collab-${r.id}`}
+                                        onClick={() => setFiltroCollab(attivo ? "all" : r.id)}
+                                        className={`cursor-pointer transition-colors ${attivo ? "bg-sky-100 hover:bg-sky-100" : "hover:bg-sky-50"}`}
+                                        title={attivo ? "Rimuovi filtro" : `Filtra per ${r.nome}`}>
+                                        <td className={`font-medium ${attivo ? "text-sky-800" : ""}`}>
+                                            {attivo && <span className="mr-1">▸</span>}{r.nome}
+                                        </td>
+                                        <td className="num text-right">{r.count}</td>
+                                        <td className="num text-right font-semibold">{fmtEur(r.importo)}</td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
@@ -211,6 +236,9 @@ export default function TitoliSospesi() {
                         <SelectContent>
                             <SelectItem value="all">Tutti</SelectItem>
                             {collab.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                            {riepilogoCollab.some((r) => r.id === "__none__") && (
+                                <SelectItem value="__none__">— Senza collaboratore —</SelectItem>
+                            )}
                         </SelectContent>
                     </Select>
                 </div>
@@ -350,8 +378,8 @@ export default function TitoliSospesi() {
                         </tbody>
                         <tfoot>
                             <tr className="bg-slate-50 font-semibold">
-                                <td colSpan="9" className="text-right">TOTALE ANTICIPI</td>
-                                <td className="num text-right">{fmtEur(totali.importo)}</td>
+                                <td colSpan="9" className="text-right">TOTALE ANTICIPI{filtroCollab !== "all" ? " (filtro attivo)" : ""}</td>
+                                <td className="num text-right">{fmtEur(totaliVisibili.importo)}</td>
                                 <td className="col-azioni"></td>
                             </tr>
                         </tfoot>
