@@ -52,7 +52,8 @@ function RiassegnaProvvigioniButton({ schema }) {
     );
 }
 
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
+import { CollabCard } from "@/pages/DocumentiAnnualiCollab";
 
 const SECTIONS = [
     { key: "azienda", label: "Azienda", icon: <Building size={14} />, endpoint: "/librerie/azienda" },
@@ -2545,6 +2546,7 @@ function UtenteForm({ section, editing, onClose }) {
                                 { key: "anno", label: "Anno", type: "text" },
                             ]} />
                         <div className="border-t border-slate-200 pt-3">
+                            <ChecklistAnnualeInline userId={editing.id} />
                             <div className="text-xs font-semibold text-slate-600 mb-2">Documenti personali</div>
                             <DocumentiCollaboratore userId={editing.id} user={f} items={f.documenti_collab || []}
                                 onChange={(updates) => Object.entries(updates).forEach(([k, v]) => set(k, v))} />
@@ -3203,6 +3205,40 @@ function docScadenza(dataScadenza) {
     if (giorni <= 30) return { label: `In scadenza (${dmt})`, cls: "bg-amber-100 text-amber-700" };
     return { label: `Scade il ${dmt}`, cls: "bg-slate-100 text-slate-600" };
 }
+
+function ChecklistAnnualeInline({ userId }) {
+    const [anno, setAnno] = useState(new Date().getFullYear());
+    const [collab, setCollab] = useState(null);
+    const navigate = useNavigate();
+    const load = () => api.get("/collaboratori/documenti-annuali", { params: { anno, uid: userId } })
+        .then((r) => setCollab(r.data.collaboratori?.[0] || null)).catch(() => { });
+    useEffect(() => { if (userId) load(); /* eslint-disable-next-line */ }, [anno, userId]);
+    if (!collab) return null;
+    const anni = [1, 0, -1, -2].map((d) => new Date().getFullYear() + d);
+    return (
+        <div className="border border-emerald-100 bg-emerald-50/40 rounded-lg p-3 mb-3" data-testid="checklist-annuale-inline">
+            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
+                <div className="text-xs font-semibold text-emerald-800 flex items-center gap-1.5">
+                    Checklist documenti annuali · {collab.mancanti === 0
+                        ? <span className="text-emerald-600">completa</span>
+                        : <span className="text-rose-600">{collab.mancanti} da sistemare</span>}
+                </div>
+                <div className="flex items-center gap-2">
+                    <select value={anno} onChange={(e) => setAnno(parseInt(e.target.value))}
+                        className="text-xs border rounded px-2 py-1 bg-white" data-testid="inline-anno-sel">
+                        {anni.map((y) => <option key={y} value={y}>{y}</option>)}
+                    </select>
+                    <button onClick={() => navigate("/documenti-collaboratori")}
+                        className="text-xs text-sky-700 hover:underline whitespace-nowrap" data-testid="inline-open-vista">
+                        Apri vista completa →
+                    </button>
+                </div>
+            </div>
+            <CollabCard collab={collab} anno={anno} canUpload isAdmin onChanged={load} />
+        </div>
+    );
+}
+
 
 function DocumentiCollaboratore({ userId, user, items, onChange }) {
     const list = items || [];

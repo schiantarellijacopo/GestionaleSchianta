@@ -24,6 +24,7 @@ import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
 import RegolazionePremio from "@/pages/RegolazionePremio";
 import RegolazionePublic from "@/pages/RegolazionePublic";
 import CorsiIvass from "@/pages/CorsiIvass";
+import DocumentiAnnualiCollab from "@/pages/DocumentiAnnualiCollab";
 import AssistentePersonale from "@/pages/AssistentePersonale";
 import NotebookAI from "@/pages/NotebookAI";
 import NotebookAIDetail from "@/pages/NotebookAIDetail";
@@ -141,6 +142,7 @@ function App() {
                             <Route path="/incentivazioni" element={<Incentivazioni />} />
                             <Route path="/pnc" element={<Pnc />} />
                             <Route path="/corsi-ivass" element={<CorsiIvass />} />
+                            <Route path="/documenti-collaboratori" element={<DocumentiAnnualiCollab />} />
                             <Route path="/assistente-personale" element={<AssistentePersonale />} />
                             <Route path="/ritenute" element={
                                 <ProtectedRoute roles={["admin", "collaboratore"]}><RitenuteHub /></ProtectedRoute>

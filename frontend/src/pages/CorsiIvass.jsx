@@ -193,7 +193,13 @@ function NuovoCorsoDialog({ collaboratore_id, onClose }) {
             toast.error("Titolo, data e ore obbligatori"); return;
         }
         try {
-            await api.post("/corsi-ivass", { ...f, collaboratore_id });
+            await api.post("/corsi-ivass", {
+                ...f,
+                ente: f.ente || null,
+                note: f.note || null,
+                crediti_ivass: f.crediti_ivass === "" || f.crediti_ivass === null ? null : f.crediti_ivass,
+                collaboratore_id,
+            });
             toast.success("Corso registrato"); onClose();
         } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
     };

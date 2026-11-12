@@ -17055,6 +17055,219 @@ async def del_card_custom(entita: str, key: str, user=Depends(require_user("admi
     return {"ok": True}
 
 
+# ============================================================
+# DOCUMENTI ANNUALI COLLABORATORI (checklist di conformità)
+# ============================================================
+DOC_ANNUALI_COLLAB_DEFAULT = [
+    {"key": "casellario_giudiziale", "label": "Casellario giudiziale", "obbligatorio": True, "is_ivass": False},
+    {"key": "carichi_pendenti", "label": "Carichi pendenti", "obbligatorio": True, "is_ivass": False},
+    {"key": "attestato_ivass", "label": "Attestato corso IVASS (30 ore)", "obbligatorio": True, "is_ivass": True},
+    {"key": "visura_rui", "label": "Visura / iscrizione RUI", "obbligatorio": True, "is_ivass": False},
+    {"key": "antiriciclaggio", "label": "Autocertificazione antiriciclaggio", "obbligatorio": True, "is_ivass": False},
+]
+_RUOLI_COLLAB = ["admin", "collaboratore", "dipendente"]
+
+
+def _norm_txt(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+
+
+async def _get_checklist_annuale() -> list:
+    az = await db.azienda_config.find_one({}, {"_id": 0, "doc_annuali_collab": 1}) or {}
+    lst = az.get("doc_annuali_collab")
+    if not lst:
+        return [dict(x) for x in DOC_ANNUALI_COLLAB_DEFAULT]
+    return lst
+
+
+def _doc_match_item(doc: dict, item: dict) -> bool:
+    rk = doc.get("req_key")
+    if rk:
+        return rk == item["key"]
+    return _norm_txt(doc.get("tipologia")) == _norm_txt(item["label"])
+
+
+def _anno_doc(doc: dict) -> str:
+    return str(doc.get("anno") or (doc.get("data_rilascio") or "")[:4] or (doc.get("created_at") or "")[:4] or "")
+
+
+def _stato_item_annuale(user_docs: list, item: dict, anno, ore_ivass: float) -> dict:
+    from datetime import date as _date
+    anno_s = str(anno)
+    if item.get("is_ivass"):
+        if ore_ivass >= 30:
+            stato = "presente"
+        elif ore_ivass > 0:
+            stato = "parziale"
+        else:
+            stato = "mancante" if item.get("obbligatorio", True) else "assente"
+        return {"key": item["key"], "label": item["label"], "obbligatorio": item.get("obbligatorio", True),
+                "is_ivass": True, "stato": stato, "ore_ivass": round(ore_ivass, 2), "obiettivo": 30, "files": []}
+    docs = [d for d in user_docs if _doc_match_item(d, item) and _anno_doc(d) == anno_s]
+    files = [{"id": d.get("id"), "url": d.get("url"), "nome_file": d.get("nome_file"),
+              "data_rilascio": d.get("data_rilascio"), "data_scadenza": d.get("data_scadenza")} for d in docs]
+    stato = "mancante" if item.get("obbligatorio", True) else "assente"
+    if docs:
+        stato = "presente"
+        scad = [d.get("data_scadenza") for d in docs if d.get("data_scadenza")]
+        if scad:
+            try:
+                dd = _date.fromisoformat(max(scad)[:10])
+                giorni = (dd - _date.today()).days
+                if giorni < 0:
+                    stato = "scaduto"
+                elif giorni <= 30:
+                    stato = "in_scadenza"
+            except Exception:
+                pass
+    return {"key": item["key"], "label": item["label"], "obbligatorio": item.get("obbligatorio", True),
+            "is_ivass": False, "stato": stato, "files": files}
+
+
+async def _ore_ivass_anno(uid: str, anno) -> float:
+    flt = {"collaboratore_id": uid, "data_corso": {"$gte": f"{anno}-01-01", "$lte": f"{anno}-12-31"}}
+    corsi = await db.corsi_ivass.find(flt, {"_id": 0, "ore_riconosciute": 1}).to_list(1000)
+    return sum(float(c.get("ore_riconosciute") or 0) for c in corsi)
+
+
+async def _build_collab_annuale(u: dict, checklist: list, anno) -> dict:
+    docs = u.get("documenti_collab") or []
+    ore = await _ore_ivass_anno(u["id"], anno)
+    items = [_stato_item_annuale(docs, it, anno, ore) for it in checklist]
+    mancanti = sum(1 for i in items if i["stato"] in ("mancante", "scaduto"))
+    completi = sum(1 for i in items if i["stato"] == "presente")
+    return {"id": u["id"], "name": u.get("name") or u.get("email"), "email": u.get("email"),
+            "role": u.get("role"), "items": items, "mancanti": mancanti,
+            "completi": completi, "totale": len(items)}
+
+
+@api.get("/collaboratori/documenti-annuali")
+async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str] = None, user=Depends(current_user)):
+    """Checklist documenti annuali per collaboratore. Admin vede tutti; gli altri solo i propri."""
+    from datetime import datetime as _dt
+    if not anno:
+        anno = _dt.now().year
+    checklist = await _get_checklist_annuale()
+    is_admin = user.get("role") == "admin"
+    if uid and not is_admin and uid != user.get("id"):
+        raise HTTPException(403, "Permesso negato")
+    if is_admin and not uid:
+        q = {"role": {"$in": _RUOLI_COLLAB}, "attivo": {"$ne": False}}
+    else:
+        q = {"id": uid or user.get("id")}
+    proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "documenti_collab": 1}
+    users = await db.users.find(q, proj).to_list(2000)
+    out = [await _build_collab_annuale(u, checklist, anno) for u in users]
+    out.sort(key=lambda x: (x["name"] or "").lower())
+    return {"anno": anno, "checklist": checklist, "collaboratori": out,
+            "is_admin": is_admin, "me_id": user.get("id")}
+
+
+async def _add_doc_annuale(uid: str, file: UploadFile, req_key: str, tipologia: str,
+                           anno: str, data_rilascio: str, data_scadenza: str) -> dict:
+    target = await db.users.find_one({"id": uid}, {"_id": 0, "id": 1})
+    if not target:
+        raise HTTPException(404, "Utente non trovato")
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "File vuoto")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File troppo grande (max 10 MB)")
+    ct = file.content_type or obj_storage.mime_for(file.filename or "")
+    ext = (file.filename or "doc.pdf").rsplit(".", 1)[-1].lower() or "pdf"
+    path = f"{os.environ.get('APP_NAME', 'assicura')}/users/{uid}/annuale_{_uid()}.{ext}"
+    try:
+        result = obj_storage.put_object(path, content, ct)
+    except Exception as e:
+        raise HTTPException(503, f"Errore upload: {e}")
+    item = {
+        "id": _uid(),
+        "url": f"/api/storage/{result['path']}",
+        "nome_file": file.filename,
+        "tipologia": tipologia or None,
+        "req_key": req_key or None,
+        "anno": anno or None,
+        "descrizione": None,
+        "data_rilascio": data_rilascio or None,
+        "data_scadenza": data_scadenza or None,
+        "created_at": _now_iso(),
+    }
+    await db.users.update_one({"id": uid}, {"$push": {"documenti_collab": item}, "$set": {"updated_at": _now_iso()}})
+    return item
+
+
+@api.post("/me/documenti-annuali")
+async def upload_mio_documento_annuale(
+    file: UploadFile = File(...),
+    req_key: str = Form(""),
+    tipologia: str = Form(""),
+    anno: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
+    user=Depends(current_user),
+):
+    return await _add_doc_annuale(user["id"], file, req_key, tipologia, anno, data_rilascio, data_scadenza)
+
+
+@api.delete("/me/documenti-annuali/{item_id}")
+async def elimina_mio_documento_annuale(item_id: str, user=Depends(current_user)):
+    await db.users.update_one({"id": user["id"]}, {"$pull": {"documenti_collab": {"id": item_id}}})
+    return {"ok": True}
+
+
+@api.post("/auth/users/{uid}/documenti-annuali")
+async def upload_documento_annuale_admin(
+    uid: str,
+    file: UploadFile = File(...),
+    req_key: str = Form(""),
+    tipologia: str = Form(""),
+    anno: str = Form(""),
+    data_rilascio: str = Form(""),
+    data_scadenza: str = Form(""),
+    user=Depends(require_user("admin")),
+):
+    return await _add_doc_annuale(uid, file, req_key, tipologia, anno, data_rilascio, data_scadenza)
+
+
+@api.delete("/auth/users/{uid}/documenti-annuali/{item_id}")
+async def elimina_documento_annuale_admin(uid: str, item_id: str, user=Depends(require_user("admin"))):
+    await db.users.update_one({"id": uid}, {"$pull": {"documenti_collab": {"id": item_id}}})
+    return {"ok": True}
+
+
+@api.get("/config/documenti-annuali-collab")
+async def get_config_documenti_annuali(user=Depends(current_user)):
+    return {"checklist": await _get_checklist_annuale()}
+
+
+@api.put("/config/documenti-annuali-collab")
+async def put_config_documenti_annuali(body: dict, user=Depends(require_user("admin"))):
+    items = body.get("checklist") or []
+    clean, seen = [], set()
+    for it in items:
+        label = (it.get("label") or "").strip()
+        if not label:
+            continue
+        key = (it.get("key") or "").strip() or ("custom_" + (re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "card"))
+        base, i = key, 2
+        while key in seen:
+            key = f"{base}_{i}"; i += 1
+        seen.add(key)
+        clean.append({"key": key, "label": label[:80],
+                      "obbligatorio": bool(it.get("obbligatorio", True)),
+                      "is_ivass": bool(it.get("is_ivass", False))})
+    if not clean:
+        raise HTTPException(400, "La checklist non può essere vuota")
+    az = await db.azienda_config.find_one({}, {"_id": 0, "id": 1}) or {}
+    if az.get("id"):
+        await db.azienda_config.update_one({"id": az["id"]}, {"$set": {"doc_annuali_collab": clean}})
+    else:
+        await db.azienda_config.insert_one({"id": _uid(), "doc_annuali_collab": clean})
+    return {"ok": True, "checklist": clean}
+
+
+
+
 
 @api.post("/email/poller/retry-allegati")
 async def imap_poller_retry_allegati(limit: int = 500, user=Depends(require_user("admin"))):

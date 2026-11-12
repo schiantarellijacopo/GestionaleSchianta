@@ -9,7 +9,7 @@ import {
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
-    Smartphone, ImagePlus, Percent, Landmark, Award, ShieldCheck,
+    Smartphone, ImagePlus, Percent, Landmark, Award, ShieldCheck, FolderCheck,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -51,6 +51,7 @@ const ALL_MENU_ITEMS = [
     { id: "assistente", path: "/assistente-personale", icon: "Bot", label: "Assistente personale", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "corsi", path: "/corsi", icon: "Video", label: "Video", section: "strumenti", roles: null },
     { id: "corsi_ivass", path: "/corsi-ivass", icon: "GraduationCap", label: "Corsi IVASS · 30h", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "documenti_collaboratori", path: "/documenti-collaboratori", icon: "FolderCheck", label: "Documenti Collaboratori", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "marketing", path: "/marketing", icon: "Megaphone", label: "Marketing", section: "marketing", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "newsletter", path: "/newsletter", icon: "Mail", label: "Newsletter", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "voucher", path: "/voucher", icon: "Ticket", label: "Voucher Compagnia", section: "strumenti", roles: ["admin", "collaboratore", "dipendente"] },
@@ -82,7 +83,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award, Eye, ShieldCheck,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award, Eye, ShieldCheck, FolderCheck,
 };
 
 const SECTION_LABELS = {
