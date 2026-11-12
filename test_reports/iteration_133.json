@@ -1,0 +1,32 @@
+{
+  "summary": "Tested on the real tenant (jacopo@schiantarelli.it). Backend: 6 of 6 pytest passed: /api/search?q=AA41979 (also 'aa 41979') returns polizza 153000736 with matricola_targa=AA41979 and contraente MAGANETTI SPEDIZIONI SPA; /api/polizze/{id}/applicazioni returns 454 or more apps including AA41979; /api/polizze?q=153000736 and /api/documenti-inbox both return 200. Frontend e2e: the TopBar search shows 153000736 with the search-matricola-targa badge 'AA41979', and clicking it opens /polizze/027e3212-... (Libro Matricola tab shows 454 attive). The Documenti Inbox page loads with the 3 cards (Anagrafiche, Polizze, Sinistri), the counters Da rivedere 8 and Salvati 50, and 58 document cards. In ReviewDialog, entità=polizza, then searching 153000736 and picking it auto-fills the cliente MAGANETTI and shows di-app-select with 455 options ('Nessun veicolo' plus 454 apps). Picking 'App. 1 · AA41979' shows the confirmation message. The final 'Archivia nella card' save was NOT run, to avoid changing real tenant data.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/documenti-inbox/{id}/save (routes/documenti_inbox.py L726)", "issue": "applicazione_matricola_id = body.get(...) or inb.target_applicazione.id. If the user explicitly picks '— Nessun veicolo —' (null) or changes polizza, the backend silently falls back to the OCR-matched target_applicazione. That app may belong to a DIFFERENT polizza, which recreates bug (1), a libretto attached to the wrong vehicle. The backend also does not check that the applicazione belongs to polizza_id."},
+      {"endpoint": "GET /api/search", "issue": "matricola_targa is only set on polizze added via db.applicazioni. If the same polizza was already in results (matched via polizze.targa or contraente), it gets no badge. Minor."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DocumentiInbox ReviewDialog", "issues": ["di-app-select is a plain Select with 454 or more items and no search or filter. Finding a targa means scrolling through hundreds of entries. Use a searchable combobox (filter by targa or numero), or pre-filter by the OCR targa.", "The 'Salva la foto come avatar dell'anagrafica' checkbox is checked by default even when the destination is polizza or libretto. Minor.", "Clearing the anagrafica (X) resets polId but not polLabel. Minor state leftover."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter_matricola_search_inbox.py", "/app/test_reports/pytest/iter_matricola.xml"],
+  "action_items": [
+    "In documenti_inbox save: respect an explicit null applicazione_matricola_id (use `'applicazione_matricola_id' in body`), and only fall back to target_applicazione when it belongs to the chosen polizza_id. Also check that the app's polizza_id matches the polizza.",
+    "Make the vehicle selector searchable (454 options)."
+  ],
+  "critical_code_review_comments": [
+    "documenti_inbox.py L726: the fallback with `or` overrides the user's explicit choice of no vehicle or a different polizza, so the document can end up on the wrong vehicle.",
+    "server.py search_globale: db.applicazioni regex '^0*'+targa is anchored, so it can use the index. That is fine. Tenant scoping relies on TenantAwareDB."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter_matricola_search_inbox.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None. No data created or modified. ReviewDialog save was not executed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Real tenant login returns access_token. Polizza 153000736 id 027e3212-d8c5-4e41-a571-47e0782d1023 has 454 apps, app 1 = AA41979. The inbox had 8 pending docs (ci_dormia.pdf etc.). Use the sandbox tenant if you need to test the actual save with applicazione_matricola_id."
+}

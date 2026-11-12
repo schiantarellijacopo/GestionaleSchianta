@@ -723,7 +723,12 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
 
     anagrafica_id = body.get("anagrafica_id") or (inb.get("target_anagrafica") or {}).get("id")
     polizza_id = body.get("polizza_id") or (inb.get("target_polizza") or {}).get("id")
-    applicazione_matricola_id = body.get("applicazione_matricola_id") or (inb.get("target_applicazione") or {}).get("id")
+    # Veicolo (libro matricola): rispetta una scelta ESPLICITA dell'utente (anche "nessun veicolo" = null);
+    # ripiega sull'applicazione individuata via OCR solo se il campo non è stato inviato affatto.
+    if "applicazione_matricola_id" in body:
+        applicazione_matricola_id = body.get("applicazione_matricola_id")
+    else:
+        applicazione_matricola_id = (inb.get("target_applicazione") or {}).get("id")
     sinistro_id = body.get("sinistro_id")
 
     if entita_tipo == "anagrafica":
@@ -808,9 +813,20 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
             visibile_cliente=await _default_visibile(entita_tipo, categoria),
             autore_id=user.get("id"),
         )
-        # Flotta / libro matricola: lega l'allegato al VEICOLO specifico
+        # Flotta / libro matricola: lega l'allegato al VEICOLO specifico,
+        # ma solo se l'applicazione appartiene DAVVERO alla polizza scelta
+        # (evita che un libretto finisca sul veicolo di un'altra polizza).
         if entita_tipo == "polizza" and applicazione_matricola_id:
-            alleg.applicazione_matricola_id = applicazione_matricola_id
+            app_doc = await db.applicazioni.find_one(
+                {"id": applicazione_matricola_id, "polizza_id": entita_id}, {"_id": 0, "id": 1}
+            )
+            if app_doc:
+                alleg.applicazione_matricola_id = applicazione_matricola_id
+            else:
+                logging.warning(
+                    "Inbox save: applicazione %s non appartiene alla polizza %s → ignorata",
+                    applicazione_matricola_id, entita_id,
+                )
         allegato_id = alleg.id
         cloud_sync = await _mirror_inbox_file(alleg.id, categoria)
         alleg_dict = alleg.model_dump()

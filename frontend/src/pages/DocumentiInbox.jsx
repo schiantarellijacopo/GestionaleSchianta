@@ -18,7 +18,7 @@ import {
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { Upload, FileText, Sparkles, CheckCircle2, X, Trash2, FileType2 } from "lucide-react";
+import { Upload, FileText, Sparkles, CheckCircle2, X, Trash2, FileType2, Truck } from "lucide-react";
 import { toast } from "sonner";
 import OcrScanWidget from "@/components/OcrScanWidget";
 
@@ -378,6 +378,7 @@ function ReviewDialog({ item, onClose }) {
     // Flotta / libro matricola: veicolo (applicazione) a cui legare il documento
     const [appId, setAppId] = useState(item.target_applicazione?.id || "");
     const [appOptions, setAppOptions] = useState([]);
+    const [appSearch, setAppSearch] = useState("");
 
     useEffect(() => {
         if (anagSearch.length >= 2) {
@@ -508,7 +509,7 @@ function ReviewDialog({ item, onClose }) {
                                 <div className="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-300 rounded">
                                     <CheckCircle2 size={14} className="text-emerald-600" />
                                     <span className="text-sm">{anagLabel || `${anagId.slice(0, 8)}…`}</span>
-                                    <button onClick={() => { setAnagId(""); setPolId(""); setSinId(""); }} className="ml-auto text-rose-600"><X size={12} /></button>
+                                    <button onClick={() => { setAnagId(""); setPolId(""); setPolLabel(""); setSinId(""); setAppId(""); }} className="ml-auto text-rose-600"><X size={12} /></button>
                                 </div>
                             ) : (
                                 <>
@@ -565,27 +566,46 @@ function ReviewDialog({ item, onClose }) {
                         )}
 
                         {/* Veicolo (applicazione) — per le polizze FLOTTA / libro matricola:
-                            lega il documento allo specifico veicolo così appare nelle sue card. */}
+                            lega il documento allo specifico veicolo così appare nelle sue card.
+                            Ricercabile per targa o numero (le flotte hanno centinaia di veicoli). */}
                         {entitaTipo === "polizza" && polId && appOptions.length > 0 && (
                             <div>
                                 <Label>Veicolo / Applicazione <span className="text-slate-400 font-normal">(libro matricola)</span></Label>
-                                <Select value={appId || "__none__"} onValueChange={(v) => setAppId(v === "__none__" ? "" : v)}>
-                                    <SelectTrigger data-testid="di-app-select"><SelectValue placeholder="Scegli il veicolo" /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="__none__">— Nessun veicolo (solo polizza) —</SelectItem>
-                                        {appOptions.map((a) => (
-                                            <SelectItem key={a.id} value={a.id}>
-                                                {`App. ${a.numero ?? ""} · ${a.targa || "—"}`}
-                                                {a.marca ? ` · ${a.marca}` : ""}{a.modello ? ` ${a.modello}` : ""}
-                                                {a.stato && a.stato !== "attiva" ? ` (${a.stato})` : ""}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {appId && (
-                                    <div className="text-[10px] text-emerald-700 mt-1">
-                                        Il documento sarà legato a questo veicolo nel libro matricola.
-                                    </div>
+                                {appId ? (
+                                    (() => {
+                                        const a = appOptions.find((x) => x.id === appId);
+                                        return (
+                                            <div className="flex items-center gap-2 p-2 bg-emerald-50 border border-emerald-300 rounded" data-testid="di-app-selected">
+                                                <Truck size={14} className="text-emerald-600" />
+                                                <span className="text-sm num">{a ? `App. ${a.numero ?? ""} · ${a.targa || "—"}${a.marca ? " · " + a.marca : ""}${a.modello ? " " + a.modello : ""}` : appId.slice(0, 8)}</span>
+                                                <button onClick={() => { setAppId(""); setAppSearch(""); }} className="ml-auto text-rose-600" data-testid="di-app-clear"><X size={12} /></button>
+                                            </div>
+                                        );
+                                    })()
+                                ) : (
+                                    <>
+                                        <Input value={appSearch} onChange={(e) => setAppSearch(e.target.value)}
+                                            placeholder={`Cerca veicolo per targa o numero (${appOptions.length} veicoli)...`} data-testid="di-app-search" />
+                                        <div className="border border-slate-200 rounded mt-1 max-h-48 overflow-y-auto">
+                                            {appOptions
+                                                .filter((a) => {
+                                                    const q = appSearch.trim().toLowerCase();
+                                                    if (!q) return true;
+                                                    return [a.targa, String(a.numero ?? ""), a.marca, a.modello]
+                                                        .some((f) => (f || "").toString().toLowerCase().includes(q));
+                                                })
+                                                .slice(0, 50)
+                                                .map((a) => (
+                                                    <button key={a.id} onClick={() => { setAppId(a.id); setAppSearch(""); }}
+                                                        className="w-full text-left p-2 hover:bg-slate-50 text-xs border-b border-slate-100 num" data-testid={`di-app-opt-${a.id}`}>
+                                                        <span className="font-semibold">App. {a.numero ?? ""} · {a.targa || "—"}</span>
+                                                        {a.marca ? ` · ${a.marca}` : ""}{a.modello ? ` ${a.modello}` : ""}
+                                                        {a.stato && a.stato !== "attiva" ? <span className="text-amber-600"> ({a.stato})</span> : ""}
+                                                    </button>
+                                                ))}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400 mt-1">Lascia vuoto per legare il documento alla sola polizza.</div>
+                                    </>
                                 )}
                             </div>
                         )}
@@ -604,8 +624,8 @@ function ReviewDialog({ item, onClose }) {
                             </div>
                         )}
 
-                        {/* AVATAR option per documenti con foto */}
-                        {["carta_identita", "patente", "passaporto", "tessera_sanitaria"].includes(item.tipo_documento) && item.foto_volto_bbox && (
+                        {/* AVATAR option per documenti con foto (solo se destinazione = anagrafica) */}
+                        {entitaTipo === "anagrafica" && ["carta_identita", "patente", "passaporto", "tessera_sanitaria"].includes(item.tipo_documento) && item.foto_volto_bbox && (
                             <div className="bg-violet-50 border border-violet-200 rounded p-2">
                                 <label className="flex items-center gap-2 cursor-pointer">
                                     <Checkbox checked={salvaAvatar} onCheckedChange={(v) => setSalvaAvatar(!!v)} data-testid="di-avatar-chk" />
