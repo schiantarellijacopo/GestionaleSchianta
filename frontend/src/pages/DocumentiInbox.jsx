@@ -297,6 +297,11 @@ export default function DocumentiInbox() {
                                         ✓ Polizza trovata: <strong>{it.target_polizza.numero_polizza || it.target_polizza.numero || "—"}</strong>
                                     </div>
                                 )}
+                                {it.target_applicazione?.targa && (
+                                    <div className="text-[11px] text-amber-700 bg-amber-50 p-1.5 rounded mb-1">
+                                        ✓ Veicolo (libro matricola): <strong>{it.target_applicazione.targa}</strong>
+                                    </div>
+                                )}
                                 {/* Avanzamento riprova auto-archivio per singola card */}
                                 {retryStatus[it.id] === "processing" && (
                                     <div className="mt-1" data-testid={`di-retry-progress-${it.id}`}>
@@ -370,6 +375,9 @@ function ReviewDialog({ item, onClose }) {
     const [polLabel, setPolLabel] = useState(
         item.target_polizza ? (item.target_polizza.numero || item.target_polizza.numero_polizza || "") : "");
     const [sinOptions, setSinOptions] = useState([]);
+    // Flotta / libro matricola: veicolo (applicazione) a cui legare il documento
+    const [appId, setAppId] = useState(item.target_applicazione?.id || "");
+    const [appOptions, setAppOptions] = useState([]);
 
     useEffect(() => {
         if (anagSearch.length >= 2) {
@@ -393,10 +401,26 @@ function ReviewDialog({ item, onClose }) {
         }
     }, [polSearch]);
 
+    useEffect(() => {
+        if (entitaTipo === "polizza" && polId) {
+            api.get(`/polizze/${polId}/applicazioni?includi_storico=true`)
+                .then((r) => {
+                    const apps = r.data || [];
+                    setAppOptions(apps);
+                    // mantieni la pre-selezione solo se appartiene a questa polizza
+                    setAppId((cur) => (apps.some((a) => a.id === cur) ? cur : ""));
+                })
+                .catch(() => { setAppOptions([]); setAppId(""); });
+        } else {
+            setAppOptions([]); setAppId("");
+        }
+    }, [entitaTipo, polId]);
+
     const pickPolizza = (p) => {
         setPolId(p.id);
         setPolLabel(p.numero || p.numero_polizza || "");
         setPolSearch(""); setPolSearchOptions([]);
+        setAppId("");
         // auto-compila il cliente dal contraente della polizza
         if (p.contraente_id && !anagId) {
             setAnagId(p.contraente_id);
@@ -417,6 +441,7 @@ function ReviewDialog({ item, onClose }) {
                 categoria,
                 anagrafica_id: anagId || null,
                 polizza_id: entitaTipo === "polizza" ? polId : null,
+                applicazione_matricola_id: entitaTipo === "polizza" ? (appId || null) : null,
                 sinistro_id: entitaTipo === "sinistro" ? sinId : null,
                 campi_da_applicare: campi,
                 salva_avatar: salvaAvatar,
@@ -535,6 +560,32 @@ function ReviewDialog({ item, onClose }) {
                                             <div className="text-[10px] text-amber-600 mt-1">Nessuna polizza trovata</div>
                                         )}
                                     </>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Veicolo (applicazione) — per le polizze FLOTTA / libro matricola:
+                            lega il documento allo specifico veicolo così appare nelle sue card. */}
+                        {entitaTipo === "polizza" && polId && appOptions.length > 0 && (
+                            <div>
+                                <Label>Veicolo / Applicazione <span className="text-slate-400 font-normal">(libro matricola)</span></Label>
+                                <Select value={appId || "__none__"} onValueChange={(v) => setAppId(v === "__none__" ? "" : v)}>
+                                    <SelectTrigger data-testid="di-app-select"><SelectValue placeholder="Scegli il veicolo" /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="__none__">— Nessun veicolo (solo polizza) —</SelectItem>
+                                        {appOptions.map((a) => (
+                                            <SelectItem key={a.id} value={a.id}>
+                                                {`App. ${a.numero ?? ""} · ${a.targa || "—"}`}
+                                                {a.marca ? ` · ${a.marca}` : ""}{a.modello ? ` ${a.modello}` : ""}
+                                                {a.stato && a.stato !== "attiva" ? ` (${a.stato})` : ""}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {appId && (
+                                    <div className="text-[10px] text-emerald-700 mt-1">
+                                        Il documento sarà legato a questo veicolo nel libro matricola.
+                                    </div>
                                 )}
                             </div>
                         )}

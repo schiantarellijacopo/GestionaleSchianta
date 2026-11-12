@@ -62,6 +62,8 @@ e restituisci ESCLUSIVAMENTE un JSON valido con questo schema:
     "telaio": "VIN 17 caratteri o null",
     "marca": "MAIUSCOLO o null",
     "modello": "MAIUSCOLO o null",
+    "proprietario": "ragione sociale/nominativo dell'INTESTATARIO del veicolo (campo C/C.2, l'utilizzatore/proprietario, NON la società di leasing) MAIUSCOLO o null",
+    "locatario_leasing": "ragione sociale della SOCIETÀ DI LEASING / locatore se il veicolo è in leasing (es. 'BPCE LEASE', 'ALBA LEASING', dicitura 'INTESTATARIO TEMPORANEO'/'LOCATARIO') MAIUSCOLO o null",
     // SE polizza / libretto / quietanza / appendice / condizioni / mup / questionario / preventivo:
     "numero_polizza": "numero del CONTRATTO/polizza (NON la P.IVA della compagnia) o null",
     "compagnia": "ragione sociale della COMPAGNIA assicuratrice (es. GROUPAMA, CATTOLICA, UNIPOL) MAIUSCOLO o null",
@@ -88,6 +90,12 @@ REGOLE:
   posizioni delle lettere non usare mai cifre e viceversa. Attenzione a NON confondere
   la lettera O con lo zero 0, la I con 1, la B con 8, la S con 5, la Z con 2.
   Il TELAIO (VIN, campo "E", 17 caratteri) è DIVERSO dalla targa: non scambiarli.
+- LIBRETTO con LEASING/NOLEGGIO: il veicolo può avere DUE soggetti — l'INTESTATARIO/
+  utilizzatore (proprietario effettivo, campo C.2.1/C.2.3 o 'intestatario temporaneo')
+  e la SOCIETÀ DI LEASING/locatore (campo C.1, es. 'BPCE LEASE', 'ALBA LEASING').
+  Metti l'utilizzatore in "proprietario" e la società di leasing in "locatario_leasing".
+  Il CONTRAENTE della polizza è SEMPRE l'utilizzatore/proprietario, MAI la società
+  di leasing: non mettere il leasing nei campi contraente_*.
 - Restituisci null per i campi non leggibili o non pertinenti
 - Date sempre YYYY-MM-DD
 - POLIZZE/QUIETANZE/APPENDICI/LIBRETTI: distingui SEMPRE la COMPAGNIA assicuratrice
@@ -402,18 +410,23 @@ def _guess_tipo_from_filename(filename: str):
 
 
 async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
-                         existing_a: dict = None, existing_p: dict = None) -> tuple:
-    """Deduce (anagrafica, polizza) dai dati OCR + nome file.
+                         existing_a: dict = None, existing_p: dict = None,
+                         existing_app: dict = None) -> tuple:
+    """Deduce (anagrafica, polizza, applicazione_veicolo) dai dati OCR + nome file.
     Per i documenti di POLIZZA la fonte autorevole del CLIENTE è il CONTRAENTE
-    della polizza trovata (numero/targa), NON il nome OCR (spesso è la COMPAGNIA)."""
+    della polizza trovata (numero/targa), NON il nome OCR (spesso è la COMPAGNIA
+    o — nei libretti — la SOCIETÀ DI LEASING/locatore, mai il cliente assicurato)."""
     dati = dati or {}
     proj_a = {"_id": 0, "id": 1, "ragione_sociale": 1, "cognome": 1, "nome": 1}
     proj_p = {"_id": 0, "id": 1, "numero_polizza": 1, "contraente_id": 1}
+    proj_app = {"_id": 0, "id": 1, "numero": 1, "targa": 1, "polizza_id": 1,
+                "intestatario_anagrafica_id": 1}
     routed_entita = DOC_ROUTING.get(tipo_documento or "altro", ("anagrafica", "altro"))[0]
     fn = _guess_from_filename(filename)
 
     target_a = existing_a if (existing_a or {}).get("id") else None
     target_p = existing_p if (existing_p or {}).get("id") else None
+    target_app = existing_app if (existing_app or {}).get("id") else None
 
     # 1) POLIZZA — per numero (OCR o filename), poi per targa (OCR o filename)
     if not (target_p or {}).get("id"):
@@ -424,13 +437,34 @@ async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
         if not (target_p or {}).get("id"):
             targa = _norm_targa((dati.get("targa") or "") or (fn["targa"] or ""))
             if targa and len(targa) >= 4:
-                # match robusto: ignora spazi/trattini e zeri di padding iniziali
+                targa_rx = {"$regex": f"^0*{re.escape(targa)}$", "$options": "i"}
+                # 1a) targa direttamente sulla polizza (polizza auto monoveicolo)
                 target_p = await db.polizze.find_one(
-                    {"targa": {"$regex": f"^0*{re.escape(targa)}$", "$options": "i"}},
-                    proj_p, sort=[("effetto", -1)])
+                    {"targa": targa_rx}, proj_p, sort=[("effetto", -1)])
+                # 1b) FLOTTA / libro matricola: la targa vive sull'APPLICAZIONE,
+                #     non sulla polizza. Cerca l'applicazione (prima tra le attive)
+                #     e risali alla sua polizza + intestatario del veicolo.
+                if not (target_p or {}).get("id") and not (target_app or {}).get("id"):
+                    app = await db.applicazioni.find_one(
+                        {"targa": targa_rx,
+                         "stato": {"$nin": ["annullata", "sostituita"]}},
+                        proj_app, sort=[("data_inclusione", -1)])
+                    if not app:
+                        app = await db.applicazioni.find_one(
+                            {"targa": targa_rx}, proj_app, sort=[("data_inclusione", -1)])
+                    if app and app.get("polizza_id"):
+                        pol = await db.polizze.find_one({"id": app["polizza_id"]}, proj_p)
+                        if pol:
+                            target_p = pol
+                            target_app = app
 
     # 2) ANAGRAFICA
-    # 2a) autorevole: contraente della polizza trovata
+    # 2a) autorevole: intestatario del VEICOLO (applicazione) → poi contraente polizza.
+    #     Nei libretti con leasing il proprietario/utilizzatore è l'intestatario
+    #     dell'applicazione, NON la società di leasing letta dall'OCR.
+    if not (target_a or {}).get("id") and (target_app or {}).get("intestatario_anagrafica_id"):
+        target_a = await db.anagrafiche.find_one(
+            {"id": target_app["intestatario_anagrafica_id"]}, proj_a)
     if not (target_a or {}).get("id") and (target_p or {}).get("contraente_id"):
         target_a = await db.anagrafiche.find_one({"id": target_p["contraente_id"]}, proj_a)
     # 2b) codice fiscale / partita IVA del CLIENTE (chiavi forti e univoche)
@@ -475,7 +509,7 @@ async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
     if not (target_a or {}).get("id") and fn["nome"]:
         target_a = await _match_anag_by_name(fn["nome"])
 
-    return (target_a or None), (target_p or None)
+    return (target_a or None), (target_p or None), (target_app or None)
 
 
 @router.post("/documenti-inbox/analyze")
@@ -504,7 +538,7 @@ async def analizza_documento(
     # Inferenza target: polizza (per numero/targa/filename) + anagrafica autorevole
     # (il CONTRAENTE della polizza, non il nome OCR che spesso è la COMPAGNIA).
     dati = result.get("dati") or {}
-    target_anagrafica, target_polizza = await _infer_targets(
+    target_anagrafica, target_polizza, target_applicazione = await _infer_targets(
         dati, file.filename, result.get("tipo_documento"))
 
     # Salva temp nell'inbox (con il file binario in storage)
@@ -529,6 +563,7 @@ async def analizza_documento(
         "dati": dati,
         "target_anagrafica": target_anagrafica,
         "target_polizza": target_polizza,
+        "target_applicazione": target_applicazione,
         "stato": "pending",
         "created_at": _now_iso(),
         "created_by": user.get("id"),
@@ -565,6 +600,7 @@ async def analizza_documento(
             auto_body = {
                 "anagrafica_id": (target_anagrafica or {}).get("id"),
                 "polizza_id": (target_polizza or {}).get("id"),
+                "applicazione_matricola_id": (target_applicazione or {}).get("id"),
                 "campi_da_applicare": campi_auto,
                 "dati": dati,
                 "salva_avatar": True,
@@ -687,6 +723,7 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
 
     anagrafica_id = body.get("anagrafica_id") or (inb.get("target_anagrafica") or {}).get("id")
     polizza_id = body.get("polizza_id") or (inb.get("target_polizza") or {}).get("id")
+    applicazione_matricola_id = body.get("applicazione_matricola_id") or (inb.get("target_applicazione") or {}).get("id")
     sinistro_id = body.get("sinistro_id")
 
     if entita_tipo == "anagrafica":
@@ -771,6 +808,9 @@ async def _do_save(iid: str, body: dict, user: dict) -> dict:
             visibile_cliente=await _default_visibile(entita_tipo, categoria),
             autore_id=user.get("id"),
         )
+        # Flotta / libro matricola: lega l'allegato al VEICOLO specifico
+        if entita_tipo == "polizza" and applicazione_matricola_id:
+            alleg.applicazione_matricola_id = applicazione_matricola_id
         allegato_id = alleg.id
         cloud_sync = await _mirror_inbox_file(alleg.id, categoria)
         alleg_dict = alleg.model_dump()
@@ -908,12 +948,13 @@ async def elimina_inbox(
 
 
 async def _rematch_pending_targets(inb: dict) -> tuple:
-    """Ri-cerca anagrafica/polizza nel DB ATTUALE usando i dati OCR salvati + nome
-    file. Necessario quando la polizza/anagrafica/targa è stata creata DOPO l'ingest
-    del documento. Ritorna (target_anagrafica | None, target_polizza | None)."""
+    """Ri-cerca anagrafica/polizza/applicazione nel DB ATTUALE usando i dati OCR
+    salvati + nome file. Necessario quando la polizza/anagrafica/targa è stata creata
+    DOPO l'ingest del documento. Ritorna (anagrafica|None, polizza|None, applicazione|None)."""
     return await _infer_targets(
         inb.get("dati") or {}, inb.get("filename") or "", inb.get("tipo_documento"),
-        existing_a=inb.get("target_anagrafica"), existing_p=inb.get("target_polizza"))
+        existing_a=inb.get("target_anagrafica"), existing_p=inb.get("target_polizza"),
+        existing_app=inb.get("target_applicazione"))
 
 
 async def _retry_one_pending(inb: dict, user) -> dict:
@@ -941,13 +982,15 @@ async def _retry_one_pending(inb: dict, user) -> dict:
     # 🔄 Ri-match: instrada con un tipo coerente (polizza se non sappiamo meglio)
     tipo_for_match = eff_tipo if (eff_tipo and eff_tipo in DOC_ROUTING) else (
         "polizza" if hint != "anagrafica" else "carta_identita")
-    new_a, new_p = await _rematch_pending_targets({**inb, "tipo_documento": tipo_for_match})
+    new_a, new_p, new_app = await _rematch_pending_targets({**inb, "tipo_documento": tipo_for_match})
     persist = {}
     did_rematch = False
     if (new_a or {}).get("id") and not (inb.get("target_anagrafica") or {}).get("id"):
         persist["target_anagrafica"] = new_a
     if (new_p or {}).get("id") and not (inb.get("target_polizza") or {}).get("id"):
         persist["target_polizza"] = new_p
+    if (new_app or {}).get("id") and not (inb.get("target_applicazione") or {}).get("id"):
+        persist["target_applicazione"] = new_app
     if eff_tipo and eff_tipo != tipo and ((new_p or {}).get("id") or (new_a or {}).get("id")):
         persist["tipo_documento"] = eff_tipo
     if persist:
@@ -956,6 +999,7 @@ async def _retry_one_pending(inb: dict, user) -> dict:
 
     target_a = new_a or (inb.get("target_anagrafica") or {}) or {}
     target_p = new_p or (inb.get("target_polizza") or {}) or {}
+    target_app = new_app or (inb.get("target_applicazione") or {}) or {}
 
     # entità finale: hint se noto, altrimenti si deduce dai target trovati
     # (una polizza trovata vince sull'anagrafica, es. frontespizio polizza).
@@ -985,6 +1029,7 @@ async def _retry_one_pending(inb: dict, user) -> dict:
         "entita_tipo": routed_entita,
         "anagrafica_id": target_a.get("id"),
         "polizza_id": target_p.get("id"),
+        "applicazione_matricola_id": target_app.get("id") if routed_entita == "polizza" else None,
         "campi_da_applicare": list((inb.get("dati") or {}).keys()),
         "dati": inb.get("dati") or {},
         "salva_avatar": True,

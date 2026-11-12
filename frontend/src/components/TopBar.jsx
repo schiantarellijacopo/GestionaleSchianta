@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, imgUrl } from "@/lib/api";
-import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon, ShoppingCart, Headphones } from "lucide-react";
+import { Search, Users, FileText, AlertTriangle, Receipt, Building2, X, Menu, User as UserIcon, ShoppingCart, Headphones, Truck } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebar } from "./Layout";
 import NotificheBell from "./NotificheBell";
@@ -145,6 +145,7 @@ export default function TopBar() {
                                         <div className="text-[11px] text-slate-500">
                                             {p.contraente_nome || "—"} · {p.ramo} · <span className="badge badge-neutral">{p.stato}</span>
                                             {p.targa && <span className="ml-1 text-sky-700 num">{p.targa}</span>}
+                                            {p.matricola_targa && <span className="ml-1 inline-flex items-center gap-1 text-emerald-700 num" data-testid="search-matricola-targa"><Truck size={11} /> {p.matricola_targa}</span>}
                                         </div>
                                     </button>
                                 )}

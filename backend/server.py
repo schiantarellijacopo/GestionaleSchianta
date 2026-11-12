@@ -18382,6 +18382,37 @@ async def search_globale(q: str, limit: int = 50, user=Depends(current_user)):
                 polizze.append(ep)
         polizze = polizze[:limit * 2]
 
+    # === FLOTTA / libro matricola: la TARGA vive sulle APPLICAZIONI (veicoli di
+    # polizza), non sul campo polizze.targa. Cerca la targa tra le applicazioni e
+    # risali alle relative polizze così la barra la trova anche per le flotte. ===
+    q_targa = re.sub(r"[^A-Z0-9]", "", qUP)
+    if not is_client and len(q_targa) >= 4:
+        apps = await db.applicazioni.find(
+            {"targa": {"$regex": "^0*" + re.escape(q_targa)}},
+            {"_id": 0, "id": 1, "targa": 1, "polizza_id": 1, "numero": 1},
+        ).limit(limit).to_list(limit)
+        existing_pol_ids = {p["id"] for p in polizze}
+        app_targa: dict = {}
+        for a in apps:
+            if a.get("polizza_id"):
+                app_targa.setdefault(a["polizza_id"], a.get("targa"))
+        need_ids = [pid for pid in app_targa if pid not in existing_pol_ids]
+        if need_ids:
+            extra = await db.polizze.find(
+                {"id": {"$in": need_ids}},
+                {"_id": 0, "id": 1, "numero_polizza": 1, "ramo": 1, "prodotto": 1,
+                 "stato": 1, "targa": 1, "contraente_id": 1},
+            ).to_list(len(need_ids))
+            extra_cids = [p.get("contraente_id") for p in extra if p.get("contraente_id")]
+            extra_names = {a["id"]: a["ragione_sociale"] async for a in db.anagrafiche.find(
+                {"id": {"$in": extra_cids}}, {"_id": 0, "id": 1, "ragione_sociale": 1})}
+            for p in extra:
+                p["contraente_nome"] = extra_names.get(p.get("contraente_id"))
+                if not p.get("targa"):
+                    p["targa"] = app_targa.get(p["id"])
+                p["matricola_targa"] = app_targa.get(p["id"])
+                polizze.append(p)
+
     return {
         "anagrafiche": anas, "polizze": polizze, "sinistri": sinistri,
         "titoli": titoli, "compagnie": compagnie,
