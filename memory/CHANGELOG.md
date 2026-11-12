@@ -1040,3 +1040,10 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Elimina regolazione: funziona solo su righe selezionate; backend BLOCCA (400) se la regolazione ha un titolo collegato coperto/incassato.
 - Regolazioni calcolate ordinate per periodo (anno) decrescente, poi per data.
 - Testato backend: elimina coperto->400, non-coperto->ok. Frontend compila.
+
+## 2026-11-12 — Storico Prima Nota + KPI dashboard prima nota aperte
+- Storico Prima Nota (Contabilita.jsx): rimossa colonna ID; aggiunta colonna STATO (badge "Chiusa") come prima colonna e colonna "Chiusa il" (data+ora, fuso Europe/Rome) subito dopo.
+- Backend list_chiusure_giorno: filtra riaperta_at=None -> le chiusure RIAPERTE spariscono dallo storico finche non ri-chiuse (match richiesta "togliere momentaneamente").
+- Nuovo endpoint GET /contabilita/prima-nota-aperte: giorni passati con movimenti ma senza chiusura attiva. Testato: count=4.
+- Dashboard: nuova KPI "Prima Nota aperte" (rossa/allerta se >0, verde se tutto chiuso), link a /contabilita, solo non-client.
+- Verificato via curl: storico esclude riaperte e include created_at; endpoint aperte ok. Frontend compila. (Screenshot UI non riuscito per login tool nel browser isolato.)

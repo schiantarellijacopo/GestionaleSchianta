@@ -11690,7 +11690,7 @@ async def list_chiusure_giorno(
       - anno: filtra per anno (es. 2026). Quando omesso ritorna tutto.
       - q: cerca per data o ID
     """
-    flt: dict = {}
+    flt: dict = {"riaperta_at": None}
     if anno:
         flt["data"] = {"$gte": f"{anno}-01-01", "$lte": f"{anno}-12-31"}
     if q:
@@ -11702,6 +11702,23 @@ async def list_chiusure_giorno(
         if not it.get("riepilogo"):
             it["riepilogo"] = {}
     return items
+
+
+@api.get("/contabilita/prima-nota-aperte")
+async def prima_nota_aperte(
+    user=Depends(require_user("admin", "collaboratore", "dipendente")),
+):
+    """KPI dashboard: giorni PASSATI con movimenti ma SENZA Prima Nota chiusa attiva
+    (inclusi i giorni la cui chiusura è stata riaperta). Il giorno corrente, ancora
+    in corso, non è considerato "aperto in ritardo"."""
+    from tzutil import oggi_italia
+    oggi = oggi_italia().isoformat()
+    date_mov_raw = await db.movimenti.distinct("data_movimento")
+    date_mov = {(d or "")[:10] for d in date_mov_raw if d}
+    chiuse_raw = await db.chiusure_giorno.distinct("data", {"riaperta_at": None})
+    chiuse = {(c or "")[:10] for c in chiuse_raw if c}
+    aperte = sorted([d for d in date_mov if d and d < oggi and d not in chiuse], reverse=True)
+    return {"count": len(aperte), "giorni": aperte[:60]}
 
 
 @api.delete("/contabilita/chiusura-giorno/{chiusura_id}")

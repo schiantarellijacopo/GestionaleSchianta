@@ -818,7 +818,8 @@ function StoricoPrimaNotaTab() {
                     <table className="tbl w-full">
                         <thead className="bg-slate-900 text-white">
                             <tr>
-                                <th className="text-left px-3 py-2 w-24">ID</th>
+                                <th className="text-left px-3 py-2 w-28">Stato</th>
+                                <th className="text-left px-3 py-2 w-44">Chiusa il</th>
                                 <th className="text-left px-3 py-2">Data</th>
                                 <th className="text-left px-3 py-2">N. movimenti</th>
                                 <th className="text-left px-3 py-2">Chiusa da</th>
@@ -924,11 +925,28 @@ function StoricoPrimaNotaTab() {
     );
 }
 
+function fmtDateTime(s) {
+    if (!s) return "—";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleString("it-IT", {
+        day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+        timeZone: "Europe/Rome",
+    });
+}
+
 function StoricoRow({ it, k, onDelete }) {
     const [vista, setVista] = useState("prima_nota"); // o "brogliaccio"
     return (
         <tr className="hover:bg-slate-50" data-testid={`storico-row-${it.id}`}>
-            <td className="px-3 py-2 font-mono text-xs text-slate-600">{it.id.slice(0, 8)}</td>
+            <td className="px-3 py-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold px-2 py-0.5" data-testid={`storico-stato-${it.id}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> Chiusa
+                </span>
+            </td>
+            <td className="px-3 py-2 text-xs text-slate-600 whitespace-nowrap" data-testid={`storico-chiusa-il-${it.id}`}>
+                {it.created_at ? fmtDateTime(it.created_at) : "—"}
+            </td>
             <td className="px-3 py-2 font-medium">{fmtDate(it.data)}</td>
             <td className="px-3 py-2 num text-sm">{it.riepilogo?.n_movimenti || 0}</td>
             <td className="px-3 py-2 text-xs text-slate-500">{it.closed_by_name || "—"}</td>

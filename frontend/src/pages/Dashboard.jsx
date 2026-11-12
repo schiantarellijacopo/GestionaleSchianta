@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, fmtEur, fmtNum } from "@/lib/api";
+import { api, fmtEur, fmtNum, fmtDate } from "@/lib/api";
 import { PageHeader } from "@/components/Shared";
 import DocumentiMancantiWidget from "@/components/DocumentiMancantiWidget";
 import OcrScanWidget from "@/components/OcrScanWidget";
@@ -18,6 +18,37 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 const COLORS = ["#0369A1", "#10B981", "#F59E0B", "#7C3AED", "#EF4444", "#0EA5E9", "#84CC16", "#F472B6"];
+
+function PrimaNotaAperteKpi() {
+    const [info, setInfo] = useState(null);
+    useEffect(() => {
+        api.get("/contabilita/prima-nota-aperte").then((r) => setInfo(r.data)).catch(() => setInfo({ count: 0, giorni: [] }));
+    }, []);
+    if (!info) return null;
+    const open = info.count > 0;
+    return (
+        <Link to="/contabilita" className="block mb-6" data-testid="kpi-prima-nota-aperte">
+            <Card className={`p-5 border transition-shadow hover:shadow-md ${open ? "border-rose-300 bg-rose-50" : "border-emerald-200 bg-emerald-50/40"}`}>
+                <div className="flex items-center gap-4">
+                    <div className={`h-11 w-11 rounded-full flex items-center justify-center shrink-0 ${open ? "bg-rose-100 text-rose-600" : "bg-emerald-100 text-emerald-600"}`}>
+                        {open ? <AlertOctagon size={22} /> : <CheckCircle2 size={22} />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <div className={`font-bold ${open ? "text-rose-800" : "text-emerald-800"}`} data-testid="kpi-pna-label">
+                            {open ? `${info.count} Prima Nota aperte da chiudere` : "Nessuna Prima Nota aperta"}
+                        </div>
+                        <div className="text-xs text-slate-600 mt-0.5 truncate">
+                            {open
+                                ? `Giorni con movimenti non ancora chiusi: ${info.giorni.slice(0, 6).map(fmtDate).join(", ")}${info.giorni.length > 6 ? "…" : ""}`
+                                : "Tutte le giornate passate con movimenti risultano chiuse."}
+                        </div>
+                    </div>
+                    {open && <span className="text-3xl font-black text-rose-600" data-testid="kpi-pna-count">{info.count}</span>}
+                </div>
+            </Card>
+        </Link>
+    );
+}
 
 function Stat({ label, value, icon, hint, testid, to }) {
     const content = (
@@ -90,6 +121,8 @@ export default function Dashboard() {
                     <Stat label="Crescita" value="+12%" hint="vs anno scorso" icon={<TrendingUp size={18} />} testid="stat-crescita" to="/contabilita" />
                 )}
             </div>
+
+            {!isClient && <PrimaNotaAperteKpi />}
 
             {!isClient && <DashboardTasks />}
 
