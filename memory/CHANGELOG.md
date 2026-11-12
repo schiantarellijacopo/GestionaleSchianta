@@ -1,5 +1,15 @@
 # Changelog — Axicura CRM
 
+## 2026-11-12 — Compagnie: dati anagrafici/fiscali completi + sezione allegati · 4 sezioni spostate in Librerie
+- **Richiesta utente**: (1) nella scheda Compagnie (editor dentro Librerie) poter inserire TUTTI i dati compagnia + una sezione Allegati come per Agenzia Partner; (2) spostare dentro la pagina Librerie le sezioni WhatsApp Agenzie, Agenzie (partner), Setup iniziale, Scambio dati agenzie, rimuovendole dal menù a sinistra.
+- **Backend** (`db_models.py` · modello `Compagnia`): aggiunti campi `indirizzo, cap, citta, provincia, partita_iva, codice_fiscale, iban, pec, note`. POST/PUT `/compagnie` li persistono; allegati via endpoint esistenti `POST/DELETE /compagnie/{cid}/documenti`.
+- **Frontend `Librerie.jsx`** — `CompagniaForm`: nuovi campi anagrafici/fiscali + sezione "Documenti / Allegati" (componente `DocumentiCompagnia`, `DocCardsScadenza` cardKey="compagnia", come agenzia partner), con `omitOnSave=["documenti","logo_storage_path","logo_mime"]`.
+- **Frontend `Librerie.jsx`** — `EXTRA_SECTIONS` role-gated: 4 nuove schede (`agenzie-partner`, `setup-iniziale`, `scambio-dati` solo admin; `whatsapp-agenzie` admin+collaboratore) che renderizzano i componenti pagina esistenti `Agenzie`, `SetupIniziale`, `ScambioDati`, `WhatsAppInstances`.
+- **`Sidebar.jsx`**: rimosse le 4 voci (agenzie, setup_iniziale, scambio_dati, whatsapp). Rotte originali mantenute in `App.js` per i deep-link.
+- **Fix**: `Sezione` dialog `onOpenChange` ora chiama `load()` anche alla chiusura con X/Escape, così la lista allegati non resta stale al riapri.
+- **Test**: testing agent (iteration_135) — 6/6 scenari frontend PASS; backend nuovi campi verificati via curl.
+
+
 ## 2026-11-09 — Titoli: i titoli arretrati/coperti della polizza ora compaiono sempre nell'elenco Titoli
 - **Problema utente**: un titolo "da incassare" presente nella polizza non compariva cercandolo nella sezione Titoli ("Nessun risultato"). Richiesta: TUTTI i titoli con stato arretrato/coperto presenti in polizza devono essere visibili in Titoli (indipendentemente dai Carichi).
 - **Causa**: quei titoli erano carichi mensili con `stato_carico="in_attesa"`; l'endpoint `/titoli` li escludeva (`stato_carico $nin [in_attesa, annullato_carico]`), quindi non comparivano nell'elenco né nella ricerca.

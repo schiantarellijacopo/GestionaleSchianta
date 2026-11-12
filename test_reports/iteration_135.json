@@ -1,0 +1,27 @@
+{
+  "summary": "Frontend-only test of Librerie hub changes. PASS: 4 new tabs (Agenzie partner, Setup iniziale, Scambio dati, WhatsApp Agenzie) render full page content with no page errors for admin; sidebar no longer links /agenzie, /setup-iniziale, /scambio-dati, /whatsapp (admin + collaboratore); Compagnie 'Modifica compagnie' dialog shows all new fields; indirizzo/CAP/citta/provincia/P.IVA/CF/IBAN/PEC/note saved via Aggiorna and persisted (UI reopen + API); Provincia/CF/IBAN uppercased; new compagnia dialog shows hint instead of allegati; Documenti/Allegati section with 7 cards, upload (toast 'Documento aggiunto') and delete work and persist; Aggiorna after upload does not wipe documenti; collaboratore sees only WhatsApp Agenzie extra tab and it loads. One minor UI bug: stale documents list after closing dialog with X/Escape.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Librerie Sezione dialog (Compagnie)", "issue": "Upload a document, then close the dialog with X/Escape (without Aggiorna) and reopen the same compagnia: the uploaded document is not shown (0 items) until a page reload. RCA: Dialog onOpenChange in Sezione (Librerie.jsx ~line 456) only calls setOpen(false)/setEditing(null), it does not call load(), so the list row (editing.documenti used as DocumentiCompagnia 'iniziali') is stale. Same happens after deleting a doc. Fix: call load() in onOpenChange close branch too (or fetch documenti on DocumentiCompagnia mount).", "selector": "[data-testid=comp-documenti-sezione]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Librerie extra tabs", "issues": ["Embedded pages render their own PageHeader (e.g. 'Agenzie', 'Setup iniziale') under the Librerie header, so there are two stacked page titles. Acceptable but could be visually lighter (hide inner header when embedded)."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Librerie.jsx Sezione: refresh list (load()) when the edit dialog is closed via X/Escape so DocumentiCompagnia shows newly uploaded/deleted documents on reopen"
+  ],
+  "critical_code_review_comments": [
+    "Librerie.jsx is ~8540 lines; strongly consider splitting sections (CompagniaForm, DocumentiCompagnia, etc.) into separate modules",
+    "Old standalone routes /agenzie, /setup-iniziale, /scambio-dati, /whatsapp still exist in App.js (reachable by URL) - fine for deep links, just confirm intent"
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (not requested)", "frontend": "95% (all 6 requested scenarios pass; 1 minor stale-state bug)"},
+  "seed_data_creation": "Created TEST_UI Compagnia / TEST_UI Compagnia2 via API plus test docs; all deleted by id afterwards (verified not in list).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Compagnie edit: Librerie -> lib-tab-compagnie -> row [data-testid=row-actions] -> [data-testid=action-edit]; save button lib-save-compagnie. Doc upload: [data-testid=comp-doc-upload-{slug}] input[type=file], then comp-doc-form-save-{slug}; delete comp-doc-del-{id} (window.confirm). Auth token in localStorage 'token'."
+}

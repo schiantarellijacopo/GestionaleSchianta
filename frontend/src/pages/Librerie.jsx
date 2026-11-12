@@ -453,7 +453,7 @@ function Sezione({ section }) {
                             <GitMerge size={13} className="mr-1" /> Unisci utenti
                         </Button>
                     )}
-                    <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); } }}>
+                    <Dialog open={open || !!editing} onOpenChange={(o) => { if (!o) { setOpen(false); setEditing(null); load(); } }}>
                         <DialogTrigger asChild>
                             <Button data-testid={`lib-new-${section.key}`} onClick={() => setOpen(true)} className="bg-sky-700 hover:bg-sky-800">
                                 <Plus size={14} className="mr-1" /> Nuovo
