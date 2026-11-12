@@ -1047,3 +1047,6 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Nuovo endpoint GET /contabilita/prima-nota-aperte: giorni passati con movimenti ma senza chiusura attiva. Testato: count=4.
 - Dashboard: nuova KPI "Prima Nota aperte" (rossa/allerta se >0, verde se tutto chiuso), link a /contabilita, solo non-client.
 - Verificato via curl: storico esclude riaperte e include created_at; endpoint aperte ok. Frontend compila. (Screenshot UI non riuscito per login tool nel browser isolato.)
+
+## 2026-11-12 — Sospesi: griglia ottimizzata (gap rimosso)
+- TitoliSospesi.jsx: colonna Cliente resa "greedy" (w-full) per assorbire lo spazio extra; altre colonne whitespace-nowrap/compatte -> eliminato il gap tra Ramo/Targa e Coperto il. Frontend compila.

@@ -286,15 +286,15 @@ export default function TitoliSospesi() {
                                         data-testid="sospesi-toggle-all"
                                     />
                                 </th>
-                                <th><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Cliente</SortHeader></th>
-                                <th><SortHeader k="cellulare" sortKey={sortKey} dir={dir} toggle={toggle}>Cellulare</SortHeader></th>
-                                <th><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
-                                <th><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Polizza</SortHeader></th>
-                                <th><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo / Targa</SortHeader></th>
-                                <th><SortHeader k="data_copertura" sortKey={sortKey} dir={dir} toggle={toggle}>Coperto il</SortHeader></th>
-                                <th><SortHeader k="giorni_anticipo" sortKey={sortKey} dir={dir} toggle={toggle}>Anticipo</SortHeader></th>
-                                <th><SortHeader k="scadenza_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Scad. polizza</SortHeader></th>
-                                <th className="text-right"><SortHeader k="da_pagare" sortKey={sortKey} dir={dir} toggle={toggle}>Da Pagare €</SortHeader></th>
+                                <th className="w-full min-w-[160px]"><SortHeader k="contraente_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Cliente</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="cellulare" sortKey={sortKey} dir={dir} toggle={toggle}>Cellulare</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="collaboratore_nome" sortKey={sortKey} dir={dir} toggle={toggle}>Collaboratore</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="numero_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Polizza</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="ramo" sortKey={sortKey} dir={dir} toggle={toggle}>Ramo / Targa</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="data_copertura" sortKey={sortKey} dir={dir} toggle={toggle}>Coperto il</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="giorni_anticipo" sortKey={sortKey} dir={dir} toggle={toggle}>Anticipo</SortHeader></th>
+                                <th className="whitespace-nowrap"><SortHeader k="scadenza_polizza" sortKey={sortKey} dir={dir} toggle={toggle}>Scad. polizza</SortHeader></th>
+                                <th className="text-right whitespace-nowrap"><SortHeader k="da_pagare" sortKey={sortKey} dir={dir} toggle={toggle}>Da Pagare €</SortHeader></th>
                                 <th className="col-azioni"></th>
                             </tr>
                         </thead>
