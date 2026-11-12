@@ -209,7 +209,12 @@ export default function DocumentiInbox() {
                         onClick={async () => {
                             try {
                                 const r = await api.post("/documenti-inbox/retry-auto-archive");
-                                toast.success(`Auto-archiviati ${r.data.archived} · ri-abbinati ${r.data.rematched || 0} · falliti ${r.data.failed}`);
+                                const { archived = 0, rematched = 0, failed = 0 } = r.data || {};
+                                if (archived === 0 && rematched === 0 && failed === 0) {
+                                    toast.info("Nessun documento pronto per l'auto-archivio: non è stato trovato un abbinamento (numero polizza, targa, codice fiscale o cliente).");
+                                } else {
+                                    toast.success(`Auto-archiviati ${archived} · ri-abbinati ${rematched} · falliti ${failed}`);
+                                }
                                 load();
                             } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
                         }} data-testid="di-retry-auto">

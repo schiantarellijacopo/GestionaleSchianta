@@ -1056,3 +1056,9 @@ Richiesta: caricare la visura camerale e compilare in automatico i dati aziendal
 - Filtro collaboratore spostato lato CLIENT: il riepilogo e i KPI in alto restano sempre completi (si puo passare da un collaboratore all altro al volo); la tabella e il suo totale riflettono il filtro.
 - Il select "Filtra per collaboratore" e sincronizzato e include l opzione "Senza collaboratore".
 - Backend /titoli/sospesi e /titoli/sospesi-storico: gestito collaboratore_id="__none__" (titoli senza collaboratore) per export/stampa. Verificato via curl.
+
+## 2026-11-12 — Inbox: retry auto-archivio anche sui documenti "ALTRO"
+- Causa: i libretti erano classificati tipo=ALTRO (OCR fallito su file 0 kB) e il retry saltava gli "altro" -> sembrava non fare nulla.
+- Fix: _guess_tipo_from_filename deduce il tipo dal NOME FILE (es. "LIBRETTO FR798LT.pdf" -> libretto) quando OCR=altro; il retry ora li processa, aggancia la polizza dalla targa/numero del nome file, corregge la classificazione (tipo_documento) e auto-archivia se c è match deterministico.
+- Messaggio del pulsante piu chiaro: toast info quando nessun abbinamento trovato (prima mostrava 0/0/0 e sembrava rotto).
+- Testato: inferenza tipo + match polizza da targa nel nome file.

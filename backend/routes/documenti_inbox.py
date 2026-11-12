@@ -370,6 +370,37 @@ async def _match_anag_by_name(name: str):
     return None
 
 
+_FN_TIPO_KEYWORDS = [
+    ("libretto", ("LIBRETTO", "CARTA DI CIRCOLAZIONE", "CIRCOLAZIONE")),
+    ("quietanza", ("QUIETANZA",)),
+    ("appendice", ("APPENDICE",)),
+    ("condizioni", ("CONDIZIONI",)),
+    ("mup", ("MUP",)),
+    ("questionario", ("QUESTIONARIO",)),
+    ("preventivo", ("PREVENTIVO",)),
+    ("atto_vendita", ("ATTO DI VENDITA", "ATTO VENDITA")),
+    ("polizza", ("POLIZZA", "CONTRATTO")),
+    ("patente", ("PATENTE",)),
+    ("passaporto", ("PASSAPORTO",)),
+    ("tessera_sanitaria", ("TESSERA SANITARIA", "SANITARIA")),
+    ("visura_camerale", ("VISURA",)),
+    ("mandato_sdd", ("MANDATO", "SDD")),
+    ("carta_identita", ("CARTA IDENTITA", "CARTA D'IDENTITA", "IDENTITA")),
+    ("cid", ("CID", "CONSTATAZIONE")),
+    ("fattura", ("FATTURA",)),
+]
+
+
+def _guess_tipo_from_filename(filename: str):
+    """Deduce il tipo documento dal nome file quando l'OCR non riesce (tipo='altro').
+    Es. 'LIBRETTO FR798LT.pdf' → 'libretto'."""
+    up = (filename or "").upper()
+    for tipo, kws in _FN_TIPO_KEYWORDS:
+        if any(k in up for k in kws):
+            return tipo
+    return None
+
+
 async def _infer_targets(dati: dict, filename: str, tipo_documento: str,
                          existing_a: dict = None, existing_p: dict = None) -> tuple:
     """Deduce (anagrafica, polizza) dai dati OCR + nome file.
@@ -897,21 +928,26 @@ async def retry_auto_archive(
     errors = []
     async for inb in db.documenti_inbox.find({"stato": "pending"}, {"_id": 0}):
         tipo = inb.get("tipo_documento")
-        if not tipo or tipo == "altro":
+        # Se l'OCR non ha classificato (altro), deduci il tipo dal NOME FILE
+        eff_tipo = tipo if (tipo and tipo != "altro") else _guess_tipo_from_filename(inb.get("filename"))
+        if not eff_tipo or eff_tipo == "altro":
             continue
-        routed_entita, _ = DOC_ROUTING.get(tipo, ("anagrafica", "altro"))
+        routed_entita, _ = DOC_ROUTING.get(eff_tipo, ("anagrafica", "altro"))
         if routed_entita == "sinistro":
             continue  # sinistro → solo manuale
 
         # 🔄 Ri-match contro il DB attuale (polizze/targhe/anagrafiche create dopo
         # l'ingest). Eseguito SEMPRE, anche a bassa confidenza, così la modale di
         # revisione si pre-compila con il cliente/polizza corretti.
-        new_a, new_p = await _rematch_pending_targets(inb)
+        new_a, new_p = await _rematch_pending_targets({**inb, "tipo_documento": eff_tipo})
         persist = {}
         if (new_a or {}).get("id") and not (inb.get("target_anagrafica") or {}).get("id"):
             persist["target_anagrafica"] = new_a
         if (new_p or {}).get("id") and not (inb.get("target_polizza") or {}).get("id"):
             persist["target_polizza"] = new_p
+        # Se il tipo è stato dedotto dal nome file, correggi anche la classificazione
+        if eff_tipo != tipo and ((new_p or {}).get("id") or (new_a or {}).get("id")):
+            persist["tipo_documento"] = eff_tipo
         if persist:
             await db.documenti_inbox.update_one({"id": inb["id"]}, {"$set": persist})
             rematched += 1
