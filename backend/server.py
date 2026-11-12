@@ -17139,13 +17139,15 @@ async def _build_collab_annuale(u: dict, checklist: list, anno) -> dict:
     mancanti = sum(1 for i in items if i["stato"] in ("mancante", "scaduto"))
     completi = sum(1 for i in items if i["stato"] == "presente")
     return {"id": u["id"], "name": u.get("name") or u.get("email"), "email": u.get("email"),
-            "role": u.get("role"), "items": items, "mancanti": mancanti,
+            "role": u.get("role"), "attivo": u.get("attivo") is not False, "items": items, "mancanti": mancanti,
             "completi": completi, "totale": len(items)}
 
 
 @api.get("/collaboratori/documenti-annuali")
-async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str] = None, user=Depends(current_user)):
-    """Checklist documenti annuali per collaboratore. Admin vede tutti; gli altri solo i propri."""
+async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str] = None,
+                                   includi_inattivi: bool = False, user=Depends(current_user)):
+    """Checklist documenti annuali per collaboratore. Admin vede tutti; gli altri solo i propri.
+    Di default i collaboratori disattivati sono esclusi (includi_inattivi=true per mostrarli)."""
     from datetime import datetime as _dt
     if not anno:
         anno = _dt.now().year
@@ -17156,13 +17158,15 @@ async def documenti_annuali_collab(anno: Optional[int] = None, uid: Optional[str
     if is_admin and not uid:
         from tenant import user_tenant_id
         _tid = user_tenant_id(user)
-        q = {"role": {"$in": _RUOLI_COLLAB}, "attivo": {"$ne": False},
-             "is_super_admin": {"$ne": True}}
+        q = {"role": {"$in": _RUOLI_COLLAB}, "is_super_admin": {"$ne": True}}
+        if not includi_inattivi:
+            q["attivo"] = {"$ne": False}
         if _tid:
             q["agenzia_tenant_id"] = _tid
     else:
         q = {"id": uid or user.get("id")}
-    proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "documenti_collab": 1, "certificati_collab": 1}
+    proj = {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "attivo": 1,
+            "documenti_collab": 1, "certificati_collab": 1}
     users = await db.users.find(q, proj).to_list(2000)
     out = [await _build_collab_annuale(u, checklist, anno) for u in users]
     out.sort(key=lambda x: (x["name"] or "").lower())

@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -240,16 +241,17 @@ export default function DocumentiAnnualiCollab() {
     const [cfgOpen, setCfgOpen] = useState(false);
     const [expanded, setExpanded] = useState({});
     const [q, setQ] = useState("");
+    const [showInattivi, setShowInattivi] = useState(false);
 
     const isAdmin = user?.role === "admin";
 
     const load = useCallback(() => {
         setLoading(true);
-        api.get("/collaboratori/documenti-annuali", { params: { anno } })
+        api.get("/collaboratori/documenti-annuali", { params: { anno, includi_inattivi: showInattivi } })
             .then((r) => setData(r.data))
             .catch(() => toast.error("Errore caricamento"))
             .finally(() => setLoading(false));
-    }, [anno]);
+    }, [anno, showInattivi]);
 
     useEffect(() => { load(); }, [load]);
 
@@ -300,6 +302,10 @@ export default function DocumentiAnnualiCollab() {
                             <Input placeholder="Cerca collaboratore…" value={q} onChange={(e) => setQ(e.target.value)}
                                 className="pl-9" data-testid="search-collab" />
                         </div>
+                        <label className="flex items-center gap-2 text-xs text-slate-600 cursor-pointer w-fit" data-testid="toggle-inattivi-label">
+                            <Switch checked={showInattivi} onCheckedChange={setShowInattivi} data-testid="toggle-inattivi" />
+                            Mostra collaboratori disattivati
+                        </label>
                         {collaboratori.length === 0 ? <Empty message="Nessun collaboratore trovato." /> : (
                             <div className="space-y-2">
                                 {collaboratori.map((c) => {
@@ -312,7 +318,14 @@ export default function DocumentiAnnualiCollab() {
                                                 data-testid={`collab-row-${c.id}`}>
                                                 {open ? <ChevronDown size={16} className="text-slate-400" /> : <ChevronRight size={16} className="text-slate-400" />}
                                                 <div className="flex-1 min-w-0">
-                                                    <div className="font-medium text-sm text-slate-800 truncate">{c.name}</div>
+                                                    <div className="font-medium text-sm text-slate-800 truncate flex items-center gap-2">
+                                                        {c.name}
+                                                        {c.attivo === false && (
+                                                            <Badge variant="outline" className="bg-slate-100 text-slate-500 border-slate-300 text-[10px] font-normal" data-testid={`inattivo-${c.id}`}>
+                                                                Disattivato
+                                                            </Badge>
+                                                        )}
+                                                    </div>
                                                     <div className="text-[11px] text-slate-400 truncate">{c.email}</div>
                                                 </div>
                                                 <div className="flex items-center gap-1.5">

@@ -1,5 +1,12 @@
 # Changelog — Axicura CRM
 
+## 2026-11-12 — Documenti collaboratori: filtro "Mostra disattivati"
+- **Richiesta**: nascondere di default i collaboratori disattivati, con un interruttore per mostrarli.
+- **Backend** (`GET /api/collaboratori/documenti-annuali`): nuovo parametro `includi_inattivi` (default false). Di default la query admin esclude `attivo == False`; con `includi_inattivi=true` li include. Il campo `attivo` è ora restituito per ogni collaboratore.
+- **Frontend** (`DocumentiAnnualiCollab.jsx`): interruttore "Mostra collaboratori disattivati" (`data-testid="toggle-inattivi"`) accanto alla ricerca; i disattivati mostrano un badge grigio "Disattivato".
+- **Verifica API**: default 3 collaboratori (nasconde Sara disattivata di test), con toggle 4 (Sara con `attivo=false`); stato ripristinato dopo il test.
+
+
 ## 2026-11-12 — Documenti collaboratori: isolamento per tenant
 - **Bug**: la sezione "Documenti collaboratori" (Librerie → documenti annuali) elencava i collaboratori di TUTTI i tenant, perché la collezione `users` è condivisa (non tenant-scoped) e l'endpoint non filtrava per agenzia.
 - **Fix** (`server.py` · `GET /api/collaboratori/documenti-annuali`): la query admin ora filtra `is_super_admin != True` e `agenzia_tenant_id == user_tenant_id(user)`, come `GET /auth/users`. Il super-admin continua a vedere tutti i tenant.
