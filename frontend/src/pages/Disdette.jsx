@@ -36,6 +36,7 @@ export default function Disdette() {
     const [stato, setStato] = useState("all");
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
+    const [seq, setSeq] = useState(0);
 
     const load = () => {
         const params = stato !== "all" ? { stato } : {};
@@ -67,11 +68,11 @@ export default function Disdette() {
                 actions={
                     <Dialog open={open} onOpenChange={setOpen}>
                         <DialogTrigger asChild>
-                            <Button onClick={() => setEditing(null)} className="bg-rose-700 hover:bg-rose-800" data-testid="dis-new">
+                            <Button onClick={() => { setEditing(null); setSeq((s) => s + 1); }} className="bg-rose-700 hover:bg-rose-800" data-testid="dis-new">
                                 <Plus size={14} className="mr-1" /> Nuova disdetta
                             </Button>
                         </DialogTrigger>
-                        <DisdettaDialog editing={editing} onClose={() => { setOpen(false); setEditing(null); load(); }} />
+                        {open && <DisdettaDialog key={`${editing?.id || "new"}-${seq}`} editing={editing} onClose={() => { setOpen(false); setEditing(null); load(); }} />}
                     </Dialog>
                 }
             />
@@ -112,7 +113,7 @@ export default function Disdette() {
                     <table className="tbl-compact w-full text-xs">
                         <thead><tr>
                             <th>Compagnia da disdire</th><th>Cliente</th><th>N. polizza</th><th>Ramo</th>
-                            <th>Scadenza invio</th><th>Modalità</th><th>Stato</th><th className="w-20"></th>
+                            <th>Scadenza invio</th><th>Scad. polizza</th><th>Modalità</th><th>Stato</th><th className="w-20"></th>
                         </tr></thead>
                         <tbody>
                             {list.map((d) => {
@@ -134,10 +135,11 @@ export default function Disdette() {
                                                 </span>
                                             )}
                                         </td>
+                                        <td className="num">{d.data_scadenza_polizza || "—"}</td>
                                         <td className="uppercase">{d.modalita_invio || "—"}</td>
                                         <td><span className={`badge ${badgeClass(st.color)}`}>{st.l}</span></td>
                                         <td className="text-right space-x-1">
-                                            <button onClick={() => { setEditing(d); setOpen(true); }}
+                                            <button onClick={() => { setEditing(d); setSeq((s) => s + 1); setOpen(true); }}
                                                 className="text-sky-700 hover:bg-sky-50 p-1 rounded" data-testid={`dis-edit-${d.id}`}>
                                                 <Edit size={11} />
                                             </button>
@@ -350,7 +352,7 @@ function AllegatiDisdetta({ disdettaId }) {
                                 <a href={imgUrl(`${API_BASE}/allegati/${a.id}/download`)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline flex items-center gap-1 truncate">
                                     <Download size={11} /> {a.nome_file}
                                 </a>
-                                <button onClick={() => del(a.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded"><Trash2 size={11} /></button>
+                                <button onClick={() => del(a.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded" data-testid={`dis-alleg-del-${a.id}`}><Trash2 size={11} /></button>
                             </div>
                         ))}
             </div>
@@ -392,8 +394,8 @@ function RubricaManager({ rubrica, onChanged }) {
                         <div key={r.id} className="flex items-center justify-between text-xs border border-slate-200 rounded px-2 py-1" data-testid={`rub-row-${r.id}`}>
                             <div className="truncate"><span className="font-medium">{r.nome}</span>{r.pec ? <span className="text-slate-400"> · {r.pec}</span> : null}</div>
                             <div className="flex gap-1 shrink-0">
-                                <button onClick={() => edit(r)} className="text-sky-700 hover:bg-sky-50 p-1 rounded"><Edit size={11} /></button>
-                                <button onClick={() => del(r.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded"><Trash2 size={11} /></button>
+                                <button onClick={() => edit(r)} className="text-sky-700 hover:bg-sky-50 p-1 rounded" data-testid={`rub-edit-${r.id}`}><Edit size={11} /></button>
+                                <button onClick={() => del(r.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded" data-testid={`rub-del-${r.id}`}><Trash2 size={11} /></button>
                             </div>
                         </div>
                     ))}

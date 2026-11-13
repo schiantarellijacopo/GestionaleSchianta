@@ -457,6 +457,14 @@ async def disdetta_pdf(did: str, user=Depends(current_user)):
         cliente_indirizzo = ", ".join(x for x in [_ind, _loc.strip()] if x)
 
     styles = getSampleStyleSheet()
+    # Escape user-provided text per evitare markup rotto nei Paragraph reportlab
+    from xml.sax.saxutils import escape as _esc
+    for _k in ("destinatario_nome", "destinatario_indirizzo", "destinatario_pec",
+               "compagnia_da_disdire", "numero_polizza", "ramo", "note"):
+        if d.get(_k):
+            d[_k] = _esc(str(d[_k]))
+    cliente_nome = _esc(cliente_nome or "")
+    cliente_indirizzo = _esc(cliente_indirizzo or "")
     body = ParagraphStyle("body", parent=styles["Normal"], fontSize=11, leading=16)
     small = ParagraphStyle("small", parent=styles["Normal"], fontSize=10, leading=14)
     right = ParagraphStyle("right", parent=body, alignment=2)

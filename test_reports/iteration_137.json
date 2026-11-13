@@ -1,0 +1,34 @@
+{
+  "summary": "Tested the Disdette enhancements on the backend and frontend as admin@assicura.it. Backend: 11/11 pytest pass. Covered: rubrica CRUD (201/200/404, empty name rejected, no _id, 401 without auth), creating and updating a disdetta with the new fields (data_scadenza_polizza, destinatario_*, polizza_emessa), the PDF (200, application/pdf, %PDF header, also with ?token= query, and 404 for an unknown id; names containing & and < do not crash it), and upload/list/delete of an allegato with entita_tipo=disdetta. UI: login form works with no bootstrap hang. The new-disdetta dialog shows all the new fields. The nested rubrica dialog adds a row, and Escape closes only the rubrica dialog. Picking the rubrica entry auto-fills Nome/Indirizzo/PEC. Create adds a row to the table. In edit mode the PDF link points to /api/disdette/{id}/pdf?token=... and returns 200 application/pdf. Upload shows the attachment and the trash button removes it. Deleting the disdetta works. CRITICAL BUG: the edit dialog shows stale form state instead of the selected record.",
+  "backend_issues": {"critical": [], "minor": [
+    {"endpoint": "GET /api/disdette/{id}/pdf", "issue": "User text (destinatario_nome, compagnia, note) goes into reportlab Paragraph markup without escaping. It does not crash, but text like '<srl>' may be silently dropped or mis-rendered. Pass the values through xml.sax.saxutils.escape()."}
+  ]},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Disdette.jsx DisdettaDialog", "issue": "The form state comes from useState(editing || {...}) only once. DisdettaDialog stays mounted under <Dialog> and only DialogContent unmounts. Result: after a fresh page load, clicking dis-edit-{id} opens 'Modifica disdetta' with all fields EMPTY (compagnia='', destinatario=''). After typing in 'Nuova disdetta' and closing, editing a record shows the typed text 'TEST_Typed' instead of the record. Clicking 'Aggiorna' in this state PUTs the stale/empty form, and PUT replaces the full body, so the record's data is overwritten (DATA LOSS). Also, after creating one disdetta, the next 'Nuova disdetta' keeps the previous values. Fix: add a key to <DisdettaDialog>, e.g. key={editing?.id || `new-${n}`} with n bumped on each open. Or add useEffect(() => setF(editing || EMPTY), [editing, open]).", "selector": "[data-testid^='dis-edit-']", "priority": "CRITICAL"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Disdette table", "issues": ["The new 'Scadenza polizza' and the destinatario are not shown in the list table, so the user cannot see the new-policy deadline without opening each record.", "The attachment trash button and the rubrica edit/delete buttons have no data-testid."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter137_disdette_rubrica_pdf.py", "/app/test_reports/pytest/pytest_iter137.xml"],
+  "action_items": [
+    "CRITICAL: Fix DisdettaDialog stale state (key prop or useEffect reset on editing/open). Today, editing a disdetta shows empty or stale fields, and saving overwrites the record.",
+    "Escape user text in the reportlab Paragraphs of the PDF endpoint.",
+    "Add data-testid to the allegato delete button (dis-alleg-del-{id}) and the rubrica edit/delete buttons (rub-edit-{id}, rub-del-{id}).",
+    "Optional: show data_scadenza_polizza in the Disdette table."
+  ],
+  "critical_code_review_comments": [
+    "Disdette.jsx: DisdettaDialog useState initializer is never re-run (root cause of the edit bug).",
+    "PUT /disdette/{id} uses the full model_dump(), so any stale or partial client body wipes fields. This amplifies the frontend bug.",
+    "The cron second loop looks correct: it filters polizza_emessa != True and data_scadenza_polizza <= today + DISDETTE_EMISSIONE_DAYS (10), with a daily dedup. Not run (needs WEBHOOK_CRON_SECRET)."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter137_disdette_rubrica_pdf.py"],
+  "success_rate": {"backend": "100%", "frontend": "85%"},
+  "seed_data_creation": "None. All TEST_ rubrica entries, disdette and allegati were deleted after the tests.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login with the form at /login (input[type=email], Enter). To retest the fix: reload /disdette, click dis-edit-{id} first, and check that dis-compagnia holds the record's value. Then open dis-new: it must be empty. Run the backend regression: test_iter137_disdette_rubrica_pdf.py.",
+  "rca of the issue": "Reproduce: create a disdetta, reload /disdette, click its edit icon. Every field is empty although the title says 'Modifica disdetta'. Cause: DisdettaDialog is always rendered as a child of <Dialog>, and Radix only unmounts DialogContent, so the useState initial value from the first render (editing=null) is kept forever. Mitigation: remount the dialog with a key, or sync the state with useEffect."
+}
