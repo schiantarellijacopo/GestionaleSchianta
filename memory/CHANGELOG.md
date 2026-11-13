@@ -1,5 +1,14 @@
 # Changelog — Axicura CRM
 
+## 2026-11-13 (refine) — Libro Matricola: documenti nel riquadro del veicolo
+- La polizza master del Libro Matricola NON ha targa a livello polizza (la targa è sulle applicazioni). Lo scanner ora, se un documento porta una targa (OCR o nome file), cerca l'APPLICAZIONE del tenant per targa, adotta la sua polizza master come entità e imposta `applicazione_matricola_id` → il file appare nei riquadri del veicolo (dialog "Documenti veicolo").
+- Cartelle Drive "Libro Matricola applicazioni" / "Certificati assicurativi" ora mappate a `quietanza` → i certificati assicurativi finiscono nella card "Quietanze" del veicolo.
+- Regex targa da nome file estesa ai formati Libro Matricola (es. AB00313, AA91159).
+- Lookup applicazione scoperto per `agenzia_tenant_id` (lo scanner gira senza contesto-tenant di request).
+- Back-fill avvio aggiornato: collega i libretti già importati all'applicazione confrontando la targa del nome file con le targhe reali delle applicazioni della polizza (gestisce anche targhe speciali).
+- Verificato con insert reale (tenant c5ae2d0e, targa AA41979): libretto→card Libretto veicolo, certificato→card Quietanze, entrambi collegati all'applicazione d5f6735c.
+
+
 ## 2026-11-13 — Fix libretti/quietanze da Drive + nuova Libreria Targhe
 ### Bug fix OCR scanner (Drive)
 - `cloud_ocr_scanner.py`: i libretti importati da Drive venivano salvati con categoria `libretto_circolazione` → finivano in "Documenti altri" e non nel riquadro "Libretto veicolo". Corretto in `libretto_veicolo` (CAT_MAP + lista visibile_cliente).

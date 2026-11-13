@@ -72,9 +72,11 @@ INBOX_SUBFOLDERS_MAP = {
     "quietanze":            "quietanza",
     "quietanza":            "quietanza",
     # ── Libro Matricola (certificati assicurativi per veicoli) ────────
-    "libro matricola applicazioni": "polizza_frontespizio",
-    "libro matricola":              "polizza_frontespizio",
-    "certificati assicurativi":     "polizza_frontespizio",
+    # I certificati/quietanze per singolo veicolo vanno nella card "Quietanze"
+    # dell'applicazione (match per targa → applicazione_matricola_id).
+    "libro matricola applicazioni": "quietanza",
+    "libro matricola":              "quietanza",
+    "certificati assicurativi":     "quietanza",
     # ── Sinistri / Contabilità ────────────────────────────────────────
     "denunce sinistro":     "denuncia_sinistro",
     "denunce":              "denuncia_sinistro",
@@ -1018,7 +1020,7 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
     # (es. "LIBRETTO - GY308AK.pdf", "QUIETANZA GY308AK.pdf"), la usiamo per
     # abbinare la polizza/applicazione del libro matricola.
     if not (data.get("targa") or "").strip():
-        m = re.search(r"\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2})\b", (name or "").upper())
+        m = re.search(r"\b([A-Z]{2}\s?\d{3,6}\s?[A-Z]{0,2})\b", (name or "").upper())
         if m:
             data["targa"] = m.group(1).replace(" ", "")
             classification["dati_estratti"] = data
@@ -1200,6 +1202,26 @@ async def _create_crm_attachment(
         "bonifico": ("anagrafica", "bonifico"),
         "rid": ("anagrafica", "rid"),
     }
+    data_ocr = classification.get("dati_estratti") or {}
+    targa_up = (data_ocr.get("targa") or "").upper().strip()
+
+    # ── Libro Matricola: la polizza master NON ha targa a livello polizza; la
+    # targa vive sulle APPLICAZIONI. Se il documento porta una targa (OCR o nome
+    # file), cerchiamo l'applicazione del tenant e, se non abbiamo già una
+    # polizza, adottiamo la sua polizza master come entità. Vale per libretto,
+    # quietanza/certificato assicurativo, ecc.
+    lm_app = None
+    if targa_up:
+        app_q = {"targa": {"$regex": f"^{re.escape(targa_up)}$", "$options": "i"}}
+        if tenant_id and tenant_id != "default":
+            app_q["agenzia_tenant_id"] = tenant_id
+        lm_app = await db.applicazioni.find_one(app_q, {"_id": 0, "id": 1, "polizza_id": 1})
+    if lm_app and not pol and lm_app.get("polizza_id"):
+        pol = await db.polizze.find_one(
+            {"id": lm_app["polizza_id"]},
+            {"_id": 0, "id": 1, "is_libro_matricola": 1, "numero_polizza": 1, "contraente_id": 1},
+        )
+
     entita_tipo, categoria = CAT_MAP.get(tipo_doc, ("anagrafica", "altro"))
     entita_id = None
     if entita_tipo == "anagrafica" and ana:
@@ -1216,22 +1238,17 @@ async def _create_crm_attachment(
 
     # ── Enrichment: applicazione_matricola_id (per polizze Libro Matricola)
     # e titolo_id (per quietanze).
-    data_ocr = classification.get("dati_estratti") or {}
     applicazione_matricola_id = None
     titolo_id_for_quietanza = None
     titolo_periodo_desc = None  # es. "Quietanza · periodo 17/07/2026 → 29/07/2026"
 
-    # 1) Se la polizza è Libro Matricola e c'è una targa → match applicazione
-    if pol and pol.get("is_libro_matricola") and data_ocr.get("targa"):
-        targa_up = data_ocr["targa"].upper().strip()
-        app = await db.applicazioni.find_one(
-            {"polizza_id": pol["id"], "targa": {"$regex": f"^{targa_up}$", "$options": "i"}},
-            {"_id": 0, "id": 1},
-        )
-        if app:
-            applicazione_matricola_id = app["id"]
-            logger.info("Libro Matricola: allegato collegato all'applicazione %s (targa %s)",
-                       app["id"], targa_up)
+    # Collega all'applicazione se il doc è finito sulla polizza master di quella
+    # applicazione (targa combaciante) → appare nelle card del veicolo.
+    if (entita_tipo == "polizza" and lm_app and pol
+            and lm_app.get("polizza_id") == pol.get("id")):
+        applicazione_matricola_id = lm_app["id"]
+        logger.info("Libro Matricola: allegato collegato all'applicazione %s (targa %s)",
+                    lm_app["id"], targa_up)
 
     # 2) Se è una quietanza e la polizza è nota → trova il TITOLO di riferimento
     # (creerò un secondo allegato collegato al titolo per l'icona 📎 nella lista Titoli)

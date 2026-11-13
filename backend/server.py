@@ -20725,37 +20725,38 @@ async def startup():
     # Back-fill idempotente #2: gli allegati importati dallo scanner OCR Drive
     # con categoria legacy 'libretto_circolazione' vanno rinominati nella card
     # canonica 'libretto_veicolo'. Inoltre, per le polizze Libro Matricola,
-    # colleghiamo l'allegato all'applicazione del veicolo (match per targa)
-    # se non già collegato, così appare nel riquadro "Libretto veicolo" del veicolo.
+    # colleghiamo l'allegato all'applicazione del veicolo (targa presente nel
+    # nome file) se non già collegato, così appare nel riquadro del veicolo.
     try:
         import re as _re2
-        _rx_targa = _re2.compile(r"\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2})\b")
+        _norm = lambda s: _re2.sub(r"[^A-Z0-9]", "", (s or "").upper())
         _cur2 = raw_db.allegati.find(
-            {"categoria": "libretto_circolazione"},
+            {"categoria": {"$in": ["libretto_circolazione", "libretto_veicolo"]}},
             {"_id": 0, "id": 1, "entita_tipo": 1, "entita_id": 1,
-             "nome_file": 1, "applicazione_matricola_id": 1})
+             "categoria": 1, "nome_file": 1, "applicazione_matricola_id": 1})
         _n2 = 0
         async for _a in _cur2:
-            _set = {"categoria": "libretto_veicolo"}
-            # Collega all'applicazione del libro matricola se manca
+            _set = {}
+            if _a.get("categoria") == "libretto_circolazione":
+                _set["categoria"] = "libretto_veicolo"
             if (_a.get("entita_tipo") == "polizza" and _a.get("entita_id")
                     and not _a.get("applicazione_matricola_id")):
                 _pol = await raw_db.polizze.find_one(
                     {"id": _a["entita_id"]}, {"_id": 0, "is_libro_matricola": 1})
                 if _pol and _pol.get("is_libro_matricola"):
-                    _m = _rx_targa.search((_a.get("nome_file") or "").upper())
-                    if _m:
-                        _targa = _m.group(1).replace(" ", "")
-                        _app = await raw_db.applicazioni.find_one(
-                            {"polizza_id": _a["entita_id"],
-                             "targa": {"$regex": f"^{_targa}$", "$options": "i"}},
-                            {"_id": 0, "id": 1})
-                        if _app:
+                    _fn = _norm(_a.get("nome_file"))
+                    async for _app in raw_db.applicazioni.find(
+                        {"polizza_id": _a["entita_id"], "targa": {"$nin": [None, ""]}},
+                        {"_id": 0, "id": 1, "targa": 1}):
+                        _tn = _norm(_app.get("targa"))
+                        if _tn and len(_tn) >= 5 and _tn in _fn:
                             _set["applicazione_matricola_id"] = _app["id"]
-            await raw_db.allegati.update_one({"id": _a["id"]}, {"$set": _set})
-            _n2 += 1
+                            break
+            if _set:
+                await raw_db.allegati.update_one({"id": _a["id"]}, {"$set": _set})
+                _n2 += 1
         if _n2:
-            logger.info("Back-fill libretto_veicolo: %s allegati migrati", _n2)
+            logger.info("Back-fill libretto_veicolo: %s allegati aggiornati", _n2)
     except Exception as _e:
         logger.warning("Back-fill libretto_veicolo non riuscito: %s", _e)
 
