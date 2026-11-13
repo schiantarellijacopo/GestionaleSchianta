@@ -1,0 +1,21 @@
+{
+  "summary": "Frontend retest of the Disdette module (iteration_137 fixes). CRITICAL stale-state/data-loss bug is RESOLVED: the new-disdetta form is empty after a previous create; Edit opens prefilled with the correct record (compagnia + scadenza polizza); Edit A -> Aggiorna updates only A, B is unchanged (verified in the UI table and via GET /api/disdette). Switching Edit B -> Edit A -> Nuova always shows the correct state. Rubrica add/edit(rub-edit)/delete(rub-del) works; the nested dialog closes without closing the parent; picking a rubrica entry in dis-rubrica-select auto-fills nome/indirizzo/pec and the values persist after Aggiorna. Allegati: upload via dis-upload shows a row, download returns 200, and dis-alleg-del removes the row. dis-pdf-link -> GET /api/disdette/{id}/pdf returns 200 application/pdf. The 'Scad. polizza' column is present and populated. All test data was cleaned up through the UI.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "The PDF and allegato download links put the JWT access token in the URL query string (?token=...). That exposes it in browser history and access logs. Acceptable for now, but consider short-lived signed URLs.",
+    "The Edit dialog's state is seeded from the list row object (editing = d). This works because of the remount key. Any computed fields in the list response (e.g. anagrafica_nome) are sent back in the PUT payload; the backend should ignore or whitelist them."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped as requested)", "frontend": "100%"},
+  "seed_data_creation": "Created and then deleted via the UI: disdette 'AAA First(EDIT)' and 'BBB Second', rubrica 'TEST_Agenzia Blu2', 1 allegato TEST_alleg.txt.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Disdette page at /disdette. Login via login-email-input/login-password-input/login-submit-button. Confirm dialogs (window.confirm) are used for delete, so register an async dialog accept handler. File input lives inside the label [data-testid=dis-upload] input[type=file]. The rubrica nested dialog closes with one Escape keypress."
+}

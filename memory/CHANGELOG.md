@@ -1,5 +1,17 @@
 # Changelog — Axicura CRM
 
+## 2026-11-13 — Modulo Disdette potenziato
+- Nuovi campi disdetta: destinatario (nome assicurazione/agenzia, indirizzo, PEC), scadenza polizza, flag "nuova polizza emessa".
+- Rubrica destinatari gestita a mano: CRUD `/api/disdette-destinatari`; nel form un Select carica i dati salvati (nome/indirizzo/PEC) e li ripropone.
+- Sezione allegati per disdetta (upload/download/delete) — `entita_tipo="disdetta"` abilitato (server.py + db_models Literal).
+- Generazione PDF lettera di disdetta/recesso (solo testo, reportlab) via `GET /api/disdette/{id}/pdf`, con escaping dei campi utente.
+- Promemoria: oltre all'avviso "invia disdetta in tempo", aggiunto avviso "emetti la nuova polizza" alcuni giorni prima della scadenza polizza (cron giornaliero esistente esteso; env DISDETTE_EMISSIONE_DAYS, default 10; dedup `ultimo_promemoria_emissione`).
+- `disdette` e `disdette_destinatari` aggiunte a TENANT_SCOPED_COLLECTIONS (isolamento + auto-assegnazione tenant, necessario al cron).
+- Tabella: nuova colonna "Scad. polizza".
+- Fix critico UI (post-test): il dialog ora si rimonta ad ogni apertura (key+seq) → niente più campi vuoti/stale in modifica né sovrascrittura del record.
+- Testato (testing agent): backend 100%, frontend 100% — create/edit senza data-loss, rubrica, allegati, PDF.
+
+
 ## 2026-11-13 (refine) — Libro Matricola: documenti nel riquadro del veicolo
 - La polizza master del Libro Matricola NON ha targa a livello polizza (la targa è sulle applicazioni). Lo scanner ora, se un documento porta una targa (OCR o nome file), cerca l'APPLICAZIONE del tenant per targa, adotta la sua polizza master come entità e imposta `applicazione_matricola_id` → il file appare nei riquadri del veicolo (dialog "Documenti veicolo").
 - Cartelle Drive "Libro Matricola applicazioni" / "Certificati assicurativi" ora mappate a `quietanza` → i certificati assicurativi finiscono nella card "Quietanze" del veicolo.
