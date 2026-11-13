@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, TrendingDown, AlertTriangle, Send, FileText, Paperclip, BookUser, Download, Upload, X } from "lucide-react";
+import { Plus, Edit, Trash2, TrendingDown, AlertTriangle, Send, FileText, Paperclip, BookUser, Download, Upload, X, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 const STATI = [
@@ -58,6 +58,10 @@ export default function Disdette() {
     const del = async (id) => {
         if (!window.confirm("Eliminare la disdetta?")) return;
         await api.delete(`/disdette/${id}`); toast.success("Eliminata"); load();
+    };
+    const markEmessa = async (id) => {
+        await api.post(`/disdette/${id}/collega-polizza`, {});
+        toast.success("Polizza segnata come emessa — promemoria chiuso"); load();
     };
 
     return (
@@ -139,6 +143,15 @@ export default function Disdette() {
                                         <td className="uppercase">{d.modalita_invio || "—"}</td>
                                         <td><span className={`badge ${badgeClass(st.color)}`}>{st.l}</span></td>
                                         <td className="text-right space-x-1">
+                                            {d.polizza_emessa ? (
+                                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold px-1 py-0.5 rounded bg-emerald-100 text-emerald-700" title={d.polizza_nuova_numero ? `Polizza sostitutiva: ${d.polizza_nuova_numero}` : "Nuova polizza emessa"} data-testid={`dis-emessa-${d.id}`}>
+                                                    <CheckCircle2 size={10} /> emessa
+                                                </span>
+                                            ) : (
+                                                <button onClick={() => markEmessa(d.id)} className="text-emerald-700 hover:bg-emerald-50 p-1 rounded" title="Segna nuova polizza emessa (chiude il promemoria)" data-testid={`dis-emessa-btn-${d.id}`}>
+                                                    <CheckCircle2 size={11} />
+                                                </button>
+                                            )}
                                             <button onClick={() => { setEditing(d); setSeq((s) => s + 1); setOpen(true); }}
                                                 className="text-sky-700 hover:bg-sky-50 p-1 rounded" data-testid={`dis-edit-${d.id}`}>
                                                 <Edit size={11} />
@@ -288,10 +301,31 @@ function DisdettaDialog({ editing, onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
-                <label className="col-span-2 flex items-center gap-2 text-xs text-slate-700 mt-1 cursor-pointer" data-testid="dis-polizza-emessa">
-                    <input type="checkbox" checked={!!f.polizza_emessa} onChange={(e) => set("polizza_emessa", e.target.checked)} />
-                    Nuova polizza sostitutiva già emessa (disattiva il promemoria di emissione)
-                </label>
+                <div className="col-span-2 border border-slate-200 rounded-md p-3 bg-emerald-50/40">
+                    <div className="text-[11px] uppercase tracking-wide font-semibold text-slate-600 flex items-center gap-1 mb-2"><CheckCircle2 size={13} className="text-emerald-600" /> Polizza sostitutiva emessa</div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div>
+                            <Label className="text-xs">Collega polizza del cliente</Label>
+                            <Select value={f.polizza_nuova_id || "__none__"} onValueChange={(v) => {
+                                if (v === "__none__") { setF((p) => ({ ...p, polizza_nuova_id: "", polizza_nuova_numero: "" })); return; }
+                                const p = polizze.find((x) => x.id === v);
+                                setF((prev) => ({ ...prev, polizza_nuova_id: v, polizza_nuova_numero: p?.numero_polizza || "", polizza_emessa: true }));
+                            }}>
+                                <SelectTrigger data-testid="dis-polizza-nuova"><SelectValue placeholder={f.anagrafica_id ? "— scegli —" : "seleziona prima il cliente"} /></SelectTrigger>
+                                <SelectContent className="max-h-80">
+                                    <SelectItem value="__none__">— nessuna —</SelectItem>
+                                    {polizze.map((p) => <SelectItem key={p.id} value={p.id}>{p.numero_polizza} · {p.ramo || ""}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div><Label className="text-xs">Oppure n. polizza</Label>
+                            <Input value={f.polizza_nuova_numero || ""} onChange={(e) => set("polizza_nuova_numero", e.target.value)} placeholder="numero polizza" data-testid="dis-polizza-nuova-num" /></div>
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-slate-700 mt-2 cursor-pointer" data-testid="dis-polizza-emessa">
+                        <input type="checkbox" checked={!!f.polizza_emessa} onChange={(e) => set("polizza_emessa", e.target.checked)} />
+                        Nuova polizza emessa (chiude il promemoria di emissione)
+                    </label>
+                </div>
                 <div className="col-span-2"><Label className="text-xs">Note</Label>
                     <Textarea rows={2} value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
 

@@ -1,5 +1,13 @@
 # Changelog — Axicura CRM
 
+## 2026-11-13 — Disdette: collega polizza sostitutiva (chiudi promemoria con un clic)
+- Nuovo endpoint `POST /api/disdette/{id}/collega-polizza`: imposta `polizza_emessa=true` (chiude il promemoria di emissione) e, se passata, collega `polizza_nuova_id`/`polizza_nuova_numero`. Chiamabile anche senza body per la chiusura rapida dalla lista.
+- Campi disdetta `polizza_nuova_id` / `polizza_nuova_numero`.
+- UI lista: pulsante ✓ "Segna emessa" (un clic) sulle righe non ancora emesse; badge verde "emessa" (con tooltip n. polizza) su quelle collegate.
+- UI dialog: riquadro "Polizza sostitutiva emessa" con Select delle polizze del cliente (o numero a mano) che collega la polizza e spunta automaticamente "emessa".
+- Verificato via curl: chiusura rapida e collegamento con numero. Frontend compila.
+
+
 ## 2026-11-13 — Modulo Disdette potenziato
 - Nuovi campi disdetta: destinatario (nome assicurazione/agenzia, indirizzo, PEC), scadenza polizza, flag "nuova polizza emessa".
 - Rubrica destinatari gestita a mano: CRUD `/api/disdette-destinatari`; nel form un Select carica i dati salvati (nome/indirizzo/PEC) e li ripropone.

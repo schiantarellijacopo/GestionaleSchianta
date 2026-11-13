@@ -326,6 +326,8 @@ class DisdettaBody(BaseModel):
     destinatario_indirizzo: Optional[str] = None
     destinatario_pec: Optional[str] = None
     polizza_emessa: bool = False               # nuova polizza sostitutiva già emessa?
+    polizza_nuova_id: Optional[str] = None     # polizza sostitutiva collegata
+    polizza_nuova_numero: Optional[str] = None
 
 
 class DestinatarioDisdettaBody(BaseModel):
@@ -417,6 +419,28 @@ async def delete_disdetta(did: str, user=Depends(require_user("admin", "collabor
     if res.deleted_count == 0:
         raise HTTPException(404, "Disdetta non trovata")
     return {"ok": True}
+
+
+class CollegaPolizzaBody(BaseModel):
+    polizza_nuova_id: Optional[str] = None
+    polizza_nuova_numero: Optional[str] = None
+
+
+@router.post("/disdette/{did}/collega-polizza")
+async def collega_polizza_disdetta(did: str, body: CollegaPolizzaBody = CollegaPolizzaBody(),
+                                   user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    """Collega la polizza sostitutiva emessa alla disdetta e chiude il promemoria
+    di emissione (polizza_emessa=True). Chiamabile anche senza polizza per la
+    chiusura rapida 'con un clic' dalla lista."""
+    upd = {"polizza_emessa": True, "updated_at": _now_iso()}
+    if body.polizza_nuova_id:
+        upd["polizza_nuova_id"] = body.polizza_nuova_id
+    if body.polizza_nuova_numero:
+        upd["polizza_nuova_numero"] = body.polizza_nuova_numero
+    res = await db.disdette.update_one({"id": did}, {"$set": upd})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Disdetta non trovata")
+    return await _enrich_disdetta(await db.disdette.find_one({"id": did}, {"_id": 0}))
 
 
 def _fmt_data_it(s: Optional[str]) -> str:
