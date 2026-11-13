@@ -1014,6 +1014,15 @@ async def _process_file(db, provider: str, token: str, tenant_id: str,
 
     data = classification.get("dati_estratti") or {}
 
+    # Fallback targa: se l'OCR non ha letto la targa ma compare nel nome file
+    # (es. "LIBRETTO - GY308AK.pdf", "QUIETANZA GY308AK.pdf"), la usiamo per
+    # abbinare la polizza/applicazione del libro matricola.
+    if not (data.get("targa") or "").strip():
+        m = re.search(r"\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2})\b", (name or "").upper())
+        if m:
+            data["targa"] = m.group(1).replace(" ", "")
+            classification["dati_estratti"] = data
+
     # Match nel CRM (crea anagrafica automaticamente se manca e ci sono dati sufficienti)
     ana, anagrafica_creata = await _find_or_create_anagrafica(db, tenant_id, data)
     pol = await _find_polizza(db, tenant_id, data)
@@ -1183,7 +1192,7 @@ async def _create_crm_attachment(
         "codice_fiscale": ("anagrafica", "codice_fiscale"),
         "privacy": ("anagrafica", "privacy"),
         "visura_camerale": ("anagrafica", "visura_camerale"),
-        "libretto_circolazione": ("polizza", "libretto_circolazione"),
+        "libretto_circolazione": ("polizza", "libretto_veicolo"),
         "polizza_frontespizio": ("polizza", "polizza"),
         "quietanza": ("polizza", "quietanza"),
         "denuncia_sinistro": ("sinistro", "denuncia"),
@@ -1343,7 +1352,7 @@ async def _create_crm_attachment(
             "tessera_sanitaria", "visura_camerale", "rid",
             # Polizza
             "polizza", "condizioni", "quietanza", "libretto_pagamento",
-            "libretto_circolazione", "atto_vendita",
+            "libretto_veicolo", "atto_vendita",
         ),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),

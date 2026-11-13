@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Link, useNavigate } from "react-router-dom";
-import { api, fmtDate, fmtEur, API_BASE } from "@/lib/api";
+import { api, fmtDate, fmtEur, API_BASE, imgUrl } from "@/lib/api";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { openPdf } from "@/lib/pdf";
 import { PageHeader, StatusBadge, Loading, Empty } from "@/components/Shared";
@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import {
     Search, Plus, ScanLine, Filter, X, Printer, FileSpreadsheet, FileText,
-    ChevronDown, ChevronUp, Car, Upload,
+    ChevronDown, ChevronUp, Car, Upload, BookOpen,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -527,6 +527,7 @@ function NuovaPolizzaDialog({ onClose }) {
     const [collabQuery, setCollabQuery] = useState("");
     const [showCollabList, setShowCollabList] = useState(false);
     const [targaLoading, setTargaLoading] = useState(false);
+    const [librettoSuggerito, setLibrettoSuggerito] = useState(null);  // {libretto, proprietario, veicolo} dalla Libreria Targhe
     const [f, setF] = useState({
         numero_polizza: "", compagnia_id: "", contraente_id: "",
         ramo: "", prodotto: "", effetto: "", scadenza: "",
@@ -648,6 +649,10 @@ function NuovaPolizzaDialog({ onClose }) {
             return;
         }
         setTargaLoading(true);
+        // Suggerimento Libreria Targhe: libretto/proprietario già in archivio
+        api.get(`/librerie/targhe/lookup/${encodeURIComponent(t)}`)
+            .then((r) => setLibrettoSuggerito(r.data?.trovata ? r.data : null))
+            .catch(() => setLibrettoSuggerito(null));
         try {
             try {
                 const r = await api.get(`/veicoli/by-targa/${encodeURIComponent(t)}`);
@@ -1171,7 +1176,7 @@ function NuovaPolizzaDialog({ onClose }) {
                                 <Input
                                     value={f.targa}
                                     placeholder="Es. AB123CD"
-                                    onChange={(e) => set("targa", e.target.value.toUpperCase())}
+                                    onChange={(e) => { set("targa", e.target.value.toUpperCase()); setLibrettoSuggerito(null); }}
                                     onBlur={(e) => { const t = e.target.value.trim(); if (t.length >= 4) lookupTarga(t); }}
                                     data-testid="pol-targa-input"
                                 />
@@ -1182,6 +1187,24 @@ function NuovaPolizzaDialog({ onClose }) {
                             {veicoloInfo && (
                                 <div className="text-[11px] text-emerald-700 mt-1">
                                     {veicoloInfo.fonte === "libro_matricola" ? "Dati dal Libro Matricola" : "Dati da polizza precedente"} — compilati automaticamente
+                                </div>
+                            )}
+                            {librettoSuggerito && librettoSuggerito.libretto && (
+                                <div className="mt-2 flex items-start gap-2 text-[11px] bg-indigo-50 border border-indigo-200 rounded-md px-2.5 py-2" data-testid="libretto-suggerito">
+                                    <BookOpen size={14} className="text-indigo-600 mt-0.5 shrink-0" />
+                                    <div className="flex-1">
+                                        <span className="text-indigo-800 font-medium">Libretto già in archivio per questa targa</span>
+                                        {librettoSuggerito.proprietario && <span className="text-indigo-700"> · intestatario: {librettoSuggerito.proprietario}</span>}
+                                        <a
+                                            href={imgUrl(`${API_BASE}${librettoSuggerito.libretto.download_url}`)}
+                                            target="_blank" rel="noreferrer"
+                                            className="block text-indigo-700 underline mt-0.5"
+                                            data-testid="libretto-suggerito-link"
+                                        >
+                                            {librettoSuggerito.libretto.nome_file || "Visualizza libretto"}
+                                        </a>
+                                        <span className="text-indigo-600/80">Non serve ricaricarlo: lo trovi nella Libreria Targhe.</span>
+                                    </div>
                                 </div>
                             )}
                         </div>

@@ -19851,6 +19851,7 @@ api.include_router(_incentiv_router.router)
 from routes import agenzie as _age_router  # noqa: E402
 from routes import setup_scambio as _setup_router  # noqa: E402
 from routes import documenti_inbox as _docinbox_router  # noqa: E402
+from routes import libreria_targhe as _targhe_router  # noqa: E402
 from routes import extras_p1p2 as _extras_router  # noqa: E402
 from routes import whatsapp_evo as _wa_evo_router  # noqa: E402
 from routes import ai_chat as _ai_chat_router  # noqa: E402
@@ -19900,6 +19901,7 @@ api.include_router(_comm_router.router)
 api.include_router(_age_router.router)
 api.include_router(_setup_router.router)
 api.include_router(_docinbox_router.router)
+api.include_router(_targhe_router.router)
 api.include_router(_extras_router.router)
 api.include_router(_wa_evo_router.router)
 api.include_router(_ai_chat_router.router)
@@ -20719,6 +20721,43 @@ async def startup():
             logger.info("Back-fill categorie inbox: %s allegati ricategorizzati", _n)
     except Exception as _e:
         logger.warning("Back-fill categorie inbox non riuscito: %s", _e)
+
+    # Back-fill idempotente #2: gli allegati importati dallo scanner OCR Drive
+    # con categoria legacy 'libretto_circolazione' vanno rinominati nella card
+    # canonica 'libretto_veicolo'. Inoltre, per le polizze Libro Matricola,
+    # colleghiamo l'allegato all'applicazione del veicolo (match per targa)
+    # se non già collegato, così appare nel riquadro "Libretto veicolo" del veicolo.
+    try:
+        import re as _re2
+        _rx_targa = _re2.compile(r"\b([A-Z]{2}\s?\d{3}\s?[A-Z]{2})\b")
+        _cur2 = raw_db.allegati.find(
+            {"categoria": "libretto_circolazione"},
+            {"_id": 0, "id": 1, "entita_tipo": 1, "entita_id": 1,
+             "nome_file": 1, "applicazione_matricola_id": 1})
+        _n2 = 0
+        async for _a in _cur2:
+            _set = {"categoria": "libretto_veicolo"}
+            # Collega all'applicazione del libro matricola se manca
+            if (_a.get("entita_tipo") == "polizza" and _a.get("entita_id")
+                    and not _a.get("applicazione_matricola_id")):
+                _pol = await raw_db.polizze.find_one(
+                    {"id": _a["entita_id"]}, {"_id": 0, "is_libro_matricola": 1})
+                if _pol and _pol.get("is_libro_matricola"):
+                    _m = _rx_targa.search((_a.get("nome_file") or "").upper())
+                    if _m:
+                        _targa = _m.group(1).replace(" ", "")
+                        _app = await raw_db.applicazioni.find_one(
+                            {"polizza_id": _a["entita_id"],
+                             "targa": {"$regex": f"^{_targa}$", "$options": "i"}},
+                            {"_id": 0, "id": 1})
+                        if _app:
+                            _set["applicazione_matricola_id"] = _app["id"]
+            await raw_db.allegati.update_one({"id": _a["id"]}, {"$set": _set})
+            _n2 += 1
+        if _n2:
+            logger.info("Back-fill libretto_veicolo: %s allegati migrati", _n2)
+    except Exception as _e:
+        logger.warning("Back-fill libretto_veicolo non riuscito: %s", _e)
 
     # Chiavi AI dal vault super-admin: priorità al pannello Chiavi API.
     # ai_studio_api_key → GEMINI_API_KEY, openai_api_key → OPENAI_API_KEY.

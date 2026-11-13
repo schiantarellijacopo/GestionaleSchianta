@@ -9,7 +9,7 @@ import {
     NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, Search, TrendingDown, Handshake, ListChecks,
     Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine,
     GripVertical, Settings2, Check, Megaphone, Bell, BookUser, Gift, Eye, EyeOff, RotateCcw, Zap, X, PackageCheck,
-    Smartphone, ImagePlus, Percent, Landmark, Award, ShieldCheck, FolderCheck,
+    Smartphone, ImagePlus, Percent, Landmark, Award, ShieldCheck, FolderCheck, Car,
 } from "lucide-react";
 
 const ROLE_LABEL = {
@@ -33,6 +33,7 @@ const ALL_MENU_ITEMS = [
     { id: "disdette", path: "/disdette", icon: "TrendingDown", label: "Disdette", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "alert", path: "/alert", icon: "Zap", label: "Alert & Automazioni", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "libro_matricola", path: "/libro-matricola", icon: "ClipboardList", label: "Libro Matricola / Cumulative", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
+    { id: "libreria_targhe", path: "/libreria-targhe", icon: "Car", label: "Libreria Targhe", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "regolazione_premio", path: "/regolazione-premio", icon: "Percent", label: "Regolazione Premio", section: "assicurazione", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "primanota", path: "/contabilita", icon: "BookOpen", label: "Prima nota", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
     { id: "titoli_storici", path: "/titoli-storici", icon: "Receipt", label: "Titoli storici", section: "contabilita", roles: ["admin", "collaboratore", "dipendente"] },
@@ -79,7 +80,7 @@ const ICON_MAP = {
     LayoutDashboard, Users, FileText, Receipt, AlertTriangle, BookOpen, Building2,
     Upload, Calculator, Mail, Activity, Library, Kanban, Map, GraduationCap, Video,
     MessageCircle, Wallet, Calendar, Coins, TimerReset, Megaphone, Bell, BookUser, Gift, Zap, NotebookPen, Inbox, Brain, Bot, Briefcase, Ticket, PackageCheck,
-    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award, Eye, ShieldCheck, FolderCheck,
+    TrendingDown, Handshake, ListChecks, Banknote, ArrowRightLeft, Sparkles, ClipboardList, PenLine, Smartphone, ImagePlus, Percent, Landmark, Award, Eye, ShieldCheck, FolderCheck, Car,
 };
 
 const SECTION_LABELS = {

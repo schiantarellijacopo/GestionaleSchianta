@@ -21,6 +21,7 @@ import SinistroDetail from "@/pages/SinistroDetail";
 import Statistiche from "@/pages/Statistiche";
 import Cervello from "@/pages/Cervello";
 import LibroMatricolaPage from "@/pages/LibroMatricolaPage";
+import LibreriaTarghe from "@/pages/LibreriaTarghe";
 import RegolazionePremio from "@/pages/RegolazionePremio";
 import RegolazionePublic from "@/pages/RegolazionePublic";
 import CorsiIvass from "@/pages/CorsiIvass";
@@ -138,6 +139,7 @@ function App() {
                             <Route path="/statistiche" element={<Statistiche />} />
                             <Route path="/cervello" element={<Cervello />} />
                             <Route path="/libro-matricola" element={<LibroMatricolaPage />} />
+                            <Route path="/libreria-targhe" element={<LibreriaTarghe />} />
                             <Route path="/regolazione-premio" element={<RegolazionePremio />} />
                             <Route path="/incentivazioni" element={<Incentivazioni />} />
                             <Route path="/pnc" element={<Pnc />} />
