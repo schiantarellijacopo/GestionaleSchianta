@@ -1,0 +1,34 @@
+{
+  "summary": "Frontend-only test of the Libreria Targhe page and the libretto suggestion in the new-policy form, run as the real-data admin jacopo@schiantarelli.it. Login works with the normal form; no 'Caricamento...' hang. Sidebar 'Libreria Targhe' opens /libreria-targhe and shows '8289 targhe in archivio' with a 60-card grid. Full-plate search (AA41979) and partial search (fb828) both filter correctly. The AA41979 dialog shows FAY TRASPORTI S.R.L. / FAY TRASPORTI SRL, vehicle ZORZI 37, 'Nessun libretto allegato', 4 linked policies with company, ramo and stato badges, and Applicazioni Libro Matricola (1). Clicking a policy row opens /polizze/{id} with the correct id. FB828CV has a libretto: the download link returns 200 application/pdf. In the new-policy form, ramo 'RC Auto' shows pol-veicolo-sezione. Blurring the targa field with FB828CV calls /api/librerie/targhe/lookup/FB828CV (200), shows the libretto-suggerito banner with link and owner, and still autofills Marca/Modello. Typing clears the banner. The 'Cerca' button on AA41979 (no libretto) and on an unknown plate makes the lookup with no banner. No JS page errors. One bug: the dates in the 'Polizze collegate' list always show '— → —'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/librerie/targhe/{targa} (and list aggregation)", "issue": "Reads policy fields 'data_effetto'/'data_scadenza', but polizze documents store them as 'effetto'/'scadenza' (e.g. policy 07128a35... has effetto=2013-12-31, scadenza=2014-12-31). Result: every policy in 'Polizze collegate' shows '— → —', sorting policies by date does nothing, and the 'most recent policy' vehicle-data choice is effectively random."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "LibreriaTarghe detail dialog - Polizze collegate", "issue": "Dates show '— → —' because the backend returns null data_effetto/data_scadenza", "selector": "[data-testid^='polizza-link-']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Libreria Targhe cards", "issues": ["Long owner names are truncated without a tooltip; a title attribute would help"]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "In /app/backend/routes/libreria_targhe.py, replace data_effetto/data_scadenza with effetto/scadenza (projection, sort keys, '_ultima' logic and response mapping). You can keep the API response keys data_effetto/data_scadenza but fill them from effetto/scadenza."
+  ],
+  "critical_code_review_comments": [
+    "_aggrega_targhe() scans every policy and every application in the tenant on each list request, including each debounced keystroke. It takes about 0.3s now, but it grows with data size; consider an aggregation, a targa $regex prefilter when q is set, or caching.",
+    "Policy rows in LibreriaTarghe use a plain <a href> instead of react-router Link/navigate, so every click reloads the whole SPA.",
+    "Two different counts in the new-policy form for FB828CV: the /veicoli/by-targa toast says '50 polizze già collegate' while the Libreria shows 8. They come from different sources; worth a check for consistency.",
+    "The list endpoint does not clamp 'limit' (limit=9000 returns everything); add an upper bound."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend only)", "frontend": "95%"},
+  "seed_data_creation": "None. No data created or modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Real tenant: jacopo@schiantarelli.it / NtdZs5ilxTSP. Login form works in Playwright: fill the inputs, click login-submit-button, then wait for a URL without /login. Plate with a libretto: FB828CV (allegato 767d7eb2-55ab-4e14-acec-321c4aefc2f5). Libro Matricola plate without a libretto: AA41979. In the new-policy dialog, pick ramo option 'RC Auto' to show the vehicle section."
+}

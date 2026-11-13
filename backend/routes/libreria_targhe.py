@@ -104,7 +104,7 @@ async def _aggrega_targhe() -> dict[str, dict]:
         {"targa": {"$nin": [None, ""]}, "is_deleted": {"$ne": True}},
         {"_id": 0, "id": 1, "targa": 1, "contraente_id": 1, "compagnia_id": 1,
          "veicolo_marca": 1, "veicolo_modello": 1, "veicolo_data_immatricolazione": 1,
-         "telaio": 1, "veicolo_telaio": 1, "data_effetto": 1, "is_libro_matricola": 1},
+         "telaio": 1, "veicolo_telaio": 1, "effetto": 1, "is_libro_matricola": 1},
     ):
         tn = _norm_targa(p.get("targa"))
         if not _is_valid_targa(tn):
@@ -124,7 +124,7 @@ async def _aggrega_targhe() -> dict[str, dict]:
             r["compagnia_ids"].add(p["compagnia_id"])
         if p.get("is_libro_matricola"):
             r["is_libro_matricola"] = True
-        de = p.get("data_effetto") or ""
+        de = p.get("effetto") or ""
         if de >= r["_ultima"]:
             r["_ultima"] = de
             v = r["veicolo"]
@@ -181,6 +181,8 @@ async def _aggrega_targhe() -> dict[str, dict]:
 async def list_targhe(q: str = "", limit: int = 60, offset: int = 0,
                       user=Depends(current_user)):
     """Elenco targhe del tenant, con ricerca per targa (`q`)."""
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
     reg = await _aggrega_targhe()
     qn = _norm_targa(q)
     targhe = [r for r in reg.values() if (not qn or qn in r["targa"])]
@@ -234,7 +236,7 @@ async def _dettaglio(targa_norm: str) -> dict:
     polizze_docs = [p async for p in db.polizze.find(
         {"targa": rx, "is_deleted": {"$ne": True}},
         {"_id": 0, "id": 1, "numero_polizza": 1, "compagnia_id": 1, "contraente_id": 1,
-         "ramo": 1, "prodotto": 1, "stato": 1, "data_effetto": 1, "data_scadenza": 1,
+         "ramo": 1, "prodotto": 1, "stato": 1, "effetto": 1, "scadenza": 1,
          "is_libro_matricola": 1, "veicolo_marca": 1, "veicolo_modello": 1,
          "veicolo_data_immatricolazione": 1, "telaio": 1, "veicolo_telaio": 1})]
     app_docs = [a async for a in db.applicazioni.find(
@@ -246,8 +248,21 @@ async def _dettaglio(targa_norm: str) -> dict:
     if not polizze_docs and not app_docs:
         return {"targa": targa_norm, "trovata": False}
 
+    # Includi anche le polizze master del Libro Matricola (targa solo a livello
+    # applicazione, non sulla polizza) referenziate dalle applicazioni.
+    have_ids = {p["id"] for p in polizze_docs}
+    extra_ids = {a["polizza_id"] for a in app_docs
+                 if a.get("polizza_id") and a["polizza_id"] not in have_ids}
+    if extra_ids:
+        async for p in db.polizze.find(
+            {"id": {"$in": list(extra_ids)}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "numero_polizza": 1, "compagnia_id": 1, "contraente_id": 1,
+             "ramo": 1, "prodotto": 1, "stato": 1, "effetto": 1, "scadenza": 1,
+             "is_libro_matricola": 1, "veicolo_marca": 1, "veicolo_modello": 1,
+             "veicolo_data_immatricolazione": 1, "telaio": 1, "veicolo_telaio": 1}):
+            polizze_docs.append(p)
+
     pol_ids = {p["id"] for p in polizze_docs}
-    pol_ids |= {a["polizza_id"] for a in app_docs if a.get("polizza_id")}
     app_ids = {a["id"] for a in app_docs}
     anag_ids = {p.get("contraente_id") for p in polizze_docs if p.get("contraente_id")}
     anag_ids |= {a.get("intestatario_anagrafica_id") for a in app_docs if a.get("intestatario_anagrafica_id")}
@@ -262,7 +277,7 @@ async def _dettaglio(targa_norm: str) -> dict:
 
     # Dati veicolo: primo valore non-nullo (polizza più recente prima)
     veicolo: dict = {}
-    for p in sorted(polizze_docs, key=lambda x: x.get("data_effetto") or "", reverse=True):
+    for p in sorted(polizze_docs, key=lambda x: x.get("effetto") or "", reverse=True):
         for k, val in (("marca", p.get("veicolo_marca")), ("modello", p.get("veicolo_modello")),
                        ("immatricolazione", p.get("veicolo_data_immatricolazione")),
                        ("telaio", p.get("telaio") or p.get("veicolo_telaio"))):
@@ -279,7 +294,7 @@ async def _dettaglio(targa_norm: str) -> dict:
         "compagnia": comps.get(p.get("compagnia_id")),
         "contraente": names.get(p.get("contraente_id")),
         "ramo": p.get("ramo"), "prodotto": p.get("prodotto"), "stato": p.get("stato"),
-        "data_effetto": p.get("data_effetto"), "data_scadenza": p.get("data_scadenza"),
+        "data_effetto": p.get("effetto"), "data_scadenza": p.get("scadenza"),
         "is_libro_matricola": bool(p.get("is_libro_matricola")),
     } for p in polizze_docs]
     polizze.sort(key=lambda x: x.get("data_effetto") or "", reverse=True)

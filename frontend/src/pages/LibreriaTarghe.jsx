@@ -5,6 +5,7 @@
  * nuova polizza in sostituzione.
  */
 import { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, API_BASE, imgUrl } from "@/lib/api";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -42,6 +43,7 @@ function Veicolo({ v }) {
 }
 
 export default function LibreriaTarghe() {
+    const navigate = useNavigate();
     const [q, setQ] = useState("");
     const [items, setItems] = useState([]);
     const [total, setTotal] = useState(0);
@@ -113,7 +115,7 @@ export default function LibreriaTarghe() {
                                     </div>
                                     <ChevronRight className="h-4 w-4 text-slate-300" />
                                 </div>
-                                <div className="text-sm text-slate-700 truncate flex items-center gap-1">
+                                <div className="text-sm text-slate-700 truncate flex items-center gap-1" title={t.proprietario || ""}>
                                     <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                                     {t.proprietario || <span className="text-slate-400">Proprietario n/d</span>}
                                 </div>
@@ -197,10 +199,11 @@ export default function LibreriaTarghe() {
                                 <h3 className="text-xs font-semibold uppercase text-slate-400 mb-2">Polizze collegate ({detail.polizze?.length || 0})</h3>
                                 <div className="space-y-2">
                                     {(detail.polizze || []).map((p) => (
-                                        <a
+                                        <button
                                             key={p.id}
-                                            href={`/polizze/${p.id}`}
-                                            className="block border border-slate-200 rounded-lg p-3 hover:border-sky-300 hover:bg-sky-50/40 transition-colors"
+                                            type="button"
+                                            onClick={() => { setSel(null); setDetail(null); navigate(`/polizze/${p.id}`); }}
+                                            className="block w-full text-left border border-slate-200 rounded-lg p-3 hover:border-sky-300 hover:bg-sky-50/40 transition-colors"
                                             data-testid={`polizza-link-${p.id}`}
                                         >
                                             <div className="flex items-center justify-between">
@@ -214,7 +217,7 @@ export default function LibreriaTarghe() {
                                                 {p.contraente && <span>{p.contraente} · </span>}
                                                 {fmtData(p.data_effetto)} → {fmtData(p.data_scadenza)}
                                             </div>
-                                        </a>
+                                        </button>
                                     ))}
                                 </div>
                             </section>

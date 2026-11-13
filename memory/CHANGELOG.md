@@ -1,5 +1,19 @@
 # Changelog — Axicura CRM
 
+## 2026-11-13 — Fix libretti/quietanze da Drive + nuova Libreria Targhe
+### Bug fix OCR scanner (Drive)
+- `cloud_ocr_scanner.py`: i libretti importati da Drive venivano salvati con categoria `libretto_circolazione` → finivano in "Documenti altri" e non nel riquadro "Libretto veicolo". Corretto in `libretto_veicolo` (CAT_MAP + lista visibile_cliente).
+- Aggiunto fallback targa dal nome file (es. "LIBRETTO - GY308AK.pdf") per abbinare polizza/applicazione Libro Matricola anche quando l'OCR non legge la targa → risolve anche le quietanze "non archiviate".
+- `server.py`: back-fill all'avvio che migra gli allegati legacy `libretto_circolazione` → `libretto_veicolo` e li collega all'applicazione del veicolo (match per targa). Sistema i record esistenti in produzione al prossimo deploy.
+
+### Nuova feature: Libreria Targhe
+- Pagina dedicata `/libreria-targhe` (voce menu sezione Assicurazione, icona auto). Ricerca per targa; card con proprietario, dati veicolo, badge Libro Matricola/Libretto.
+- Dialog di dettaglio: proprietari (contraente + intestatario), dati veicolo, libretto scaricabile, storico polizze collegate (con compagnia/stato/date) e applicazioni Libro Matricola. Click su polizza → naviga alla scheda.
+- Backend `routes/libreria_targhe.py`: `GET /api/librerie/targhe` (lista+ricerca), `/{targa}` (dettaglio), `/lookup/{targa}` (suggerimento rapido). Tenant-isolato via TenantAwareDB. Campi data corretti (`effetto`/`scadenza`), limit max 200, include la polizza master Libro Matricola.
+- Suggerimento in creazione polizza: digitando una targa già in libreria compare un banner "Libretto già in archivio" con link al libretto, così non va ricaricato.
+- Testato (testing agent, tenant reale jacopo@schiantarelli.it): 8289 targhe, ricerca, dettaglio, download libretto (200 PDF), banner suggerimento su FB828CV. Fix post-test: date polizze, link SPA, clamp limit, polizza master LM.
+
+
 ## 2026-11-12 — Documenti collaboratori: filtro "Mostra disattivati"
 - **Richiesta**: nascondere di default i collaboratori disattivati, con un interruttore per mostrarli.
 - **Backend** (`GET /api/collaboratori/documenti-annuali`): nuovo parametro `includi_inattivi` (default false). Di default la query admin esclude `attivo == False`; con `includi_inattivi=true` li include. Il campo `attivo` è ora restituito per ogni collaboratore.
