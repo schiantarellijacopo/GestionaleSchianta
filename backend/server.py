@@ -16822,6 +16822,44 @@ async def cron_disdette_reminder(request: Request):
             await raw_db.notifications.insert_one(nd)
             created += 1
         await raw_db.disdette.update_one({"id": d.get("id")}, {"$set": {"ultimo_promemoria": oggi_s}})
+
+    # 2) Promemoria EMISSIONE nuova polizza: alcuni giorni prima della scadenza
+    # della polizza disdetta, se la sostitutiva non è ancora stata emessa.
+    giorni_emissione = int(os.environ.get("DISDETTE_EMISSIONE_DAYS") or 10)
+    limite_em = (oggi + _td(days=giorni_emissione)).isoformat()
+    cur_em = raw_db.disdette.find({
+        "stato": {"$in": ["da_inviare", "inviata", "confermata"]},
+        "polizza_emessa": {"$ne": True},
+        "data_scadenza_polizza": {"$gte": "2000-01-01", "$lte": limite_em},
+        "ultimo_promemoria_emissione": {"$ne": oggi_s},
+    }, {"_id": 0})
+    async for d in cur_em:
+        scad = d.get("data_scadenza_polizza")
+        tid = d.get("agenzia_tenant_id")
+        try:
+            giorni = (_date.fromisoformat(scad) - oggi).days
+        except Exception:
+            giorni = None
+        quando = ("è SCADUTA" if (giorni is not None and giorni < 0)
+                  else ("scade OGGI" if giorni == 0
+                        else (f"scade tra {giorni} giorni" if giorni is not None else f"scade il {scad}")))
+        titolo = f"📝 Emetti la nuova polizza — {d.get('compagnia_da_disdire') or ''}".strip()
+        msg = (f"La polizza disdetta verso {d.get('compagnia_da_disdire') or 'la compagnia'}"
+               f"{(' (n. ' + str(d['numero_polizza']) + ')') if d.get('numero_polizza') else ''} "
+               f"{quando} (scadenza {scad}). Ricordati di emettere la nuova polizza sostitutiva.")
+        admins = await raw_db.users.find(
+            {"agenzia_tenant_id": tid, "role": "admin"}, {"_id": 0, "id": 1}).to_list(50)
+        for a in admins:
+            n = Notification(
+                user_id=a["id"], titolo=titolo[:200], messaggio=msg,
+                tipo="warning", icona="FileText", link="/disdette",
+                entita_tipo="disdetta", entita_id=d.get("id"))
+            nd = n.model_dump()
+            nd["agenzia_tenant_id"] = tid
+            await raw_db.notifications.insert_one(nd)
+            created += 1
+        await raw_db.disdette.update_one(
+            {"id": d.get("id")}, {"$set": {"ultimo_promemoria_emissione": oggi_s}})
     return {"ok": True, "notifiche_create": created}
 
 
@@ -18124,7 +18162,7 @@ async def upload_allegato(
     file: UploadFile = File(...),
     user=Depends(require_user("admin", "collaboratore", "dipendente")),
 ):
-    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo", "pipeline_card", "trattativa"):
+    if entita_tipo not in ("anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo", "pipeline_card", "trattativa", "disdetta"):
         raise HTTPException(400, "Tipo entità non valido")
     data = await file.read()
     if len(data) > 25 * 1024 * 1024:

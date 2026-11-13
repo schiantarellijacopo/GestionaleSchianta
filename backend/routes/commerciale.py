@@ -314,11 +314,62 @@ class DisdettaBody(BaseModel):
     polizza_id: Optional[str] = None
     numero_polizza: Optional[str] = None
     ramo: Optional[str] = None
-    data_scadenza: Optional[str] = None   # scadenza polizza / termine ultimo invio
-    data_invio: Optional[str] = None      # quando è stata inviata
-    modalita_invio: Optional[str] = None  # pec | raccomandata | email
-    stato: str = "da_inviare"             # da_inviare | inviata | confermata | annullata
+    data_scadenza: Optional[str] = None        # termine ultimo invio (promemoria invio)
+    data_scadenza_polizza: Optional[str] = None  # scadenza della polizza da disdire
+    data_invio: Optional[str] = None           # quando è stata inviata
+    modalita_invio: Optional[str] = None       # pec | raccomandata | email
+    stato: str = "da_inviare"                  # da_inviare | inviata | confermata | annullata
     note: Optional[str] = None
+    # Destinatario (agenzia/assicurazione a cui si invia la disdetta)
+    destinatario_id: Optional[str] = None      # riferimento voce rubrica
+    destinatario_nome: Optional[str] = None
+    destinatario_indirizzo: Optional[str] = None
+    destinatario_pec: Optional[str] = None
+    polizza_emessa: bool = False               # nuova polizza sostitutiva già emessa?
+
+
+class DestinatarioDisdettaBody(BaseModel):
+    nome: str
+    indirizzo: Optional[str] = None
+    pec: Optional[str] = None
+    email: Optional[str] = None
+    note: Optional[str] = None
+
+
+# ----- Rubrica destinatari disdette (gestita a mano) -----
+@router.get("/disdette-destinatari")
+async def list_destinatari_disdette(user=Depends(current_user)) -> list[dict]:
+    return await db.disdette_destinatari.find({}, {"_id": 0}).sort("nome", 1).to_list(1000)
+
+
+@router.post("/disdette-destinatari", status_code=201)
+async def create_destinatario_disdetta(body: DestinatarioDisdettaBody,
+                                       user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    if not (body.nome or "").strip():
+        raise HTTPException(400, "Nome destinatario obbligatorio")
+    doc = {"id": str(uuid.uuid4()), **body.model_dump(), "created_at": _now_iso()}
+    await db.disdette_destinatari.insert_one(doc)
+    doc.pop("_id", None)
+    return doc
+
+
+@router.put("/disdette-destinatari/{rid}")
+async def update_destinatario_disdetta(rid: str, body: DestinatarioDisdettaBody,
+                                       user=Depends(require_user("admin", "collaboratore", "dipendente"))) -> dict:
+    data = {**body.model_dump(), "updated_at": _now_iso()}
+    res = await db.disdette_destinatari.update_one({"id": rid}, {"$set": data})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Destinatario non trovato")
+    return await db.disdette_destinatari.find_one({"id": rid}, {"_id": 0})
+
+
+@router.delete("/disdette-destinatari/{rid}")
+async def delete_destinatario_disdetta(rid: str,
+                                       user=Depends(require_user("admin", "collaboratore"))) -> dict:
+    res = await db.disdette_destinatari.delete_one({"id": rid})
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Destinatario non trovato")
+    return {"ok": True}
 
 
 async def _enrich_disdetta(d: dict) -> dict:
@@ -366,6 +417,114 @@ async def delete_disdetta(did: str, user=Depends(require_user("admin", "collabor
     if res.deleted_count == 0:
         raise HTTPException(404, "Disdetta non trovata")
     return {"ok": True}
+
+
+def _fmt_data_it(s: Optional[str]) -> str:
+    if not s:
+        return "__________"
+    s = str(s)[:10]
+    try:
+        return f"{s[8:10]}/{s[5:7]}/{s[0:4]}"
+    except Exception:
+        return s
+
+
+@router.get("/disdette/{did}/pdf")
+async def disdetta_pdf(did: str, user=Depends(current_user)):
+    """Genera il PDF (solo testo) della lettera di disdetta/recesso."""
+    import io
+    from fastapi.responses import StreamingResponse
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+
+    d = await db.disdette.find_one({"id": did}, {"_id": 0})
+    if not d:
+        raise HTTPException(404, "Disdetta non trovata")
+
+    # Dati firmatario (contraente)
+    cliente_nome, cliente_indirizzo = "", ""
+    if d.get("anagrafica_id"):
+        a = await db.anagrafiche.find_one(
+            {"id": d["anagrafica_id"]},
+            {"_id": 0, "ragione_sociale": 1, "nome": 1, "cognome": 1,
+             "indirizzo": 1, "cap": 1, "citta": 1, "provincia": 1}) or {}
+        cliente_nome = a.get("ragione_sociale") or f"{a.get('cognome','')} {a.get('nome','')}".strip()
+        _ind = a.get("indirizzo") or ""
+        _loc = " ".join(x for x in [a.get("cap"), a.get("citta"),
+                                    f"({a.get('provincia')})" if a.get("provincia") else ""] if x)
+        cliente_indirizzo = ", ".join(x for x in [_ind, _loc.strip()] if x)
+
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle("body", parent=styles["Normal"], fontSize=11, leading=16)
+    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=10, leading=14)
+    right = ParagraphStyle("right", parent=body, alignment=2)
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4,
+                            leftMargin=25 * mm, rightMargin=25 * mm,
+                            topMargin=22 * mm, bottomMargin=22 * mm)
+    el = []
+    # Mittente (contraente)
+    if cliente_nome:
+        el.append(Paragraph(f"<b>{cliente_nome}</b>", small))
+        if cliente_indirizzo:
+            el.append(Paragraph(cliente_indirizzo, small))
+        el.append(Spacer(1, 10 * mm))
+
+    # Destinatario
+    dest_righe = [f"<b>Spett.le {d.get('destinatario_nome') or d.get('compagnia_da_disdire') or ''}</b>"]
+    if d.get("destinatario_indirizzo"):
+        dest_righe.append(d["destinatario_indirizzo"])
+    if d.get("destinatario_pec"):
+        dest_righe.append(f"PEC: {d['destinatario_pec']}")
+    for r in dest_righe:
+        el.append(Paragraph(r, small))
+    el.append(Spacer(1, 6 * mm))
+    el.append(Paragraph(f"Luogo e data: ____________________, {_fmt_data_it(None)}", right))
+    el.append(Spacer(1, 8 * mm))
+
+    # Oggetto
+    ogg = f"<b>Oggetto: Disdetta / recesso polizza n. {d.get('numero_polizza') or '__________'}"
+    if d.get("compagnia_da_disdire"):
+        ogg += f" — {d['compagnia_da_disdire']}"
+    if d.get("ramo"):
+        ogg += f" (ramo {d['ramo']})"
+    ogg += "</b>"
+    el.append(Paragraph(ogg, body))
+    el.append(Spacer(1, 6 * mm))
+
+    # Corpo
+    scad = _fmt_data_it(d.get("data_scadenza_polizza") or d.get("data_scadenza"))
+    corpo = (
+        f"Il/La sottoscritto/a <b>{cliente_nome or '____________________'}</b>, "
+        f"in qualità di contraente della polizza assicurativa n. "
+        f"<b>{d.get('numero_polizza') or '__________'}</b>"
+        f"{(' del ramo ' + d['ramo']) if d.get('ramo') else ''}, "
+        f"con la presente comunica formalmente la <b>disdetta/recesso</b> della suddetta "
+        f"polizza con effetto dalla sua naturale scadenza del <b>{scad}</b>, "
+        f"chiedendo di non procedere ad alcun tacito rinnovo."
+    )
+    el.append(Paragraph(corpo, body))
+    el.append(Spacer(1, 4 * mm))
+    el.append(Paragraph(
+        "Si richiede cortese conferma scritta dell'avvenuta registrazione della presente disdetta.",
+        body))
+    if d.get("note"):
+        el.append(Spacer(1, 4 * mm))
+        el.append(Paragraph(d["note"], body))
+    el.append(Spacer(1, 16 * mm))
+    el.append(Paragraph("In fede,", body))
+    el.append(Spacer(1, 12 * mm))
+    el.append(Paragraph("____________________________<br/>(firma del contraente)", body))
+
+    doc.build(el)
+    buf.seek(0)
+    fname = f"disdetta_{(d.get('numero_polizza') or did)}.pdf".replace("/", "-")
+    return StreamingResponse(
+        buf, media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{fname}"'})
 
 
 # ===========================================================

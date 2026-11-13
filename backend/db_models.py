@@ -1191,7 +1191,7 @@ class TicketMessage(BaseDoc):
 # =============== ALLEGATI / DOCUMENTI ===============
 class Allegato(BaseDoc):
     """Allegato collegato a una entità (anagrafica/polizza/sinistro/cliente/corso)."""
-    entita_tipo: Literal["anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo", "pipeline_card", "trattativa"]
+    entita_tipo: Literal["anagrafica", "polizza", "sinistro", "compagnia", "corso", "movimento", "titolo", "pipeline_card", "trattativa", "disdetta"]
     entita_id: str
     nome_file: str
     storage_path: str

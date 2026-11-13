@@ -3,7 +3,7 @@
  * con avviso/promemoria di scadenza (termine ultimo per l'invio).
  */
 import { useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { api, API_BASE, imgUrl } from "@/lib/api";
 import { PageHeader, Loading, Empty } from "@/components/Shared";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Edit, Trash2, TrendingDown, AlertTriangle, Send } from "lucide-react";
+import { Plus, Edit, Trash2, TrendingDown, AlertTriangle, Send, FileText, Paperclip, BookUser, Download, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 const STATI = [
@@ -159,12 +159,16 @@ export default function Disdette() {
 function DisdettaDialog({ editing, onClose }) {
     const [anagrafiche, setAnagrafiche] = useState([]);
     const [polizze, setPolizze] = useState([]);
+    const [rubrica, setRubrica] = useState([]);
+    const [rubricaOpen, setRubricaOpen] = useState(false);
     const [f, setF] = useState(editing || {
         anagrafica_id: "", compagnia_da_disdire: "", polizza_id: "", numero_polizza: "",
-        ramo: "", data_scadenza: "", data_invio: "", modalita_invio: "pec",
-        stato: "da_inviare", note: "",
+        ramo: "", data_scadenza: "", data_scadenza_polizza: "", data_invio: "", modalita_invio: "pec",
+        stato: "da_inviare", note: "", polizza_emessa: false,
+        destinatario_id: "", destinatario_nome: "", destinatario_indirizzo: "", destinatario_pec: "",
     });
-    useEffect(() => { api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data)); }, []);
+    const loadRubrica = () => api.get("/disdette-destinatari").then((r) => setRubrica(r.data || []));
+    useEffect(() => { api.get("/anagrafiche?limit=2000").then((r) => setAnagrafiche(r.data)); loadRubrica(); }, []);
     useEffect(() => {
         if (f.anagrafica_id) {
             api.get("/polizze", { params: { contraente_id: f.anagrafica_id, limit: 500 } })
@@ -173,6 +177,11 @@ function DisdettaDialog({ editing, onClose }) {
         } else setPolizze([]);
     }, [f.anagrafica_id]);
     const set = (k, v) => setF((p) => ({ ...p, [k]: v }));
+    const pickDestinatario = (rid) => {
+        if (rid === "__none__") { setF((p) => ({ ...p, destinatario_id: "", destinatario_nome: "", destinatario_indirizzo: "", destinatario_pec: "" })); return; }
+        const r = rubrica.find((x) => x.id === rid);
+        if (r) setF((p) => ({ ...p, destinatario_id: r.id, destinatario_nome: r.nome || "", destinatario_indirizzo: r.indirizzo || "", destinatario_pec: r.pec || "" }));
+    };
     const save = async () => {
         if (!f.compagnia_da_disdire) { toast.error("Compagnia da disdire obbligatoria"); return; }
         try {
@@ -190,6 +199,35 @@ function DisdettaDialog({ editing, onClose }) {
                     <Input value={f.compagnia_da_disdire} onChange={(e) => set("compagnia_da_disdire", e.target.value)}
                         placeholder="es. UnipolSai, Allianz, Generali…" data-testid="dis-compagnia" />
                 </div>
+
+                {/* ---- Destinatario (agenzia/assicurazione) ---- */}
+                <div className="col-span-2 border border-slate-200 rounded-md p-3 bg-slate-50/60">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase tracking-wide font-semibold text-slate-600 flex items-center gap-1"><BookUser size={13} /> Destinatario disdetta</span>
+                        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setRubricaOpen(true)} data-testid="dis-gestisci-rubrica">
+                            <BookUser size={12} className="mr-1" /> Gestisci rubrica
+                        </Button>
+                    </div>
+                    <div className="mb-2">
+                        <Label className="text-xs">Scegli dalla rubrica</Label>
+                        <Select value={f.destinatario_id || "__none__"} onValueChange={pickDestinatario}>
+                            <SelectTrigger data-testid="dis-rubrica-select"><SelectValue placeholder="— seleziona —" /></SelectTrigger>
+                            <SelectContent className="max-h-80">
+                                <SelectItem value="__none__">— nessuno —</SelectItem>
+                                {rubrica.map((r) => <SelectItem key={r.id} value={r.id}>{r.nome}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="col-span-2"><Label className="text-xs">Nome assicurazione / agenzia</Label>
+                            <Input value={f.destinatario_nome || ""} onChange={(e) => set("destinatario_nome", e.target.value)} data-testid="dis-dest-nome" /></div>
+                        <div className="col-span-2"><Label className="text-xs">Indirizzo</Label>
+                            <Input value={f.destinatario_indirizzo || ""} onChange={(e) => set("destinatario_indirizzo", e.target.value)} data-testid="dis-dest-indirizzo" /></div>
+                        <div className="col-span-2"><Label className="text-xs">PEC destinatario</Label>
+                            <Input value={f.destinatario_pec || ""} onChange={(e) => set("destinatario_pec", e.target.value)} placeholder="pec@esempio.it" data-testid="dis-dest-pec" /></div>
+                    </div>
+                </div>
+
                 <div className="col-span-2">
                     <Label className="text-xs">Cliente</Label>
                     <Select value={f.anagrafica_id || "__none__"} onValueChange={(v) => set("anagrafica_id", v === "__none__" ? "" : v)}>
@@ -207,7 +245,7 @@ function DisdettaDialog({ editing, onClose }) {
                     <Select value={f.polizza_id || "__none__"} onValueChange={(v) => {
                         if (v === "__none__") { set("polizza_id", ""); return; }
                         const p = polizze.find((x) => x.id === v);
-                        setF((prev) => ({ ...prev, polizza_id: v, numero_polizza: p?.numero_polizza || prev.numero_polizza, ramo: p?.ramo || prev.ramo }));
+                        setF((prev) => ({ ...prev, polizza_id: v, numero_polizza: p?.numero_polizza || prev.numero_polizza, ramo: p?.ramo || prev.ramo, data_scadenza_polizza: p?.scadenza || p?.data_scadenza || prev.data_scadenza_polizza }));
                     }}>
                         <SelectTrigger data-testid="dis-polizza"><SelectValue placeholder="— nessuna —" /></SelectTrigger>
                         <SelectContent className="max-h-80">
@@ -230,6 +268,10 @@ function DisdettaDialog({ editing, onClose }) {
                     <Label className="text-xs flex items-center gap-1"><AlertTriangle size={11} className="text-amber-500" /> Scadenza invio (promemoria)</Label>
                     <Input type="date" value={f.data_scadenza || ""} onChange={(e) => set("data_scadenza", e.target.value)} data-testid="dis-scadenza" />
                 </div>
+                <div>
+                    <Label className="text-xs flex items-center gap-1"><AlertTriangle size={11} className="text-rose-500" /> Scadenza polizza</Label>
+                    <Input type="date" value={f.data_scadenza_polizza || ""} onChange={(e) => set("data_scadenza_polizza", e.target.value)} data-testid="dis-scadenza-polizza" />
+                </div>
                 <div><Label className="text-xs">Data invio effettivo</Label>
                     <Input type="date" value={f.data_invio || ""} onChange={(e) => set("data_invio", e.target.value)} /></div>
                 <div>
@@ -244,14 +286,118 @@ function DisdettaDialog({ editing, onClose }) {
                         </SelectContent>
                     </Select>
                 </div>
+                <label className="col-span-2 flex items-center gap-2 text-xs text-slate-700 mt-1 cursor-pointer" data-testid="dis-polizza-emessa">
+                    <input type="checkbox" checked={!!f.polizza_emessa} onChange={(e) => set("polizza_emessa", e.target.checked)} />
+                    Nuova polizza sostitutiva già emessa (disattiva il promemoria di emissione)
+                </label>
                 <div className="col-span-2"><Label className="text-xs">Note</Label>
                     <Textarea rows={2} value={f.note || ""} onChange={(e) => set("note", e.target.value)} /></div>
+
+                {/* ---- Allegati + PDF (solo su disdetta esistente) ---- */}
+                {editing?.id && (
+                    <div className="col-span-2 border-t border-slate-200 pt-3 mt-1">
+                        <div className="flex items-center justify-between mb-2">
+                            <span className="text-[11px] uppercase tracking-wide font-semibold text-slate-600 flex items-center gap-1"><Paperclip size={13} /> Allegati & modulo</span>
+                            <a href={imgUrl(`${API_BASE}/disdette/${editing.id}/pdf`)} target="_blank" rel="noreferrer" data-testid="dis-pdf-link">
+                                <Button type="button" variant="outline" size="sm" className="h-7 text-xs"><FileText size={12} className="mr-1" /> Scarica PDF disdetta</Button>
+                            </a>
+                        </div>
+                        <AllegatiDisdetta disdettaId={editing.id} />
+                    </div>
+                )}
             </div>
             <DialogFooter>
                 <Button onClick={save} className="bg-rose-700 hover:bg-rose-800" data-testid="dis-save">
                     {editing?.id ? <><Edit size={14} className="mr-1" /> Aggiorna</> : <><Send size={14} className="mr-1" /> Crea</>}
                 </Button>
             </DialogFooter>
+
+            <Dialog open={rubricaOpen} onOpenChange={setRubricaOpen}>
+                <RubricaManager rubrica={rubrica} onChanged={loadRubrica} />
+            </Dialog>
+        </DialogContent>
+    );
+}
+
+function AllegatiDisdetta({ disdettaId }) {
+    const [items, setItems] = useState(null);
+    const [busy, setBusy] = useState(false);
+    const load = () => api.get("/allegati", { params: { entita_tipo: "disdetta", entita_id: disdettaId } })
+        .then((r) => setItems(r.data || [])).catch(() => setItems([]));
+    useEffect(() => { load(); /* eslint-disable-next-line */ }, [disdettaId]);
+    const upload = async (file) => {
+        if (!file) return;
+        setBusy(true);
+        const fd = new FormData(); fd.append("file", file);
+        try {
+            await api.post(`/allegati?entita_tipo=disdetta&entita_id=${disdettaId}`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+            toast.success("Allegato caricato"); load();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore upload"); }
+        finally { setBusy(false); }
+    };
+    const del = async (id) => { await api.delete(`/allegati/${id}`); toast.success("Rimosso"); load(); };
+    return (
+        <div>
+            <label className="inline-flex items-center gap-2 text-xs text-sky-700 border border-dashed border-sky-300 rounded px-3 py-2 cursor-pointer hover:bg-sky-50" data-testid="dis-upload">
+                <Upload size={13} /> {busy ? "Caricamento…" : "Carica documento"}
+                <input type="file" hidden disabled={busy} onChange={(e) => upload(e.target.files?.[0])} />
+            </label>
+            <div className="mt-2 space-y-1">
+                {items === null ? <span className="text-xs text-slate-400">…</span>
+                    : items.length === 0 ? <span className="text-xs text-slate-400">Nessun allegato</span>
+                        : items.map((a) => (
+                            <div key={a.id} className="flex items-center justify-between text-xs border border-slate-200 rounded px-2 py-1" data-testid={`dis-alleg-${a.id}`}>
+                                <a href={imgUrl(`${API_BASE}/allegati/${a.id}/download`)} target="_blank" rel="noreferrer" className="text-sky-700 hover:underline flex items-center gap-1 truncate">
+                                    <Download size={11} /> {a.nome_file}
+                                </a>
+                                <button onClick={() => del(a.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded"><Trash2 size={11} /></button>
+                            </div>
+                        ))}
+            </div>
+        </div>
+    );
+}
+
+function RubricaManager({ rubrica, onChanged }) {
+    const empty = { nome: "", indirizzo: "", pec: "", email: "", note: "" };
+    const [form, setForm] = useState(empty);
+    const [editId, setEditId] = useState(null);
+    const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+    const save = async () => {
+        if (!form.nome.trim()) { toast.error("Nome obbligatorio"); return; }
+        try {
+            if (editId) await api.put(`/disdette-destinatari/${editId}`, form);
+            else await api.post("/disdette-destinatari", form);
+            toast.success("Salvato"); setForm(empty); setEditId(null); onChanged();
+        } catch (e) { toast.error(e.response?.data?.detail || "Errore"); }
+    };
+    const edit = (r) => { setEditId(r.id); setForm({ nome: r.nome || "", indirizzo: r.indirizzo || "", pec: r.pec || "", email: r.email || "", note: r.note || "" }); };
+    const del = async (id) => { if (!window.confirm("Eliminare la voce?")) return; await api.delete(`/disdette-destinatari/${id}`); toast.success("Eliminata"); if (editId === id) { setEditId(null); setForm(empty); } onChanged(); };
+    return (
+        <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="dis-rubrica-dialog">
+            <DialogHeader><DialogTitle className="flex items-center gap-2"><BookUser size={18} /> Rubrica destinatari</DialogTitle></DialogHeader>
+            <div className="space-y-2">
+                <Input placeholder="Nome assicurazione / agenzia *" value={form.nome} onChange={(e) => set("nome", e.target.value)} data-testid="rub-nome" />
+                <Input placeholder="Indirizzo" value={form.indirizzo} onChange={(e) => set("indirizzo", e.target.value)} data-testid="rub-indirizzo" />
+                <Input placeholder="PEC" value={form.pec} onChange={(e) => set("pec", e.target.value)} data-testid="rub-pec" />
+                <Input placeholder="Email (facoltativa)" value={form.email} onChange={(e) => set("email", e.target.value)} />
+                <div className="flex gap-2">
+                    <Button onClick={save} size="sm" className="bg-rose-700 hover:bg-rose-800" data-testid="rub-save">{editId ? "Aggiorna" : "Aggiungi"}</Button>
+                    {editId && <Button onClick={() => { setEditId(null); setForm(empty); }} size="sm" variant="outline">Annulla</Button>}
+                </div>
+            </div>
+            <div className="mt-3 border-t pt-2 space-y-1">
+                {(rubrica || []).length === 0 ? <span className="text-xs text-slate-400">Rubrica vuota</span>
+                    : rubrica.map((r) => (
+                        <div key={r.id} className="flex items-center justify-between text-xs border border-slate-200 rounded px-2 py-1" data-testid={`rub-row-${r.id}`}>
+                            <div className="truncate"><span className="font-medium">{r.nome}</span>{r.pec ? <span className="text-slate-400"> · {r.pec}</span> : null}</div>
+                            <div className="flex gap-1 shrink-0">
+                                <button onClick={() => edit(r)} className="text-sky-700 hover:bg-sky-50 p-1 rounded"><Edit size={11} /></button>
+                                <button onClick={() => del(r.id)} className="text-rose-600 hover:bg-rose-50 p-1 rounded"><Trash2 size={11} /></button>
+                            </div>
+                        </div>
+                    ))}
+            </div>
         </DialogContent>
     );
 }
